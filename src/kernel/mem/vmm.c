@@ -1,6 +1,7 @@
-#include "../include/vmm.h"
-#include "../include/pmm.h"
+#include "../../include/vmm.h"
+#include "../../include/pmm.h"
 #include <stddef.h>
+#include <stdint.h>
 
 static page_table* kernel_pml4;
 
@@ -21,6 +22,11 @@ void VMM_MapPage(void* virtual_addr, void* physical_addr, uint64_t flags) {
     uint64_t v = (uint64_t)virtual_addr;
     uint64_t p = (uint64_t)physical_addr;
 
+    uint64_t table_flags = PAGE_PRESENT | PAGE_WRITE;
+    if (flags & PAGE_USER) {
+        table_flags |= PAGE_USER;
+    }
+
     uint64_t pml4_idx = (v >> 39) & 0x1FF;
     uint64_t pdp_idx  = (v >> 30) & 0x1FF;
     uint64_t pd_idx   = (v >> 21) & 0x1FF;
@@ -30,7 +36,10 @@ void VMM_MapPage(void* virtual_addr, void* physical_addr, uint64_t flags) {
     if (!(kernel_pml4->entries[pml4_idx] & PAGE_PRESENT)) {
         void* new_table = PMM_AllocatePage();
         clear_page(new_table);
-        kernel_pml4->entries[pml4_idx] = (uint64_t)new_table | PAGE_PRESENT | PAGE_WRITE;
+        kernel_pml4->entries[pml4_idx] = (uint64_t)new_table | table_flags;
+    } else if (flags & PAGE_USER) {
+        // Upgrade existing mapping to be user-accessible.
+        kernel_pml4->entries[pml4_idx] |= PAGE_USER;
     }
     page_table* pdp = (page_table*)(kernel_pml4->entries[pml4_idx] & ~0xFFFULL);
 
@@ -38,7 +47,10 @@ void VMM_MapPage(void* virtual_addr, void* physical_addr, uint64_t flags) {
     if (!(pdp->entries[pdp_idx] & PAGE_PRESENT)) {
         void* new_table = PMM_AllocatePage();
         clear_page(new_table);
-        pdp->entries[pdp_idx] = (uint64_t)new_table | PAGE_PRESENT | PAGE_WRITE;
+        pdp->entries[pdp_idx] = (uint64_t)new_table | table_flags;
+    } else if (flags & PAGE_USER) {
+        // Upgrade existing mapping to be user-accessible.
+        pdp->entries[pdp_idx] |= PAGE_USER;
     }
     page_table* pd = (page_table*)(pdp->entries[pdp_idx] & ~0xFFFULL);
 
@@ -46,12 +58,18 @@ void VMM_MapPage(void* virtual_addr, void* physical_addr, uint64_t flags) {
     if (!(pd->entries[pd_idx] & PAGE_PRESENT)) {
         void* new_table = PMM_AllocatePage();
         clear_page(new_table);
-        pd->entries[pd_idx] = (uint64_t)new_table | PAGE_PRESENT | PAGE_WRITE;
+        pd->entries[pd_idx] = (uint64_t)new_table | table_flags;
+    } else if (flags & PAGE_USER) {
+        // Upgrade existing mapping to be user-accessible.
+        pd->entries[pd_idx] |= PAGE_USER;
     }
     page_table* pt = (page_table*)(pd->entries[pd_idx] & ~0xFFFULL);
 
     // PT entry
     pt->entries[pt_idx] = p | flags | PAGE_PRESENT;
+
+    // Ensure the CPU sees new mappings immediately.
+    __asm__ volatile ("invlpg (%0)" : : "r"(virtual_addr) : "memory");
 }
 
 void VMM_Activate() {

@@ -27,6 +27,10 @@ struct InterruptFrame {
 } __attribute__((packed));
 
 void PIC_EndMaster();
+void PIC_SetMask(uint8_t irq_line);
+void PIC_ClearMask(uint8_t irq_line);
 void PIT_Init(uint32_t frequency);
+void Timer_OnTick(void);
+uint64_t Timer_Ticks(void);
 
 #endif

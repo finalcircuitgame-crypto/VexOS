@@ -1,4 +1,5 @@
 #include "usb/xhci.h"
+#include "xhci_internal.h"
 #include "heap.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -21,18 +22,18 @@ typedef struct {
   uint32_t rsvd;
 } __attribute__((packed)) xhci_erst_entry_t;
 
-static xhci_cap_regs_t *cap_regs;
-static xhci_op_regs_t *op_regs;
-static xhci_runtime_regs_t *runtime_regs;
-static uint32_t *doorbell_regs;
+xhci_cap_regs_t *cap_regs;
+xhci_op_regs_t *op_regs;
+xhci_runtime_regs_t *runtime_regs;
+uint32_t *doorbell_regs;
 
-static xhci_trb_t *command_ring;
-static uint32_t command_ring_index = 0;
-static uint8_t command_ring_cycle = 1;
+xhci_trb_t *command_ring;
+uint32_t command_ring_index = 0;
+uint8_t command_ring_cycle = 1;
 
-static xhci_trb_t *event_ring;
-static uint32_t event_ring_index = 0;
-static uint8_t event_ring_cycle = 1;
+xhci_trb_t *event_ring;
+uint32_t event_ring_index = 0;
+uint8_t event_ring_cycle = 1;
 static xhci_erst_entry_t *erst;
 
 // DCBAA - Device Context Base Address Array
@@ -54,93 +55,33 @@ static void print_hex64(uint64_t val) {
   }
 }
 
-static inline uint32_t trb_type(uint32_t control) {
-  return (control >> 10) & 0x3F;
-}
+uint32_t trb_type(uint32_t control) { return (control >> 10) & 0x3F; }
 
-static inline uint32_t trb_cc(uint32_t status) { return (status >> 24) & 0xFF; }
+uint32_t trb_cc(uint32_t status) { return (status >> 24) & 0xFF; }
 
-static inline uint32_t trb_slot_id(uint32_t control) {
-  return (control >> 24) & 0xFF;
-}
+uint32_t trb_slot_id(uint32_t control) { return (control >> 24) & 0xFF; }
 
-static inline uint32_t make_trb_control(uint32_t type, uint8_t cycle) {
+uint32_t make_trb_control(uint32_t type, uint8_t cycle) {
   return (uint32_t)(cycle & 1u) | (type << 10);
 }
 
-static void xhci_ring_doorbell_cmd(void) {
+void xhci_ring_doorbell_cmd(void) {
   // Doorbell 0, target=0 (Command Ring)
   doorbell_regs[0] = 0;
 }
 
-static void xhci_event_ring_update_erdp(void) {
-  // ERDP points to the next TRB to be dequeued.
-  // Set EHB (bit 3) to clear Event Handler Busy.
-  uint64_t next = (uint64_t)(uintptr_t)&event_ring[event_ring_index];
-  runtime_regs->interrupters[0].erdp = next | (1ULL << 3);
-}
-
-static int xhci_poll_event(xhci_trb_t *out) {
-  xhci_trb_t trb = event_ring[event_ring_index];
-
-  // Producer sets cycle bit; consumer tracks expected cycle.
-  if ((trb.control & 1u) != (uint32_t)event_ring_cycle) {
-    return 0;
-  }
-
-  *out = trb;
-
-  // Advance consumer
-  event_ring_index++;
-  if (event_ring_index >= XHCI_EVT_RING_TRBS) {
-    event_ring_index = 0;
-    event_ring_cycle ^= 1;
-  }
-
-  xhci_event_ring_update_erdp();
-  return 1;
-}
-
-struct xhci_device_state {
-  uint32_t slot_id;
-  uint32_t ep0_mps;
-  xhci_trb_t *ep0_ring;
-  uint32_t ep0_index;
-  uint8_t ep0_cycle;
-
-  uint8_t *dev_ctx;
-
-  uint8_t speed_code;
-
-  uint8_t hid_ifnum;
-  uint8_t hid_proto;
-  uint8_t intr_epaddr;
-  uint16_t intr_mps;
-  uint8_t intr_interval;
-
-  xhci_trb_t *intr_ring;
-  uint32_t intr_index;
-  uint8_t intr_cycle;
-
-  uint8_t *intr_buf;
-};
-typedef struct xhci_device_state xhci_device_state_t;
 
 static void xhci_ring_doorbell_ep0(uint32_t slot_id);
 static void xhci_ep0_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb);
-static int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc);
-static void xhci_print_u32_dec(uint32_t v);
-static void xhci_print_hex32(uint32_t v);
+void xhci_print_u32_dec(uint32_t v);
+void xhci_print_hex32(uint32_t v);
 
-static xhci_trb_t *xhci_alloc_tr_ring(void);
+xhci_trb_t *xhci_alloc_tr_ring(void);
 
-static int xhci_wait_for_command_completion(uint32_t *out_slot_id,
-                                            uint32_t *out_cc);
-static void xhci_cmd_ring_push(const xhci_trb_t *trb);
-static void xhci_ring_doorbell_cmd(void);
+void xhci_cmd_ring_push(const xhci_trb_t *trb);
 
-static int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup,
-                               void *buf, uint32_t len) {
+int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup, void *buf,
+                        uint32_t len) {
   xhci_trb_t setup_trb;
   setup_trb.data = setup;
   setup_trb.status = 8;
@@ -178,8 +119,7 @@ static int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup,
   return 1;
 }
 
-static int xhci_ep0_control_no_data_out(xhci_device_state_t *dev,
-                                        uint64_t setup) {
+int xhci_ep0_control_no_data_out(xhci_device_state_t *dev, uint64_t setup) {
   xhci_trb_t setup_trb;
   setup_trb.data = setup;
   setup_trb.status = 8;
@@ -253,10 +193,35 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
   serial_print("\n");
 
   dev->hid_ifnum = 0xFF;
+  dev->hid_subclass = 0;
   dev->hid_proto = 0;
+  dev->hid_report_desc_len = 0;
+  dev->hid_has_report_id = 0;
+  dev->hid_mouse_report_id = 0;
+  dev->hid_mouse_valid = 0;
+  dev->hid_buttons_bitoff = 0;
+  dev->hid_buttons_bits = 0;
+  dev->hid_x_bitoff = 0;
+  dev->hid_x_bits = 0;
+  dev->hid_x_is_relative = 0;
+  dev->hid_y_bitoff = 0;
+  dev->hid_y_bits = 0;
+  dev->hid_y_is_relative = 0;
+  dev->hid_wheel_bitoff = 0;
+  dev->hid_wheel_bits = 0;
+  dev->hid_wheel_is_relative = 0;
+  dev->hid_abs_have_last = 0;
+  dev->hid_abs_last_x = 0;
+  dev->hid_abs_last_y = 0;
   dev->intr_epaddr = 0;
+  dev->intr_dci = 0;
   dev->intr_mps = 0;
   dev->intr_interval = 0;
+
+  dev->kbd_prev_mod = 0;
+  for (uint32_t i = 0; i < 6; i++) {
+    dev->kbd_prev_keys[i] = 0;
+  }
 
   uint8_t cur_ifnum = 0xFF;
   uint8_t cur_ifclass = 0;
@@ -287,6 +252,7 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
 
       if (cls == 3 && (sub == 0 || sub == 1)) {
         dev->hid_ifnum = ifnum;
+        dev->hid_subclass = sub;
         dev->hid_proto = proto;
       }
 
@@ -303,6 +269,12 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
       serial_print(" proto=");
       xhci_print_u32_dec(proto);
       serial_print("\n");
+    } else if (bType == 0x21 && bLength >= 9) {
+      if (cur_ifclass == 3) {
+        uint16_t rep_len =
+            (uint16_t)(buf[off + 7] | (uint16_t)(buf[off + 8] << 8));
+        dev->hid_report_desc_len = rep_len;
+      }
     } else if (bType == 5 && bLength >= 7) {
       uint8_t epaddr = buf[off + 2];
       uint8_t attr = buf[off + 3];
@@ -311,9 +283,11 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
 
       uint8_t xfertype = attr & 0x3u;
       uint8_t dir_in = (epaddr & 0x80u) ? 1u : 0u;
-      if (dev->intr_epaddr == 0 && cur_ifclass == 3 && cur_ifsub == 1 &&
-          dir_in && xfertype == 3) {
+      if (dev->intr_epaddr == 0 && cur_ifclass == 3 &&
+          (cur_ifsub == 0 || cur_ifsub == 1) && dir_in && xfertype == 3) {
         dev->intr_epaddr = epaddr;
+        uint8_t epnum = (uint8_t)(epaddr & 0x0Fu);
+        dev->intr_dci = (uint8_t)(2u * (uint32_t)epnum + 1u);
         dev->intr_mps = mps;
         dev->intr_interval = interval;
       }
@@ -349,31 +323,7 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
   return 1;
 }
 
-static int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev);
-static int xhci_hid_set_protocol_boot(xhci_device_state_t *dev);
-static int xhci_hid_set_idle(xhci_device_state_t *dev);
-static void xhci_hid_start_polling(xhci_device_state_t *dev);
-
-static int xhci_wait_for_command_completion(uint32_t *out_slot_id,
-                                            uint32_t *out_cc) {
-  // Busy-wait poll. This is fine for early bring-up.
-  for (uint32_t spins = 0; spins < 5000000; spins++) {
-    xhci_trb_t evt;
-    if (!xhci_poll_event(&evt))
-      continue;
-
-    if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
-      if (out_slot_id)
-        *out_slot_id = trb_slot_id(evt.control);
-      if (out_cc)
-        *out_cc = trb_cc(evt.status);
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static void xhci_cmd_ring_push(const xhci_trb_t *trb) {
+void xhci_cmd_ring_push(const xhci_trb_t *trb) {
   // Place TRB at current index
   command_ring[command_ring_index] = *trb;
 
@@ -421,179 +371,12 @@ typedef struct {
   uint32_t rsvd[3];
 } __attribute__((packed)) xhci_ep_ctx_32_t;
 
-static uint32_t g_ctx_size = 32;
+uint32_t g_ctx_size = 32;
 
-static void xhci_intr_ring_push(xhci_device_state_t *dev,
-                                const xhci_trb_t *trb) {
-  dev->intr_ring[dev->intr_index] = *trb;
-  dev->intr_ring[dev->intr_index].control &= ~1u;
-  dev->intr_ring[dev->intr_index].control |= (uint32_t)(dev->intr_cycle & 1u);
-
-  dev->intr_index++;
-  if (dev->intr_index == 255) {
-    dev->intr_index = 0;
-    dev->intr_cycle ^= 1;
-  }
-}
-
-static void xhci_ring_doorbell_ep(uint32_t slot_id, uint32_t dci) {
+void xhci_ring_doorbell_ep(uint32_t slot_id, uint32_t dci) {
   doorbell_regs[slot_id] = dci;
 }
-
-static int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
-  if (dev->intr_epaddr == 0 || dev->intr_mps == 0) {
-    serial_print(
-        "[xHCI] No interrupt IN endpoint found; skipping HID polling\n");
-    return 0;
-  }
-
-  // For EP1 IN, DCI = 3 (xHCI spec). Input context index = DCI+1 = 4.
-  const uint32_t dci = 3;
-  const uint32_t ctx_index = dci + 1;
-
-  dev->intr_ring = xhci_alloc_tr_ring();
-  dev->intr_index = 0;
-  dev->intr_cycle = 1;
-
-  uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
-  for (uint32_t i = 0; i < 4096; i++)
-    input_ctx[i] = 0;
-
-  xhci_input_control_ctx_t *icc = (xhci_input_control_ctx_t *)input_ctx;
-  // Must include Slot Context when increasing Context Entries (xHCI spec
-  // requirement).
-  icc->add_flags = (1u << 0) | (1u << 3);
-  icc->drop_flags = 0;
-
-  // Slot Context at index 1: bump Context Entries to include DCI=3 (EP1 IN)
-  // Context Entries field is bits 31:27 of Dword0.
-  xhci_slot_ctx_32_t *slot = (xhci_slot_ctx_32_t *)(input_ctx + g_ctx_size);
-  if (dev->dev_ctx) {
-    // Device Context layout: Slot Context is index 0.
-    xhci_slot_ctx_32_t *cur =
-        (xhci_slot_ctx_32_t *)(dev->dev_ctx + (0 * g_ctx_size));
-    *slot = *cur;
-  } else {
-    slot->dword0 = 0;
-    slot->dword1 = 0;
-    slot->dword2 = 0;
-    slot->dword3 = 0;
-    for (int i = 0; i < 4; i++)
-      slot->rsvd[i] = 0;
-  }
-  slot->dword0 &= ~(0x1Fu << 27);
-  slot->dword0 |= (3u & 0x1Fu) << 27;
-
-  xhci_ep_ctx_32_t *ep =
-      (xhci_ep_ctx_32_t *)(input_ctx + (ctx_index * g_ctx_size));
-
-  // EP Type Interrupt IN = 7, CErr should be 3 for interrupt endpoints.
-  // dword1: [31:16]=Max Packet Size, [15:8]=Max Burst, [7:3]=EP Type,
-  // [2:0]=CErr
-  ep->dword1 = ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16) | (0u << 8) |
-               ((7u & 0x7u) << 3) | 3u;
-
-  uint64_t trdp = (uint64_t)(uintptr_t)dev->intr_ring;
-  trdp &= ~0xFULL;
-  trdp |= 1u;
-  ep->tr_deq_lo = (uint32_t)(trdp & 0xFFFFFFFFu);
-  ep->tr_deq_hi = (uint32_t)((trdp >> 32) & 0xFFFFFFFFu);
-
-  // xHCI Interval encoding depends on speed. For HS/SS interrupt endpoints,
-  // bInterval is already an exponent (1-16). For FS/LS it is in frames.
-  // For bring-up: force a frequent interval so we don't wait a long time.
-  // (We'll make this spec-correct once we are seeing reports.)
-  uint32_t interval = dev->intr_interval; // from endpoint descriptor
-  ep->dword0 = (interval & 0xFFu) << 16;
-  // dword4: [15:0]=Avg TRB Length, [31:16]=Max ESIT Payload.
-  // Set Max ESIT Payload to MPS (single packet) for now.
-  ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
-
-  xhci_trb_t cmd;
-  cmd.data = (uint64_t)(uintptr_t)input_ctx;
-  cmd.status = 0;
-  cmd.control =
-      make_trb_control(TRB_TYPE_CONFIGURE_EP_CMD, command_ring_cycle) |
-      (dev->slot_id << 24);
-
-  xhci_cmd_ring_push(&cmd);
-  xhci_ring_doorbell_cmd();
-
-  uint32_t evt_slot = 0;
-  uint32_t cc = 0;
-  if (!xhci_wait_for_command_completion(&evt_slot, &cc)) {
-    serial_print("[xHCI] ConfigureEP: timeout\n");
-    return 0;
-  }
-
-  serial_print("[xHCI] ConfigureEP: completion_code=");
-  xhci_print_u32_dec(cc);
-  serial_print(" slot_id=");
-  xhci_print_u32_dec(evt_slot);
-  serial_print("\n");
-
-  if (cc == 1 && dev->dev_ctx) {
-    // Device Context layout: endpoint context index equals DCI. EP1 IN =>
-    // DCI=3.
-    xhci_ep_ctx_32_t *cur_ep =
-        (xhci_ep_ctx_32_t *)(dev->dev_ctx + (3 * g_ctx_size));
-    serial_print("[xHCI] EP1IN ctx d0=");
-    xhci_print_hex32(cur_ep->dword0);
-    serial_print(" d1=");
-    xhci_print_hex32(cur_ep->dword1);
-    serial_print(" trdp_lo=");
-    xhci_print_hex32(cur_ep->tr_deq_lo);
-    serial_print("\n");
-  }
-
-  return (cc == 1);
-}
-
-static int xhci_hid_set_protocol_boot(xhci_device_state_t *dev) {
-  if (dev->hid_ifnum == 0xFF)
-    return 0;
-  uint64_t setup = 0;
-  setup |= 0x21ULL;
-  setup |= 0x0BULL << 8;
-  setup |= 0x0000ULL << 16;
-  setup |= ((uint64_t)dev->hid_ifnum) << 32;
-  setup |= 0ULL << 48;
-  return xhci_ep0_control_no_data_out(dev, setup);
-}
-
-static int xhci_hid_set_idle(xhci_device_state_t *dev) {
-  if (dev->hid_ifnum == 0xFF)
-    return 0;
-  uint64_t setup = 0;
-  setup |= 0x21ULL;
-  setup |= 0x0AULL << 8;
-  setup |= 0x0000ULL << 16;
-  setup |= ((uint64_t)dev->hid_ifnum) << 32;
-  setup |= 0ULL << 48;
-  return xhci_ep0_control_no_data_out(dev, setup);
-}
-
-static void xhci_hid_start_polling(xhci_device_state_t *dev) {
-  if (!dev->intr_ring)
-    return;
-
-  if (!dev->intr_buf) {
-    dev->intr_buf = (uint8_t *)PMM_AllocatePage();
-    for (uint32_t i = 0; i < 4096; i++)
-      dev->intr_buf[i] = 0;
-  }
-
-  const uint32_t dci = 3;
-  xhci_trb_t trb;
-  trb.data = (uint64_t)(uintptr_t)dev->intr_buf;
-  trb.status = (uint32_t)(dev->intr_mps & 0xFFFFu);
-  trb.control = make_trb_control(TRB_TYPE_NORMAL, dev->intr_cycle) | (1u << 5) |
-                (1u << 2);
-  xhci_intr_ring_push(dev, &trb);
-  xhci_ring_doorbell_ep(dev->slot_id, dci);
-}
-
-static void xhci_print_u32_dec(uint32_t v) {
+void xhci_print_u32_dec(uint32_t v) {
   char s[12];
   int n = 0;
   char buf[12];
@@ -610,7 +393,25 @@ static void xhci_print_u32_dec(uint32_t v) {
   serial_print(s);
 }
 
-static void xhci_print_hex32(uint32_t v);
+void xhci_print_i32_dec(int32_t v) {
+  if (v < 0) {
+    serial_print("-");
+    // Avoid overflow for INT32_MIN by converting through int64.
+    int64_t t = -(int64_t)v;
+    xhci_print_u32_dec((uint32_t)t);
+    return;
+  }
+  xhci_print_u32_dec((uint32_t)v);
+}
+
+void xhci_print_hex8(uint8_t v) {
+  static const char *hex = "0123456789ABCDEF";
+  char s[3];
+  s[0] = hex[(v >> 4) & 0xFu];
+  s[1] = hex[(v >> 0) & 0xFu];
+  s[2] = 0;
+  serial_print(s);
+}
 
 // PortSC bits
 static const uint32_t PORTSC_CCS = 1u << 0; // Current Connect Status
@@ -631,6 +432,25 @@ static uint32_t xhci_port_speed(uint32_t portsc) {
 
 static uint32_t xhci_port_pls(uint32_t portsc) { return (portsc >> 5) & 0xFu; }
 
+static const char *xhci_speed_name(uint32_t speed) {
+  switch (speed) {
+  case 0:
+    return "none";
+  case 1:
+    return "full"; // USB 1.1 full-speed
+  case 2:
+    return "low"; // USB 1.1 low-speed
+  case 3:
+    return "high"; // USB 2.0 high-speed
+  case 4:
+    return "superspeed"; // USB 3.x
+  case 5:
+    return "superspeed+"; // USB 3.1/3.2 SuperSpeedPlus (common on orange ports)
+  default:
+    return "unknown";
+  }
+}
+
 static void xhci_log_portsc(uint32_t port_id, const char *prefix,
                             uint32_t portsc) {
   serial_print(prefix);
@@ -641,7 +461,13 @@ static void xhci_log_portsc(uint32_t port_id, const char *prefix,
   serial_print(" PLS=");
   xhci_print_u32_dec(xhci_port_pls(portsc));
   serial_print(" speed=");
-  xhci_print_u32_dec(xhci_port_speed(portsc));
+  {
+    uint32_t sp = xhci_port_speed(portsc);
+    xhci_print_u32_dec(sp);
+    serial_print("(");
+    serial_print(xhci_speed_name(sp));
+    serial_print(")");
+  }
   serial_print(" PED=");
   xhci_print_u32_dec((portsc >> 1) & 1u);
   serial_print("\n");
@@ -827,7 +653,7 @@ static void xhci_bios_handoff(void) {
   }
 }
 
-static void xhci_print_hex32(uint32_t v) {
+void xhci_print_hex32(uint32_t v) {
   static const char *hex = "0123456789ABCDEF";
   char s[9];
   s[0] = hex[(v >> 28) & 0xF];
@@ -869,7 +695,7 @@ static int xhci_cmd_enable_slot(uint32_t *out_slot_id) {
   return (cc == 1 && slot != 0);
 }
 
-static xhci_trb_t *xhci_alloc_tr_ring(void) {
+xhci_trb_t *xhci_alloc_tr_ring(void) {
   xhci_trb_t *ring = (xhci_trb_t *)PMM_AllocatePage();
   for (int i = 0; i < 256; i++) {
     ring[i].data = 0;
@@ -883,7 +709,7 @@ static xhci_trb_t *xhci_alloc_tr_ring(void) {
   return ring;
 }
 
-static xhci_device_state_t g_devs[256];
+xhci_device_state_t g_devs[256];
 
 static void xhci_ring_doorbell_ep0(uint32_t slot_id) {
   // Doorbell target is DCI. For EP0, DCI=1.
@@ -901,37 +727,6 @@ static void xhci_ep0_ring_push(xhci_device_state_t *dev,
     dev->ep0_index = 0;
     dev->ep0_cycle ^= 1;
   }
-}
-
-static int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
-  uint32_t seen_other = 0;
-  for (uint32_t spins = 0; spins < 50000000; spins++) {
-    xhci_trb_t evt;
-    if (!xhci_poll_event(&evt))
-      continue;
-
-    if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT) {
-      uint32_t cc = trb_cc(evt.status);
-      uint32_t eslot = trb_slot_id(evt.control);
-      if (eslot == slot_id) {
-        if (out_cc)
-          *out_cc = cc;
-        return 1;
-      }
-
-      // Rate-limited debug: if we're getting transfer events but not for our
-      // slot, print a few so we know the ring is alive.
-      if (seen_other < 4) {
-        serial_print("[xHCI] TransferEvent other slot=");
-        xhci_print_u32_dec(eslot);
-        serial_print(" cc=");
-        xhci_print_u32_dec(cc);
-        serial_print("\n");
-        seen_other++;
-      }
-    }
-  }
-  return 0;
 }
 
 static void xhci_print_hex16(uint16_t v) {
@@ -1065,8 +860,10 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
     mps = 8; // full-speed
   if (speed_code == 2)
     mps = 8; // low-speed
-  if (speed_code == 4)
-    mps = 512; // superspeed
+  if (speed_code == 3)
+    mps = 64; // high-speed
+  if (speed_code >= 4)
+    mps = 512; // superspeed / superspeed+
 
   ep0->dword1 = ((mps & 0xFFFFu) << 16) | ((4u & 0x7u) << 3);
 
@@ -1119,10 +916,29 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   dev->intr_index = 0;
   dev->intr_cycle = 1;
   dev->hid_ifnum = 0xFF;
+  dev->hid_subclass = 0;
   dev->hid_proto = 0;
+  dev->hid_report_desc_len = 0;
+  dev->hid_has_report_id = 0;
+  dev->hid_mouse_report_id = 0;
+  dev->hid_mouse_valid = 0;
+  dev->hid_buttons_bitoff = 0;
+  dev->hid_buttons_bits = 0;
+  dev->hid_x_bitoff = 0;
+  dev->hid_x_bits = 0;
+  dev->hid_y_bitoff = 0;
+  dev->hid_y_bits = 0;
+  dev->hid_wheel_bitoff = 0;
+  dev->hid_wheel_bits = 0;
   dev->intr_epaddr = 0;
+  dev->intr_dci = 0;
   dev->intr_mps = 0;
   dev->intr_interval = 0;
+
+  dev->kbd_prev_mod = 0;
+  for (uint32_t i = 0; i < 6; i++) {
+    dev->kbd_prev_keys[i] = 0;
+  }
 
   // Next milestone: read the USB Device Descriptor via EP0 control transfer
   if (!xhci_ep0_get_device_descriptor(dev)) {
@@ -1136,10 +952,13 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   // Basic HID bring-up: boot protocol + idle, then enable interrupt IN EP and
   // poll reports.
   if (dev->hid_ifnum != 0xFF) {
-    serial_print("[HID] SET_PROTOCOL(boot)\n");
-    (void)xhci_hid_set_protocol_boot(dev);
+    if (dev->hid_subclass == 1) {
+      serial_print("[HID] SET_PROTOCOL(boot)\n");
+      (void)xhci_hid_set_protocol_boot(dev);
+    }
     serial_print("[HID] SET_IDLE\n");
     (void)xhci_hid_set_idle(dev);
+    xhci_hid_try_parse_mouse_report_desc(dev);
     if (xhci_cmd_configure_intr_in_ep(dev)) {
       serial_print("[HID] Interrupt IN armed\n");
       xhci_hid_start_polling(dev);
@@ -1392,134 +1211,27 @@ void xhci_init(uint64_t mmio_phys) {
     // If the port is already usable, do NOT reset it. On some real controllers
     // a reset here can knock the link into Disabled/Recovery and it won't come
     // back.
-    uint32_t initial_speed = xhci_port_speed(ps);
-    uint32_t initial_pls = xhci_port_pls(ps);
-    uint32_t initial_ped = (ps & PORTSC_PED) ? 1u : 0u;
+    uint32_t speed = 0;
     uint32_t ready = 0;
-    if (initial_ped && initial_speed != 0 && initial_pls == 0) {
-      serial_print("[xHCI] Port already ready; skipping reset\n");
-      ready = 1;
-    }
 
-    if (!ready) {
-      // Ensure port power is on (some controllers require PP before reset)
-      if (!(ps & PORTSC_PP)) {
-        *portsc = (ps | PORTSC_PP) & ~PORTSC_W1C;
-        ps = *portsc;
-      }
-
-      // Clear any pending change bits before doing reset
-      ps = *portsc;
-      if (ps & PORTSC_W1C) {
-        *portsc = ps | PORTSC_W1C;
-      }
-
-      ps = *portsc;
-      uint32_t speed_hint = xhci_port_speed(ps);
-
-      if (speed_hint == 4) {
-        // SuperSpeed: prefer Warm Port Reset
-        serial_print("[xHCI] SuperSpeed port; using Warm Reset\n");
-        uint32_t w = ps;
-        w &= ~PORTSC_W1C;
-        w |= PORTSC_WPR;
-        *portsc = w;
-
-        for (uint32_t spins = 0; spins < 20000000; spins++) {
-          ps = *portsc;
-          if (!(ps & PORTSC_WPR))
-            break;
-        }
-
-        ps = *portsc;
-        if (ps & PORTSC_W1C) {
-          *portsc = ps | PORTSC_W1C;
-          ps = *portsc;
-        }
-        xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
-      } else {
-        // Non-SS: cold Port Reset
-        uint32_t v = ps;
-        v &= ~PORTSC_W1C;
-        v |= PORTSC_PR;
-        *portsc = v;
-
-        // Wait for PR to clear
-        uint32_t ok = 0;
-        for (uint32_t spins = 0; spins < 20000000; spins++) {
-          ps = *portsc;
-          if (!(ps & PORTSC_PR)) {
-            ok = 1;
-            break;
-          }
-        }
-        if (!ok) {
-          serial_print("[xHCI] Port reset timeout PortSC=");
-          xhci_print_hex32(*portsc);
-          serial_print("\n");
-        }
-
-        // Clear RW1C bits that may be set after reset
-        ps = *portsc;
-        if (ps & PORTSC_W1C) {
-          *portsc = ps | PORTSC_W1C;
-        }
-
-        ps = *portsc;
-        xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
-      }
-
-      // Wait for the port to actually be usable (PED=1, speed!=0, and for USB3:
-      // link in U0). On real hardware, speed may remain 0 until link training
-      // completes.
-      for (uint32_t spins = 0; spins < 20000000; spins++) {
-        ps = *portsc;
-        uint32_t speed = xhci_port_speed(ps);
-        uint32_t pls = xhci_port_pls(ps);
-        if ((ps & PORTSC_CCS) && (ps & PORTSC_PED) && (speed != 0) &&
-            (pls == 0)) {
-          ready = 1;
-          break;
-        }
-      }
-    }
-
+    // Use the more robust helper that:
+    // - powers on the port
+    // - clears W1C change bits
+    // - tries warm/cold reset in multiple passes
+    // - forces the port into U0 if needed
+    ready = (uint32_t)xhci_force_port_ready(portsc, port_id, &speed);
     ps = *portsc;
-    uint32_t speed = xhci_port_speed(ps);
+    xhci_log_portsc(port_id, "[xHCI] Final", ps);
+
     if (ready) {
       serial_print("[xHCI] Port ready\n");
     } else {
       serial_print("[xHCI] Port NOT ready after reset(s)\n");
-      uint32_t pls = xhci_port_pls(ps);
       serial_print("[xHCI] Stuck state: PLS=");
-      xhci_print_u32_dec(pls);
+      xhci_print_u32_dec(xhci_port_pls(ps));
       serial_print(" speed=");
       xhci_print_u32_dec(speed);
       serial_print("\n");
-
-      if (pls == 3) { // U3 (Suspend)
-        serial_print("[xHCI] Port in U3; attempting Wakeup (PLS=15)...\n");
-        uint32_t cmd = ps & ~PORTSC_W1C;
-        cmd &= ~PORTSC_PLS_MASK;
-        cmd |= (15u << 5); // Resume
-        cmd |= (1u << 16); // LWS (Link Write Strobe) required to write PLS
-        *portsc = cmd;
-
-        // Wait for Resume to complete (transition to U0)
-        for (uint32_t w = 0; w < 20000000; w++) {
-          ps = *portsc;
-          if (xhci_port_pls(ps) == 0) { // U0
-            serial_print("[xHCI] Wakeup successful (U0)\n");
-            ready = 1;
-            break;
-          }
-        }
-      }
-    }
-    xhci_log_portsc(port_id, "[xHCI] Final", ps);
-
-    if (!ready) {
-      // Don't attempt EnableSlot/AddressDevice with invalid speed/PED.
       continue;
     }
 
@@ -1540,60 +1252,3 @@ void xhci_init(uint64_t mmio_phys) {
 }
 
 void xhci_send_command(xhci_trb_t *trb) { (void)trb; }
-
-void xhci_poll_events() {
-  if (!event_ring)
-    return;
-
-  while (1) {
-    xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      break;
-    }
-
-    if (trb_type(evt.control) != TRB_TYPE_TRANSFER_EVENT) {
-      continue;
-    }
-
-    uint32_t cc = trb_cc(evt.status);
-    uint32_t slot_id = trb_slot_id(evt.control);
-    uint32_t ep_id = (evt.control >> 16) & 0x1Fu;
-
-    if (slot_id == 0 || slot_id >= 256) {
-      continue;
-    }
-
-    xhci_device_state_t *dev = &g_devs[slot_id];
-    if (dev->slot_id != slot_id) {
-      continue;
-    }
-
-    // EP1 IN is DCI=3.
-    if (ep_id != 3) {
-      continue;
-    }
-
-    if (cc == 1 && dev->intr_buf) {
-      uint32_t a =
-          (uint32_t)(dev->intr_buf[0] | (dev->intr_buf[1] << 8) |
-                     (dev->intr_buf[2] << 16) | (dev->intr_buf[3] << 24));
-      uint32_t b =
-          (uint32_t)(dev->intr_buf[4] | (dev->intr_buf[5] << 8) |
-                     (dev->intr_buf[6] << 16) | (dev->intr_buf[7] << 24));
-      if (1) {
-        serial_print("[HID] slot=");
-        xhci_print_u32_dec(slot_id);
-        serial_print(" report=");
-        xhci_print_hex32(a);
-        serial_print(" ");
-        xhci_print_hex32(b);
-        serial_print("\n");
-      }
-    }
-
-    // Re-arm interrupt IN for next report.
-    if (dev->intr_ring && dev->intr_mps) {
-      xhci_hid_start_polling(dev);
-    }
-  }
-}

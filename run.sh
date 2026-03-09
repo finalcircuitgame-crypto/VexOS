@@ -25,9 +25,11 @@ qemu-system-x86_64 \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
     -drive format=raw,file=dist/tiny64.img \
+    -drive if=ide,index=1,format=raw,file=dist/storage.img \
+    -m 1G \
     -device qemu-xhci \
     -device usb-kbd \
-    -device usb-mouse \
+    -device usb-tablet \
     -nic none \
-    -serial stdio \
+    -serial mon:stdio \
     -boot order=c,menu=off

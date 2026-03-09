@@ -24,6 +24,7 @@ LDFLAGS_KERNEL = -nostdlib -T $(KERNELDIR)/linker.ld -z max-page-size=0x1000
 BOOTLOADER_EFI = $(DISTDIR)/BOOTX64.EFI
 KERNEL_ELF = $(DISTDIR)/kernel.elf
 DISK_IMG = $(DISTDIR)/tiny64.img
+STORAGE_IMG = $(DISTDIR)/storage.img
 
 # Kernel Objects
 # Recursively find all C and S files
@@ -35,7 +36,7 @@ KERNEL_OBJS := $(patsubst $(KERNELDIR)/%.c, $(OBJDIR)/%.o, $(KERNEL_SRCS)) \
               $(patsubst $(KERNELDIR)/%.s, $(OBJDIR)/%_asm.o, $(KERNEL_ASMS))
 FONT_OBJ = $(OBJDIR)/font.o
 
-all: setup $(DISK_IMG)
+all: setup $(DISK_IMG) $(STORAGE_IMG)
 
 setup:
 	mkdir -p $(OBJDIR)
@@ -73,6 +74,14 @@ $(DISK_IMG): $(BOOTLOADER_EFI) $(KERNEL_ELF)
 	mmd -i $(DISK_IMG) ::/EFI/BOOT
 	mcopy -o -i $(DISK_IMG) $(BOOTLOADER_EFI) ::/EFI/BOOT/BOOTX64.EFI
 	mcopy -o -i $(DISK_IMG) $(KERNEL_ELF) ::/kernel.elf
+	@mkdir -p build
+	@printf "fs0:\n\\EFI\\BOOT\\BOOTX64.EFI\n" > build/startup.nsh
+	mcopy -o -i $(DISK_IMG) build/startup.nsh ::/startup.nsh
+
+# Create separate persistent storage disk (raw) used by SimpleFS.
+# This avoids overwriting the EFI/FAT boot image.
+$(STORAGE_IMG):
+	dd if=/dev/zero of=$(STORAGE_IMG) bs=1M count=64
 
 clean:
 	rm -rf $(DISTDIR)/*

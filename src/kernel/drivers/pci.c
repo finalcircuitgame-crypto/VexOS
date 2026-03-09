@@ -62,6 +62,37 @@ static void print_dec_u32(uint32_t v) {
     serial_print(s);
 }
 
+static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
+                                    uint16_t vendor_id) {
+    uint32_t usb2pr = pci_config_read_dword(bus, slot, func, 0xD0);
+    uint32_t usb3pr = pci_config_read_dword(bus, slot, func, 0xD4);
+
+    serial_print("[PCI] xHCI USB2PR=");
+    print_hex(usb2pr);
+    serial_print(" USB3PR=");
+    print_hex(usb3pr);
+    serial_print("\n");
+
+    if (vendor_id != 0x8086) {
+        return;
+    }
+
+    if (usb2pr != 0xFFFFFFFFu) {
+        pci_config_write_dword(bus, slot, func, 0xD0, 0xFFFFFFFFu);
+    }
+    if (usb3pr != 0xFFFFFFFFu) {
+        pci_config_write_dword(bus, slot, func, 0xD4, 0xFFFFFFFFu);
+    }
+
+    usb2pr = pci_config_read_dword(bus, slot, func, 0xD0);
+    usb3pr = pci_config_read_dword(bus, slot, func, 0xD4);
+    serial_print("[PCI] xHCI USB2PR(after)=");
+    print_hex(usb2pr);
+    serial_print(" USB3PR(after)=");
+    print_hex(usb3pr);
+    serial_print("\n");
+}
+
 void pci_enumerate() {
     serial_print("[PCI] Enumerating all buses...\n");
     for (uint16_t bus = 0; bus < 256; bus++) {
@@ -69,6 +100,9 @@ void pci_enumerate() {
             for (uint8_t func = 0; func < 8; func++) {
                 uint32_t vendor_device = pci_config_read_dword(bus, slot, func, 0);
                 if ((uint16_t)vendor_device == 0xFFFF) continue;
+
+                uint16_t vendor_id = (uint16_t)(vendor_device & 0xFFFFu);
+                uint16_t device_id = (uint16_t)((vendor_device >> 16) & 0xFFFFu);
 
                 serial_print("[PCI] Device Found: ");
                 print_hex(vendor_device);
@@ -113,6 +147,8 @@ void pci_enumerate() {
                     // Enable Bus Mastering and MMIO
                     uint32_t command = pci_config_read_dword(bus, slot, func, 0x04);
                     pci_config_write_dword(bus, slot, func, 0x04, command | 0x06);
+
+                    xhci_force_usb2_routing((uint8_t)bus, slot, func, vendor_id);
 
                     xhci_init(mmio_base);
                 }
