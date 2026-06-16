@@ -286,20 +286,23 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
 
-  desktop_init(bootInfo);
-
-  // After we switch to the desktop, stop drawing serial/boot text to the
-  // framebuffer (COM1 logging continues).
-  g_ConsoleReady = 0;
-
-  // PCI Enumeration
+  // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
-  if (g_ConsoleReady) {
-    PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
-  }
+  PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
   hw_profile_update_pci_gpu();
   serial_print("[KERNEL] PCI enumeration returned\n");
+
+  // Run fullscreen setup wizard on first boot (now with working xHCI)
+  serial_print("[KERNEL] Starting Fullscreen Setup Wizard...\n");
+  desktop_run_fullscreen_wizard(bootInfo);
+
+  // After setup completes, initialize desktop
+  serial_print("[KERNEL] Setup complete, initializing desktop...\n");
+  desktop_init(bootInfo);
+
+  // Stop drawing serial/boot text to the framebuffer
+  g_ConsoleReady = 0;
 
   Task_Init();
   serial_print("[KERNEL] Task_Init done\n");
@@ -332,38 +335,33 @@ void kernel_main(BootInfo *bootInfo) {
   if (g_ConsoleReady) {
     PrintString("Starting Preemptive Multitasking...\n", 0xFFFFFF);
   }
-  serial_print("[KERNEL] Starting Preemptive "
-               "Multitaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasking...\n");
+  serial_print("[KERNEL] Starting main loop (uncapped)...\n");
 
-  // Frame pacing via PIT counter polling (no interrupts required).
-  // Target FPS can be set anywhere from ~60-120 by changing this constant.
-  const uint32_t target_fps = hw_tuning_get()->target_fps;
-  const uint32_t pit_base_hz = 1193182;
-  const uint16_t pit_reload = (uint16_t)(pit_base_hz / 1000u);
-  const uint64_t frame_cycles = (uint64_t)(pit_base_hz / target_fps);
+  // Main loop - precise time-based frame rate limiter
+  uint32_t target_fps = hw_tuning_get()->target_fps;
+  if (target_fps == 0) {
+    target_fps = 60;
+  }
+  uint32_t frame_delay = 1000 / target_fps;
+  uint64_t last_frame_ticks = Timer_Ticks();
 
-  uint16_t last_ctr = pit_read_counter();
-  uint64_t cycles = 0;
-  uint64_t last_frame = 0;
   while (1) {
-    // Keep xHCI polling frequent so mouse doesn't stall.
+    // Keep xHCI polling frequent so mouse/keyboard remain responsive
     xhci_poll_events();
 
-    // Update a monotonic cycle counter based on PIT down-counter deltas.
-    uint16_t ctr = pit_read_counter();
-    uint16_t delta;
-    if (ctr <= last_ctr) {
-      delta = (uint16_t)(last_ctr - ctr);
-    } else {
-      delta = (uint16_t)(last_ctr + pit_reload - ctr);
-    }
-    last_ctr = ctr;
-    cycles += (uint64_t)delta;
+    // Run desktop tick
+    desktop_tick();
 
-    // Render at target FPS.
-    if ((cycles - last_frame) >= frame_cycles) {
-      last_frame = cycles;
-      desktop_tick();
+    // Yield/Wait to maintain targeted FPS
+    uint64_t current_ticks = Timer_Ticks();
+    uint64_t elapsed = current_ticks - last_frame_ticks;
+    if (elapsed < frame_delay) {
+      uint64_t wait_ticks = frame_delay - elapsed;
+      uint64_t target_ticks = current_ticks + wait_ticks;
+      while (Timer_Ticks() < target_ticks) {
+        __asm__ volatile("pause");
+      }
     }
+    last_frame_ticks = Timer_Ticks();
   }
 }

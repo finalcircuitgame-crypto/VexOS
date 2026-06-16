@@ -569,26 +569,13 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
       break;
 
     uint32_t speed_hint = xhci_port_speed(ps);
-    int prefer_warm = (speed_hint >= 4);
 
-    for (uint32_t pass = 0; pass < 2; pass++) {
-      int do_warm = (pass == 0) ? prefer_warm : !prefer_warm;
-      if (attempt & 1)
-        do_warm = !do_warm;
-
-      if (do_warm) {
-        serial_print("[xHCI] Forcing warm reset\n");
-        xhci_port_warm_reset(portsc);
-        ps = *portsc;
-        xhci_port_clear_w1c(portsc, &ps);
-        xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
-      } else {
-        serial_print("[xHCI] Forcing cold reset\n");
-        xhci_port_cold_reset(portsc);
-        ps = *portsc;
-        xhci_port_clear_w1c(portsc, &ps);
-        xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
-      }
+    if (speed_hint >= 4) {
+      serial_print("[xHCI] Forcing warm reset\n");
+      xhci_port_warm_reset(portsc);
+      ps = *portsc;
+      xhci_port_clear_w1c(portsc, &ps);
+      xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
 
       if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
         if (out_speed)
@@ -602,9 +589,28 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
           *out_speed = xhci_port_speed(ps);
         return 1;
       }
-
-      ps = *portsc;
     }
+
+    serial_print("[xHCI] Forcing cold reset\n");
+    xhci_port_cold_reset(portsc);
+    ps = *portsc;
+    xhci_port_clear_w1c(portsc, &ps);
+    xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
+
+    if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
+      if (out_speed)
+        *out_speed = xhci_port_speed(ps);
+      return 1;
+    }
+
+    xhci_port_force_u0(portsc);
+    if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
+      if (out_speed)
+        *out_speed = xhci_port_speed(ps);
+      return 1;
+    }
+
+    ps = *portsc;
   }
 
   if (out_speed)
@@ -740,6 +746,51 @@ static void xhci_print_hex16(uint16_t v) {
   serial_print(s);
 }
 
+static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
+                                                uint32_t new_mps) {
+  if (!dev || dev->slot_id == 0)
+    return 0;
+
+  uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  for (uint32_t i = 0; i < 4096; i++)
+    input_ctx[i] = 0;
+
+  xhci_input_control_ctx_t *icc = (xhci_input_control_ctx_t *)input_ctx;
+  icc->add_flags = (1u << 1);
+  icc->drop_flags = 0;
+
+  xhci_ep_ctx_32_t *ep0 = (xhci_ep_ctx_32_t *)(input_ctx + (2 * g_ctx_size));
+  ep0->dword1 = ((new_mps & 0xFFFFu) << 16) | ((4u & 0x7u) << 3);
+
+  xhci_trb_t cmd;
+  cmd.data = (uint64_t)(uintptr_t)input_ctx;
+  cmd.status = 0;
+  cmd.control = make_trb_control(TRB_TYPE_EVALUATE_CTX_CMD, command_ring_cycle) |
+                (dev->slot_id << 24);
+
+  xhci_cmd_ring_push(&cmd);
+  xhci_ring_doorbell_cmd();
+
+  uint32_t evt_slot = 0;
+  uint32_t cc = 0;
+  if (!xhci_wait_for_command_completion(&evt_slot, &cc)) {
+    serial_print("[xHCI] EvaluateContext: timeout\n");
+    return 0;
+  }
+
+  if (cc != 1 || evt_slot != dev->slot_id) {
+    serial_print("[xHCI] EvaluateContext: completion_code=");
+    xhci_print_u32_dec(cc);
+    serial_print(" slot_id=");
+    xhci_print_u32_dec(evt_slot);
+    serial_print("\n");
+    return 0;
+  }
+
+  dev->ep0_mps = new_mps;
+  return 1;
+}
+
 static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
   // USB Device Descriptor is 18 bytes
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
@@ -749,58 +800,45 @@ static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
   // Setup packet (USB2.0 9.3): GET_DESCRIPTOR(Device)
   // bmRequestType=0x80 (Device-to-host, Standard, Device)
   // bRequest=6, wValue=(1<<8)|0, wIndex=0, wLength=18
-  uint64_t setup = 0;
-  setup |= 0x80ULL;         // bmRequestType
-  setup |= 0x06ULL << 8;    // bRequest
-  setup |= 0x0100ULL << 16; // wValue
-  setup |= 0x0000ULL << 32; // wIndex
-  setup |= 18ULL << 48;     // wLength
+  uint64_t setup8 = 0;
+  setup8 |= 0x80ULL;
+  setup8 |= 0x06ULL << 8;
+  setup8 |= 0x0100ULL << 16;
+  setup8 |= 0x0000ULL << 32;
+  setup8 |= 8ULL << 48;
 
-  // Setup Stage TRB
-  xhci_trb_t setup_trb;
-  setup_trb.data = setup;
-  // Transfer length=8, interrupter target=0
-  setup_trb.status = 8;
-  // TRT=2 (IN data stage) in bits 17:16
-  // IDT=1 (bit 6) because setup packet is in the TRB parameter field
-  setup_trb.control = make_trb_control(TRB_TYPE_SETUP_STAGE, dev->ep0_cycle) |
-                      (2u << 16) | (1u << 6) | (1u << 5);
-
-  // Data Stage TRB (IN)
-  xhci_trb_t data_trb;
-  data_trb.data = (uint64_t)(uintptr_t)buf;
-  data_trb.status = 18; // transfer length
-  // DIR=1 in bit 16
-  data_trb.control = make_trb_control(TRB_TYPE_DATA_STAGE, dev->ep0_cycle) |
-                     (1u << 16) | (1u << 5);
-
-  // Status Stage TRB (OUT for IN data stage)
-  xhci_trb_t status_trb;
-  status_trb.data = 0;
-  status_trb.status = 0;
-  // DIR=0
-  status_trb.control =
-      make_trb_control(TRB_TYPE_STATUS_STAGE, dev->ep0_cycle) | (1u << 5);
-
-  xhci_ep0_ring_push(dev, &setup_trb);
-  xhci_ep0_ring_push(dev, &data_trb);
-  xhci_ep0_ring_push(dev, &status_trb);
-
-  xhci_ring_doorbell_ep0(dev->slot_id);
-
-  uint32_t cc = 0;
-  if (!xhci_wait_for_transfer_event(dev->slot_id, &cc)) {
-    serial_print("[xHCI] EP0 GET_DESCRIPTOR: timeout\n");
+  if (!xhci_ep0_control_in(dev, setup8, buf, 8)) {
+    serial_print("[xHCI] EP0 GET_DESCRIPTOR(8) failed\n");
     return 0;
   }
 
-  serial_print("[xHCI] EP0 GET_DESCRIPTOR: completion_code=");
-  xhci_print_u32_dec(cc);
-  serial_print("\n");
-  if (cc != 1)
-    return 0;
+  uint8_t mps0 = buf[7];
+  if (dev->speed_code == 1) {
+    if (mps0 == 8 || mps0 == 16 || mps0 == 32 || mps0 == 64) {
+      if (dev->ep0_mps != (uint32_t)mps0) {
+        if (!xhci_cmd_evaluate_ctx_update_ep0_mps(dev, (uint32_t)mps0)) {
+          serial_print("[xHCI] EP0 update MPS failed\n");
+          return 0;
+        }
+      }
+    }
+  }
 
-  // Parse: idVendor at 8, idProduct at 10, bDeviceClass at 4
+  for (uint32_t i = 0; i < 4096; i++)
+    buf[i] = 0;
+
+  uint64_t setup18 = 0;
+  setup18 |= 0x80ULL;
+  setup18 |= 0x06ULL << 8;
+  setup18 |= 0x0100ULL << 16;
+  setup18 |= 0x0000ULL << 32;
+  setup18 |= 18ULL << 48;
+
+  if (!xhci_ep0_control_in(dev, setup18, buf, 18)) {
+    serial_print("[xHCI] EP0 GET_DESCRIPTOR(18) failed\n");
+    return 0;
+  }
+
   uint16_t vid = (uint16_t)(buf[8] | (buf[9] << 8));
   uint16_t pid = (uint16_t)(buf[10] | (buf[11] << 8));
   uint8_t cls = buf[4];
@@ -1250,5 +1288,3 @@ void xhci_init(uint64_t mmio_phys) {
     serial_print("[xHCI] PORT SCAN END\n");
   }
 }
-
-void xhci_send_command(xhci_trb_t *trb) { (void)trb; }
