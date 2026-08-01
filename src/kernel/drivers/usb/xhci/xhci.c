@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 /**
- * Tiny64 xHCI Driver (bring-up + command ring + event ring polling)
+ * VexOS xHCI Driver (bring-up + command ring + event ring polling)
  * Spec refs:
  * - xHCI 1.1: 4.2 (init), 4.8/4.9 (rings), 6.4 (TRBs), 7 (commands/events)
  */
