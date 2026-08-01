@@ -144,6 +144,7 @@ if [ ! -f build/OVMF_VARS_4M.fd ]; then
 fi
 
 qemu-system-x86_64 \
+    -machine q35 \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
     -drive format=raw,file=dist/tiny64.img \

@@ -1,7 +1,7 @@
 #include "xhci_internal.h"
 #include "pmm.h"
 
-static uint32_t xhci_hid_get_bits_u32(const uint8_t *buf, uint32_t bitoff,
+uint32_t xhci_hid_get_bits_u32(const uint8_t *buf, uint32_t bitoff,
                                      uint32_t bits) {
   uint32_t v = 0;
   for (uint32_t i = 0; i < bits && i < 32; i++) {
@@ -14,7 +14,7 @@ static uint32_t xhci_hid_get_bits_u32(const uint8_t *buf, uint32_t bitoff,
   return v;
 }
 
-static int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff,
+int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff,
                                     uint32_t bits) {
   if (bits == 0 || bits > 32) {
     return 0;
@@ -228,10 +228,12 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   setup |= ((uint64_t)dev->hid_report_desc_len) << 48;
 
   if (!xhci_ep0_control_in(dev, setup, buf, dev->hid_report_desc_len)) {
+    PMM_FreePage(buf);
     return;
   }
 
   xhci_hid_parse_report_desc_mouse(dev, buf, dev->hid_report_desc_len);
+  PMM_FreePage(buf);
 }
 
 static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb) {

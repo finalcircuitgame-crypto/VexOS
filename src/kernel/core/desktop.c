@@ -783,6 +783,20 @@ static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y
   }
 }
 
+void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
+  if (!g_bi || !src) return;
+  uint32_t* dst = g_bi->framebuffer;
+  uint32_t copy_w = (w > g_bi->width) ? g_bi->width : w;
+  uint32_t copy_h = (h > g_bi->height) ? g_bi->height : h;
+  for (uint32_t yy = 0; yy < copy_h; yy++) {
+    uint32_t *drow = &dst[yy * g_bi->pitch];
+    const uint32_t *srow = &src[yy * w];
+    for (uint32_t xx = 0; xx < copy_w; xx++) {
+      drow[xx] = srow[xx];
+    }
+  }
+}
+
 static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
   if (!g_bi)
     return;
@@ -1413,8 +1427,9 @@ static void shell_run_line(void) {
     shell_append("\n");
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "specs", 5)) {
     shell_run_specs();
-  } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) {
-    shell_append("launching ring3...\n");
+  } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) ||
+             (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4))) {
+    shell_append("launching doom.elf...\n");
     launch_ring3_task();
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
     shell_append("mounting fs...\n");
