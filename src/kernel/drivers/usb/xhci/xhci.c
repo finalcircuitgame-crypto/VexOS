@@ -570,8 +570,10 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
 
     uint32_t speed_hint = xhci_port_speed(ps);
 
+    // USB 2.0 (speed 1-3): use cold reset only
+    // USB 3.x (speed 4-5): try warm reset first, then cold reset
     if (speed_hint >= 4) {
-      serial_print("[xHCI] Forcing warm reset\n");
+      serial_print("[xHCI] Forcing warm reset (USB3)\n");
       xhci_port_warm_reset(portsc);
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
@@ -591,6 +593,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
       }
     }
 
+    // Cold reset for both USB 2.0 and USB 3.x
     serial_print("[xHCI] Forcing cold reset\n");
     xhci_port_cold_reset(portsc);
     ps = *portsc;
@@ -603,11 +606,15 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
       return 1;
     }
 
-    xhci_port_force_u0(portsc);
-    if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
-      if (out_speed)
-        *out_speed = xhci_port_speed(ps);
-      return 1;
+    // For USB 2.0, don't force U0 - it's not applicable
+    // For USB 3.x, try forcing U0 as fallback
+    if (speed_hint >= 4) {
+      xhci_port_force_u0(portsc);
+      if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
+        if (out_speed)
+          *out_speed = xhci_port_speed(ps);
+        return 1;
+      }
     }
 
     ps = *portsc;
@@ -987,16 +994,29 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
     serial_print("[xHCI] Config descriptor / set config failed\n");
   }
 
-  // Basic HID bring-up: boot protocol + idle, then enable interrupt IN EP and
-  // poll reports.
+  // Basic HID bring-up: try parsing report descriptor first, then choose protocol.
   if (dev->hid_ifnum != 0xFF) {
+    xhci_hid_try_parse_mouse_report_desc(dev);
+
     if (dev->hid_subclass == 1) {
-      serial_print("[HID] SET_PROTOCOL(boot)\n");
-      (void)xhci_hid_set_protocol_boot(dev);
+      if (dev->hid_proto == 1) {
+        // Keyboard: we only support boot protocol for now.
+        serial_print("[HID] SET_PROTOCOL(boot) for keyboard\n");
+        (void)xhci_hid_set_protocol_boot(dev);
+      } else if (dev->hid_proto == 2) {
+        // Mouse: only use boot protocol if we couldn't parse the report descriptor.
+        if (!dev->hid_mouse_valid) {
+          serial_print("[HID] SET_PROTOCOL(boot) for mouse (fallback)\n");
+          (void)xhci_hid_set_protocol_boot(dev);
+        } else {
+          serial_print("[HID] Using report protocol for mouse\n");
+        }
+      }
     }
+
     serial_print("[HID] SET_IDLE\n");
     (void)xhci_hid_set_idle(dev);
-    xhci_hid_try_parse_mouse_report_desc(dev);
+
     if (xhci_cmd_configure_intr_in_ep(dev)) {
       serial_print("[HID] Interrupt IN armed\n");
       xhci_hid_start_polling(dev);
@@ -1218,9 +1238,10 @@ void xhci_init(uint64_t mmio_phys) {
   }
 
   // Always wait a bit for lines to stabilize (especially USB 2.0)
+  // USB 2.0 needs longer stabilization time (100ms+ per USB spec)
   serial_print("[xHCI] Waiting for ports to stabilize...\n");
-  for (uint32_t tries = 0; tries < 20; tries++) {
-    for (volatile uint32_t d = 0; d < 2000000; d++) { }
+  for (uint32_t tries = 0; tries < 50; tries++) {
+    for (volatile uint32_t d = 0; d < 5000000; d++) { }
 
     for (uint32_t i = 0; i < num_ports; i++) {
       volatile uint32_t *portsc =

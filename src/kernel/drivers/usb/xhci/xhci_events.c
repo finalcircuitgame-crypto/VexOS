@@ -171,79 +171,26 @@ void xhci_poll_events() {
 
           uint32_t buttons = 0;
           if (dev->hid_buttons_bits) {
-            buttons = 0;
-            for (uint32_t i = 0; i < (uint32_t)dev->hid_buttons_bits && i < 32;
-                 i++) {
-              uint32_t b = (uint32_t)dev->hid_buttons_bitoff + base_bit + i;
-              uint32_t byte = b >> 3;
-              uint32_t bit = b & 7u;
-              uint32_t bitv = (uint32_t)((r[byte] >> bit) & 1u);
-              buttons |= (bitv << i);
-            }
+            buttons = xhci_hid_get_bits_u32(r, (uint32_t)dev->hid_buttons_bitoff + base_bit, (uint32_t)dev->hid_buttons_bits);
           }
 
           int32_t dx = 0;
           int32_t dy = 0;
           int32_t wheel = 0;
-          {
-            uint32_t bits = (uint32_t)dev->hid_x_bits;
-            uint32_t bitoff = (uint32_t)dev->hid_x_bitoff + base_bit;
-            uint32_t u = 0;
-            for (uint32_t i = 0; i < bits && i < 32; i++) {
-              uint32_t b = bitoff + i;
-              uint32_t byte = b >> 3;
-              uint32_t bit = b & 7u;
-              uint32_t bitv = (uint32_t)((r[byte] >> bit) & 1u);
-              u |= (bitv << i);
-            }
-            if (bits && bits < 32) {
-              uint32_t sign = 1u << (bits - 1);
-              if (u & sign) {
-                uint32_t mask = ~((1u << bits) - 1u);
-                u |= mask;
-              }
-            }
-            dx = (int32_t)u;
+          if (dev->hid_x_bits) {
+            uint32_t off = (uint32_t)dev->hid_x_bitoff + base_bit;
+            uint32_t sz = (uint32_t)dev->hid_x_bits;
+            dx = dev->hid_x_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
           }
-          {
-            uint32_t bits = (uint32_t)dev->hid_y_bits;
-            uint32_t bitoff = (uint32_t)dev->hid_y_bitoff + base_bit;
-            uint32_t u = 0;
-            for (uint32_t i = 0; i < bits && i < 32; i++) {
-              uint32_t b = bitoff + i;
-              uint32_t byte = b >> 3;
-              uint32_t bit = b & 7u;
-              uint32_t bitv = (uint32_t)((r[byte] >> bit) & 1u);
-              u |= (bitv << i);
-            }
-            if (bits && bits < 32) {
-              uint32_t sign = 1u << (bits - 1);
-              if (u & sign) {
-                uint32_t mask = ~((1u << bits) - 1u);
-                u |= mask;
-              }
-            }
-            dy = (int32_t)u;
+          if (dev->hid_y_bits) {
+            uint32_t off = (uint32_t)dev->hid_y_bitoff + base_bit;
+            uint32_t sz = (uint32_t)dev->hid_y_bits;
+            dy = dev->hid_y_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
           }
           if (dev->hid_wheel_bits) {
-            uint32_t bits = (uint32_t)dev->hid_wheel_bits;
-            uint32_t bitoff = (uint32_t)dev->hid_wheel_bitoff + base_bit;
-            uint32_t u = 0;
-            for (uint32_t i = 0; i < bits && i < 32; i++) {
-              uint32_t b = bitoff + i;
-              uint32_t byte = b >> 3;
-              uint32_t bit = b & 7u;
-              uint32_t bitv = (uint32_t)((r[byte] >> bit) & 1u);
-              u |= (bitv << i);
-            }
-            if (bits && bits < 32) {
-              uint32_t sign = 1u << (bits - 1);
-              if (u & sign) {
-                uint32_t mask = ~((1u << bits) - 1u);
-                u |= mask;
-              }
-            }
-            wheel = (int32_t)u;
+            uint32_t off = (uint32_t)dev->hid_wheel_bitoff + base_bit;
+            uint32_t sz = (uint32_t)dev->hid_wheel_bits;
+            wheel = dev->hid_wheel_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
           }
 
           if (dev->hid_x_is_relative && dev->hid_y_is_relative) {

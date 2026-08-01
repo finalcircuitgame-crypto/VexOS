@@ -10,4 +10,6 @@ void desktop_tick(void);
 void desktop_run_fullscreen_wizard(BootInfo *bootInfo);
 int desktop_is_setup_complete(void);
 
+void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h);
+
 #endif

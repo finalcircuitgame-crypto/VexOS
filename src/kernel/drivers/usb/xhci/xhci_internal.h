@@ -102,6 +102,9 @@ int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc);
 int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc);
 
 // HID support.
+uint32_t xhci_hid_get_bits_u32(const uint8_t *buf, uint32_t bitoff, uint32_t bits);
+int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff, uint32_t bits);
+
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev);
 int xhci_hid_set_protocol_boot(xhci_device_state_t *dev);
 int xhci_hid_set_idle(xhci_device_state_t *dev);
