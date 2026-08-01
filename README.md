@@ -1,6 +1,6 @@
 # VexOS
 
-VexOS is a small educational x86_64 operating system project (Tiny64-style) that boots via an EFI bootloader and runs a minimal kernel with a simple desktop environment. It includes basic kernel subsystems (PMM, VMM, heap, tasking), PCI/xHCI support, a SimpleFS persistent storage image, and a fullscreen setup wizard.
+VexOS is a small educational x86_64 operating system project that boots via an EFI bootloader and runs a minimal kernel with a simple desktop environment. It includes basic kernel subsystems (PMM, VMM, heap, tasking), PCI/xHCI support, a SimpleFS persistent storage image, and a fullscreen setup wizard.
 
 ## Key features
 - EFI bootloader (src/boot) that loads kernel.elf and passes a BootInfo struct
