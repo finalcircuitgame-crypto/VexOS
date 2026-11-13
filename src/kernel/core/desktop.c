@@ -350,34 +350,44 @@ static const uint32_t k_icon_notepad_20[20u * 20u] = {
     0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0x00000000u,
 };
 
+static void ring3_task_entry(void) {
+  usermode_launch();
+
+  // On success usermode_launch transfers to ring 3 and never returns. A
+  // return means the loader rejected the image or failed before the switch.
+  shell_append("ring3: loader returned; see serial log\\n");
+  for (;;) {
+    __asm__ volatile("sti; hlt");
+  }
+}
+
 static void launch_ring3_task(void) {
   if (g_ring3_task_started)
     return;
   g_ring3_task_started = 1;
 
-  // The user-mode loader reads doom.elf from the mounted storage volume.
   if (!simplefs_init()) {
-    shell_append("ring3: storage mount failed\n");
+    shell_append("ring3: storage mount failed\\n");
     g_ring3_task_started = 0;
     return;
   }
 
   uint32_t elf_size = 0;
   if (!simplefs_file_size("doom.elf", &elf_size) || elf_size == 0) {
-    shell_append("ring3: doom.elf not found\n");
+    shell_append("ring3: doom.elf not found\\n");
     g_ring3_task_started = 0;
     return;
   }
 
   void *stack = kmalloc(8192);
   if (!stack) {
-    shell_append("ring3: no mem\n");
+    shell_append("ring3: no mem\\n");
     g_ring3_task_started = 0;
     return;
   }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
-  Task_Create(usermode_launch, stack_top);
+  Task_Create(ring3_task_entry, stack_top);
 }
 
 static void draw_window_chrome(const wm_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save) {
