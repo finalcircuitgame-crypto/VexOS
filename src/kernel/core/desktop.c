@@ -2049,7 +2049,7 @@ void desktop_tick(void) {
               g_notepad_text[g_notepad_text_len - 2u] == 'e' &&
               g_notepad_text[g_notepad_text_len - 1u] == 'x') {
             ci_notepad_text_seen = 1;
-            serial_print("[CI] Notepad accepted the full typed text vex\\n");
+            serial_print("[CI] Notepad accepted the full typed text vex\n");
           }
 #endif
           ui_changed = 1;
