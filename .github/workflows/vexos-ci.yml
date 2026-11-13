@@ -199,34 +199,24 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
-          # Exercise keyboard input in the opened shell.
-          for key in ["h", "e", "l", "p", "ret"]:
-          for key in ["m", "e", "m", "ret"]:
-              command({
-                  "execute": "send-key",
-                  "arguments": {
-                      "keys": [{"type": "qcode", "data": key}],
-                      "hold-time": 100
-                  }
-              })
-              time.sleep(0.25)
-          for key in ["s", "p", "e", "c", "s", "ret", "n", "o", "t", "e", "p", "a", "d", "ret", "v", "e", "x"]:
-              command({
-                  "execute": "send-key",
-                  "arguments": {
-                      "keys": [{"type": "qcode", "data": key}],
-                      "hold-time": 100
-                  }
-              })
-              time.sleep(0.25)
-              command({
-                  "execute": "send-key",
-                  "arguments": {
-                      "keys": [{"type": "qcode", "data": key}],
-                      "hold-time": 100
-                  }
-              })
-              time.sleep(0.25)
+          # Exercise shell commands, then open Notepad and type into it.
+          sequences = [
+              ["h", "e", "l", "p", "ret"],
+              ["m", "e", "m", "ret"],
+              ["s", "p", "e", "c", "s", "ret"],
+              ["n", "o", "t", "e", "p", "a", "d", "ret"],
+              ["v", "e", "x"],
+          ]
+          for sequence in sequences:
+              for key in sequence:
+                  command({
+                      "execute": "send-key",
+                      "arguments": {
+                          "keys": [{"type": "qcode", "data": key}],
+                          "hold-time": 100
+                      }
+                  })
+                  time.sleep(0.25)
           stream.close()
           sock.close()
           print("QMP injected keyboard input, USB tablet movement, and two mouse clicks.")
