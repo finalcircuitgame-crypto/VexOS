@@ -17,20 +17,20 @@ void Task_Init() {
 }
 
 void Task_Create(void (*entry)(), void *stack_top) {
-  if (task_count >= 10)
+  if (!entry || !stack_top || task_count >= 10)
     return;
 
+  // The interrupt stub restores 15 GPRs, then executes IRETQ in ring 0.
+  // A same-privilege IRETQ consumes only RIP, CS and RFLAGS (not RSP/SS).
+  // Leave a fake return slot below that frame so a normal C entry has the
+  // SysV x86-64 alignment expected after a CALL: RSP % 16 == 8.
   uint64_t *stack = (uint64_t *)stack_top;
+  *(--stack) = 0;                    // Fake return address if entry returns.
+  *(--stack) = 0x202;                // RFLAGS (interrupts enabled).
+  *(--stack) = 0x08;                 // CS (kernel code).
+  *(--stack) = (uint64_t)entry;      // RIP.
 
-  // iretq frame: x86-64 iretq ALWAYS pops all 5 values, even for
-  // same-privilege returns. Push them in reverse order (SS first).
-  *(--stack) = 0x10;                // SS  (kernel data)
-  *(--stack) = (uint64_t)stack_top; // RSP (clean stack for the new task)
-  *(--stack) = 0x202;               // RFLAGS (IF=1)
-  *(--stack) = 0x08;                // CS  (kernel code)
-  *(--stack) = (uint64_t)entry;     // RIP
-
-  // Push dummy registers for PUSH_GPRS (15 registers)
+  // PUSH_GPRS saves/restores these 15 registers in the interrupt stub.
   for (int i = 0; i < 15; i++) {
     *(--stack) = 0;
   }
