@@ -137,7 +137,6 @@ jobs:
             "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
             "[CI] ELF header/segment validation and rollback passed" \
             "[CI] Task IRET frame and scheduler checks passed" \
-            "[CI] IRQ0 preempted and executed both runtime tasks" \
             "[CI] Successful framebuffer syscall draw passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
@@ -264,6 +263,7 @@ jobs:
           echo "Waiting for keyboard, mouse movement, Start menu, and shell input..."
           markers=(
             "[CI] Keyboard character reached desktop input queue"
+            "[CI] IRQ0 preempted and executed both runtime tasks"
             "[CI] Mouse pointer movement reached desktop_tick"
             "[CI] Start menu opened by USB mouse click"
             "[CI] Shell opened from Start menu mouse click"
