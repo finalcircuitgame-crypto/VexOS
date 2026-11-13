@@ -214,6 +214,17 @@ int usermode_ci_self_test(void) {
         return 0;
     }
 
+    // A mapped user page can be made read-only and then restored writable.
+    if (!VMM_SetPageWrite((void *)(uintptr_t)test_pages[0], 0) ||
+        VMM_IsUserRange((void *)(uintptr_t)test_pages[0], 1, 1) ||
+        !VMM_IsUserRange((void *)(uintptr_t)test_pages[0], 1, 0))
+        return 0;
+    if (VMM_SetPageWrite((void *)(uintptr_t)(test_pages[0] + 1u), 1))
+        return 0;
+    if (!VMM_SetPageWrite((void *)(uintptr_t)test_pages[0], 1) ||
+        !VMM_IsUserRange((void *)(uintptr_t)test_pages[0], 1, 1))
+        return 0;
+
     rollback_user_pages((uint64_t *)test_pages, 2);
     if (VMM_IsUserRange((void *)(uintptr_t)test_pages[0], 1, 0) ||
         VMM_IsUserRange((void *)(uintptr_t)test_pages[1], 1, 0))
@@ -322,9 +333,12 @@ void usermode_launch(void) {
         uint64_t page_flags = PAGE_USER | PAGE_PRESENT;
         if (ph->p_flags & PF_W) page_flags |= PAGE_WRITE;
 
+        // ELF pages need to be writable while the kernel clears BSS and copies
+        // file contents. Apply the segment's final write permission afterward.
+        uint64_t load_flags = page_flags | PAGE_WRITE;
         for (uint64_t va = start; va < end; va += PAGE_SIZE) {
             void *pa = PMM_AllocatePage();
-            if (!pa || !VMM_MapPage((void *)(uintptr_t)va, pa, page_flags)) {
+            if (!pa || !VMM_MapPage((void *)(uintptr_t)va, pa, load_flags)) {
                 if (pa) PMM_FreePage(pa);
                 rollback_user_pages(mapped_pages, mapped_count);
                 kfree(mapped_pages);
@@ -338,6 +352,20 @@ void usermode_launch(void) {
 
         mem_copy((void *)(uintptr_t)ph->p_vaddr,
                  (const uint8_t *)elf_data + ph->p_offset, ph->p_filesz);
+
+        // Restore ELF PT_LOAD write permissions after loading. Executable and
+        // read-only data segments remain supervisor-writable only temporarily.
+        if (!(ph->p_flags & PF_W)) {
+            for (uint64_t va = start; va < end; va += PAGE_SIZE) {
+                if (!VMM_SetPageWrite((void *)(uintptr_t)va, 0)) {
+                    rollback_user_pages(mapped_pages, mapped_count);
+                    kfree(mapped_pages);
+                    kfree(elf_data);
+                    serial_print("[USERMODE] unable to apply ELF segment permissions\n");
+                    return;
+                }
+            }
+        }
     }
 
     // Create a dedicated user stack.

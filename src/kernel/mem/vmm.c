@@ -123,6 +123,45 @@ int VMM_UnmapPage(void *virtual_addr, int free_physical) {
     return 1;
 }
 
+int VMM_SetPageWrite(void *virtual_addr, int writable) {
+    uint64_t v = (uint64_t)(uintptr_t)virtual_addr;
+    if (!kernel_pml4 || (v & (PAGE_SIZE - 1u)) != 0 ||
+        v >= USER_ADDRESS_LIMIT || !is_canonical(v))
+        return 0;
+
+    uint64_t i4 = (v >> 39) & 0x1FF;
+    uint64_t i3 = (v >> 30) & 0x1FF;
+    uint64_t i2 = (v >> 21) & 0x1FF;
+    uint64_t i1 = (v >> 12) & 0x1FF;
+
+    uint64_t e4 = kernel_pml4->entries[i4];
+    if ((e4 & (PAGE_PRESENT | PAGE_USER)) != (PAGE_PRESENT | PAGE_USER))
+        return 0;
+    page_table *pdpt = (page_table *)(uintptr_t)(e4 & PHYSICAL_ADDRESS_MASK);
+
+    uint64_t e3 = pdpt->entries[i3];
+    if ((e3 & (PAGE_PRESENT | PAGE_USER)) != (PAGE_PRESENT | PAGE_USER))
+        return 0;
+    page_table *pd = (page_table *)(uintptr_t)(e3 & PHYSICAL_ADDRESS_MASK);
+
+    uint64_t e2 = pd->entries[i2];
+    if ((e2 & (PAGE_PRESENT | PAGE_USER)) != (PAGE_PRESENT | PAGE_USER))
+        return 0;
+    page_table *pt = (page_table *)(uintptr_t)(e2 & PHYSICAL_ADDRESS_MASK);
+
+    uint64_t *entry = &pt->entries[i1];
+    if ((*entry & (PAGE_PRESENT | PAGE_USER)) != (PAGE_PRESENT | PAGE_USER))
+        return 0;
+
+    if (writable)
+        *entry |= PAGE_WRITE;
+    else
+        *entry &= ~PAGE_WRITE;
+
+    __asm__ volatile ("invlpg (%0)" : : "r"(virtual_addr) : "memory");
+    return 1;
+}
+
 int VMM_IsUserRange(const void *address, uint64_t length, int write_access) {
     uint64_t start = (uint64_t)(uintptr_t)address;
     if (length == 0) return 1;

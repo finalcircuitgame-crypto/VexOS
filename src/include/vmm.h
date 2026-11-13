@@ -15,6 +15,7 @@ typedef struct {
 int VMM_Init(void);
 int VMM_MapPage(void *virtual_addr, void *physical_addr, uint64_t flags);
 int VMM_UnmapPage(void *virtual_addr, int free_physical);
+int VMM_SetPageWrite(void *virtual_addr, int writable);
 int VMM_IsUserRange(const void *address, uint64_t length, int write_access);
 void VMM_Activate(void);
 page_table *VMM_GetKernelPML4(void);
