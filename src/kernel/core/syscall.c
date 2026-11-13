@@ -158,6 +158,11 @@ static void *sys_mmap(void *requested_addr, uint32_t length) {
         void *physical = PMM_AllocatePage();
         if (!physical) break;
 
+        // Never expose stale kernel/previous-process contents to ring 3.
+        uint64_t *clear_words = (uint64_t *)physical;
+        for (uint32_t word = 0; word < PAGE_SIZE / sizeof(uint64_t); word++)
+            clear_words[word] = 0;
+
         void *virtual_page = (void *)(uintptr_t)(vaddr + mapped * PAGE_SIZE);
         if (!VMM_MapPage(virtual_page, physical,
                         PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
