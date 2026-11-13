@@ -1462,6 +1462,9 @@ static void shell_run_line(void) {
     shell_append("\n");
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "specs", 5)) {
     shell_run_specs();
+#ifdef VEXOS_CI_INPUT_TEST
+    serial_print("[CI] Shell specs command executed\\n");
+#endif
   } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) ||
              (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4))) {
     shell_append("launching doom.elf...\n");
@@ -1522,6 +1525,9 @@ static void shell_run_line(void) {
     shell_append("opening notepad...\n");
     g_app_open[APP_NOTEPAD] = 1;
     g_app_focus = APP_NOTEPAD;
+#ifdef VEXOS_CI_INPUT_TEST
+    serial_print("[CI] Notepad opened by shell command\\n");
+#endif
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
     g_setup_open = 1;
@@ -2024,6 +2030,13 @@ void desktop_tick(void) {
         if (g_notepad_text_len) {
           g_notepad_text_len--;
           g_notepad_text[g_notepad_text_len] = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+          static uint8_t ci_notepad_text_seen;
+          if (!ci_notepad_text_seen) {
+            ci_notepad_text_seen = 1;
+            serial_print("[CI] Notepad received printable keyboard input\\n");
+          }
+#endif
           ui_changed = 1;
         }
       } else if (c == '\n') {
