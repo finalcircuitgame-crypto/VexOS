@@ -225,6 +225,16 @@ uint64_t syscall_handler(uint64_t rsp) {
         frame->rax = input_kbd_pop_char(&c) ? (uint64_t)(uint8_t)c : 0;
         break;
     }
+    // Returns 0 when empty, otherwise bit 16 marks a valid event,
+    // bit 8 is pressed/released, and bits 0..7 contain the HID usage.
+    case 10: {
+        input_kbd_event_t event;
+        if (input_kbd_pop_event(&event))
+            frame->rax = 0x10000ULL | ((uint64_t)event.pressed << 8) | event.usage;
+        else
+            frame->rax = 0;
+        break;
+    }
     case 9: {
         uint64_t w = frame->rsi;
         uint64_t h = frame->rdx;

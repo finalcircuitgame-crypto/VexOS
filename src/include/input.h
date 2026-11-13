@@ -4,6 +4,11 @@
 #include <stdint.h>
 
 typedef struct {
+  uint8_t usage;
+  uint8_t pressed;
+} input_kbd_event_t;
+
+typedef struct {
   int32_t x;
   int32_t y;
   int32_t dx;
@@ -23,5 +28,7 @@ input_pointer_state_t input_pointer_get(void);
 
 void input_kbd_push_char(char c);
 int input_kbd_pop_char(char *out);
+void input_kbd_push_event(uint8_t usage, int pressed);
+int input_kbd_pop_event(input_kbd_event_t *out);
 
 #endif

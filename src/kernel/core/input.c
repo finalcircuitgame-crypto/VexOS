@@ -8,6 +8,11 @@ static char g_kbd_q[256];
 static uint32_t g_kbd_r;
 static uint32_t g_kbd_w;
 
+#define KBD_EVENT_MASK 127u
+static input_kbd_event_t g_kbd_events[128];
+static uint32_t g_kbd_event_r;
+static uint32_t g_kbd_event_w;
+
 static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
   if (v < lo)
     return lo;
@@ -28,6 +33,8 @@ void input_init(uint32_t screen_w, uint32_t screen_h) {
 
   g_kbd_r = 0;
   g_kbd_w = 0;
+  g_kbd_event_r = 0;
+  g_kbd_event_w = 0;
 }
 
 void input_pointer_set_abs(int32_t x, int32_t y, uint32_t buttons) {
@@ -80,5 +87,22 @@ int input_kbd_pop_char(char *out) {
   }
   *out = g_kbd_q[g_kbd_r & 0xFFu];
   g_kbd_r = (g_kbd_r + 1u) & 0xFFu;
+  return 1;
+}
+
+void input_kbd_push_event(uint8_t usage, int pressed) {
+  uint32_t next = (g_kbd_event_w + 1u) & KBD_EVENT_MASK;
+  if (next == g_kbd_event_r)
+    return;
+  g_kbd_events[g_kbd_event_w].usage = usage;
+  g_kbd_events[g_kbd_event_w].pressed = pressed ? 1u : 0u;
+  g_kbd_event_w = next;
+}
+
+int input_kbd_pop_event(input_kbd_event_t *out) {
+  if (!out || g_kbd_event_r == g_kbd_event_w)
+    return 0;
+  *out = g_kbd_events[g_kbd_event_r];
+  g_kbd_event_r = (g_kbd_event_r + 1u) & KBD_EVENT_MASK;
   return 1;
 }
