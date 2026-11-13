@@ -52,18 +52,18 @@ jobs:
         shell: bash
         run: |
           set -e
-          OVMF_CODE="$(find /usr/share -type f -name 'OVMF_CODE*.fd' -print -quit)"
-          if [ -z "$OVMF_CODE" ]; then
-            echo "Could not locate an OVMF_CODE firmware image"
-            find /usr/share -iname '*ovmf*' -print || true
-            exit 1
-          fi
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS_TEMPLATE=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -s "$OVMF_CODE"
+          test -s "$OVMF_VARS_TEMPLATE"
+          cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
           echo "Using UEFI firmware: $OVMF_CODE"
           set +e
           timeout 25s qemu-system-x86_64 \
             -machine q35 \
             -m 512M \
-            -bios "$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
             -device qemu-xhci \
