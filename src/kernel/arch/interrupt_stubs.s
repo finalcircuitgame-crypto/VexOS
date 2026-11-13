@@ -99,7 +99,8 @@ irq0_stub:
     /* Save all registers */
     PUSH_GPRS
 
-    mov %rsp, %rdi /* Pass stack pointer as argument */
+    mov %rsp, %rdi /* Pass original interrupt frame */
+    andq $-16, %rsp /* Align the temporary C call stack per SysV ABI */
     call irq0_handler
 
     /* If irq0_handler returns a new RSP, switch to it */
