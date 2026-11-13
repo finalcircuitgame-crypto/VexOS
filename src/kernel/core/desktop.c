@@ -1586,6 +1586,8 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
     g_setup_open = 1;
+    g_app_open[APP_SETUP] = 1;
+    app_raise(APP_SETUP);
     g_setup_step = 0;
   } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "wall", 4)) {
     shell_append("wall: loading new.png...\n");
@@ -2287,6 +2289,7 @@ void desktop_tick(void) {
         int32_t list_w = ww - 16;
         int32_t list_h = wh - 32;
         if (hit_test(p0.x, p0.y, list_x, list_y, list_w, list_h)) {
+          app_raise(APP_EXPLORER);
           uint32_t row_h = 10u;
           uint32_t idx = g_explorer_scroll +
                          (uint32_t)((p0.y - list_y) / (int32_t)row_h);
@@ -2422,6 +2425,7 @@ void desktop_tick(void) {
         g_setup_dragging = 1;
         g_setup_drag_off_x = p0.x - wx;
         g_setup_drag_off_y = p0.y - wy;
+        app_raise(APP_SETUP);
         ui_changed = 1;
       }
       // Back button
