@@ -118,6 +118,7 @@ static uint64_t ci_runtime_stack_a[512] __attribute__((aligned(16)));
 static uint64_t ci_runtime_stack_b[512] __attribute__((aligned(16)));
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
+static volatile int ci_runtime_setup_ok;
 
 static void ci_runtime_task_a(void) {
   for (;;) {
@@ -136,15 +137,14 @@ static void ci_runtime_task_b(void) {
 void Task_CI_StartRuntimeTest(void) {
   ci_runtime_count_a = 0;
   ci_runtime_count_b = 0;
+  ci_runtime_setup_ok = 0;
   Task_Create(ci_runtime_task_a, &ci_runtime_stack_a[512]);
   Task_Create(ci_runtime_task_b, &ci_runtime_stack_b[512]);
-  if (task_count != 3) {
-    ci_runtime_count_a = UINT64_MAX;
-    ci_runtime_count_b = UINT64_MAX;
-  }
+  ci_runtime_setup_ok = (task_count == 3);
 }
 
 int Task_CI_RuntimeTestPassed(void) {
-  return ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
+  return ci_runtime_setup_ok &&
+         ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
 }
 #endif
