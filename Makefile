@@ -21,6 +21,11 @@ LDFLAGS_EFI = -nostdlib -znocombreloc -T $(EFI_LIB)/elf_x86_64_efi.lds -shared -
 
 # Kernel Flags
 CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
+
+# CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
+ifeq ($(VEXOS_CI),1)
+CFLAGS_KERNEL += -DVEXOS_CI_SKIP_WIZARD -DVEXOS_CI_INPUT_TEST
+endif
 LDFLAGS_KERNEL = -nostdlib -T $(KERNELDIR)/linker.ld -z max-page-size=0x1000
 
 # Targets
