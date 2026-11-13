@@ -37,7 +37,7 @@ jobs:
       - name: Clean build bootloader, kernel, and disk images
         run: |
           make clean
-          make -j2 all
+          make VEXOS_CI=1 -j2 all
 
       - name: Verify build artifacts
         run: |
@@ -48,7 +48,7 @@ jobs:
           file dist/BOOTX64.EFI dist/kernel.elf dist/tiny64.img dist/storage.img
           readelf -h dist/kernel.elf
 
-      - name: Boot UEFI image in QEMU through the interactive setup wizard
+      - name: Boot desktop in QEMU and inject USB keyboard input
         shell: bash
         run: |
           set -e
@@ -57,47 +57,124 @@ jobs:
           test -s "$OVMF_CODE"
           test -s "$OVMF_VARS_TEMPLATE"
           cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
-          echo "Using UEFI firmware: $OVMF_CODE"
-          set +e
-          timeout 25s qemu-system-x86_64 \
+          rm -f /tmp/vexos-qmp.sock serial.log qemu.log
+
+          qemu-system-x86_64 \
             -machine q35 \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
-            -device qemu-xhci \
+            -device qemu-xhci,id=xhci \
+            -device usb-kbd,bus=xhci.0 \
             -display none \
             -monitor none \
             -serial file:serial.log \
-            -no-reboot -no-shutdown
-          qemu_status=$?
-          set -e
-          if [ "$qemu_status" -ne 0 ] && [ "$qemu_status" -ne 124 ]; then
-            echo "QEMU exited unexpectedly: $qemu_status"
-            cat serial.log || true
-            exit 1
-          fi
-          if ! grep -q "\[KERNEL\] Entered kernel_main" serial.log; then
-            echo "Kernel entry marker not found. Serial output:"
-            cat serial.log || true
-            exit 1
-          fi
-          for marker in \
-            "[KERNEL] Heap Initialized Successfully." \
-            "[PCI] Enumeration Complete" \
-            "[xHCI] Controller Running" \
-            "[KERNEL] Starting Fullscreen Setup Wizard..."; do
-            if ! grep -Fq "$marker" serial.log; then
-              echo "Expected boot marker missing: $marker"
+            -qmp unix:/tmp/vexos-qmp.sock,server=on,wait=off \
+            -no-reboot -no-shutdown >qemu.log 2>&1 &
+          qemu_pid=$!
+          cleanup() {
+            kill "$qemu_pid" 2>/dev/null || true
+            wait "$qemu_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          echo "Waiting for VexOS desktop and main loop..."
+          for i in $(seq 1 200); do
+            if grep -Fq "[KERNEL] Starting main loop" serial.log 2>/dev/null; then
+              break
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before reaching the desktop."
+              cat qemu.log || true
               cat serial.log || true
               exit 1
             fi
+            sleep 0.1
           done
-          if grep -q "\[KERNEL\] FATAL:" serial.log; then
+
+          for marker in \
+            "[KERNEL] Entered kernel_main" \
+            "[KERNEL] Heap Initialized Successfully." \
+            "[PCI] Enumeration Complete" \
+            "[xHCI] Controller Running" \
+            "[CI] Setup wizard skipped for automated desktop test" \
+            "[KERNEL] Desktop initialized" \
+            "[KERNEL] Starting main loop"; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Expected boot marker missing: $marker"
+              cat serial.log || true
+              cat qemu.log || true
+              exit 1
+            fi
+          done
+
+          echo "Injecting a key through QEMU's emulated USB keyboard..."
+          python3 - <<'PY'
+          import json
+          import socket
+          import time
+
+          path = "/tmp/vexos-qmp.sock"
+          deadline = time.time() + 15
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          while True:
+              try:
+                  sock.connect(path)
+                  break
+              except (FileNotFoundError, ConnectionRefusedError):
+                  if time.time() >= deadline:
+                      raise
+                  time.sleep(0.1)
+
+          stream = sock.makefile("r", encoding="utf-8")
+          greeting = json.loads(stream.readline())
+          if "QMP" not in greeting:
+              raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
+
+          def command(payload):
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
+              while True:
+                  response = json.loads(stream.readline())
+                  if "return" in response:
+                      return response["return"]
+                  if "error" in response:
+                      raise RuntimeError(response["error"])
+
+          command({"execute": "qmp_capabilities"})
+          command({
+              "execute": "send-key",
+              "arguments": {
+                  "keys": [{"type": "qcode", "data": "a"}],
+                  "hold-time": 100
+              }
+          })
+          stream.close()
+          sock.close()
+          print("QMP successfully injected USB keyboard key 'a'.")
+          PY
+
+          echo "Waiting for the character to reach desktop input..."
+          for i in $(seq 1 100); do
+            if grep -Fq "[CI] Keyboard character reached desktop input queue" serial.log; then
+              break
+            fi
+            sleep 0.1
+          done
+
+          if ! grep -Fq "[CI] Keyboard character reached desktop input queue" serial.log; then
+            echo "USB keyboard input did not reach desktop_tick."
+            cat serial.log || true
+            cat qemu.log || true
+            exit 1
+          fi
+
+          if grep -Fq "[KERNEL] FATAL:" serial.log; then
             echo "Kernel reported a fatal error:"
             cat serial.log
             exit 1
           fi
-          echo "UEFI boot smoke test passed; kernel initialized memory, PCI, xHCI, and entered the interactive setup wizard."
-          tail -c 4000 serial.log
+
+          echo "PASS: UEFI boot, desktop initialization, main loop, and injected USB keyboard input."
+          tail -c 5000 serial.log
