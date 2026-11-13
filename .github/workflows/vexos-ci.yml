@@ -210,6 +210,15 @@ jobs:
                   }
               })
               time.sleep(0.25)
+          for key in ["s", "p", "e", "c", "s", "ret", "n", "o", "t", "e", "p", "a", "d", "ret", "v", "e", "x"]:
+              command({
+                  "execute": "send-key",
+                  "arguments": {
+                      "keys": [{"type": "qcode", "data": key}],
+                      "hold-time": 100
+                  }
+              })
+              time.sleep(0.25)
               command({
                   "execute": "send-key",
                   "arguments": {
@@ -233,6 +242,9 @@ jobs:
             "[CI] Shell command submitted through keyboard"
             "[CI] Shell help command executed"
             "[CI] Shell mem command executed"
+            "[CI] Shell specs command executed"
+            "[CI] Notepad opened by shell command"
+            "[CI] Notepad received printable keyboard input"
           )
           for i in $(seq 1 150); do
             all_seen=1
