@@ -275,7 +275,7 @@ static void ci_install_ring3_elf_fixture(void) {
 
   // mov eax, 1; mov edi, 0x400020; mov esi, message_len;
   // int 0x80; mov eax, 0; int 0x80; jmp $.
-  uint8_t code[code_len] = {
+  uint8_t code[26] = {
       0xB8, 0x01, 0x00, 0x00, 0x00,
       0xBF, 0x20, 0x00, 0x40, 0x00,
       0xBE, 0, 0, 0, 0,
