@@ -355,13 +355,26 @@ static void launch_ring3_task(void) {
     return;
   g_ring3_task_started = 1;
 
-  void *stack = kmalloc(8192);
-  if (!stack) {
-    shell_append("ring3: no mem\n");
+  // The user-mode loader reads doom.elf from the mounted storage volume.
+  if (!simplefs_init()) {
+    shell_append("ring3: storage mount failed\\n");
     g_ring3_task_started = 0;
     return;
   }
 
+  uint32_t elf_size = 0;
+  if (!simplefs_file_size("doom.elf", &elf_size) || elf_size == 0) {
+    shell_append("ring3: doom.elf not found\\n");
+    g_ring3_task_started = 0;
+    return;
+  }
+
+  void *stack = kmalloc(8192);
+  if (!stack) {
+    shell_append("ring3: no mem\\n");
+    g_ring3_task_started = 0;
+    return;
+  }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
   Task_Create(usermode_launch, stack_top);
