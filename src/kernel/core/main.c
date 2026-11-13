@@ -837,6 +837,7 @@ void kernel_main(BootInfo *bootInfo) {
 #ifdef VEXOS_CI_INPUT_TEST
   extern void Task_CI_StartRuntimeTest(void);
   extern int Task_CI_RuntimeTestPassed(void);
+  extern uint64_t Task_CI_RuntimeBadFrameCS(void);
   Task_CI_StartRuntimeTest();
 #endif
   serial_print("[KERNEL] Task_Init done\n");
@@ -884,6 +885,10 @@ void kernel_main(BootInfo *bootInfo) {
 #ifdef VEXOS_CI_INPUT_TEST
     if (!ci_task_runtime_reported && Task_CI_RuntimeTestPassed()) {
       serial_print("[CI] IRQ0 preempted and executed both runtime tasks\n");
+      ci_task_runtime_reported = 1;
+    }
+    if (!ci_task_runtime_reported && Task_CI_RuntimeBadFrameCS() != 0) {
+      serial_print("[CI] IRQ scheduler rejected an invalid task CS frame\n");
       ci_task_runtime_reported = 1;
     }
 #endif
