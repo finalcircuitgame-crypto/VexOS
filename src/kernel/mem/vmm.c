@@ -47,7 +47,8 @@ int VMM_MapPage(void *virtual_addr, void *physical_addr, uint64_t flags) {
     uint64_t p = (uint64_t)(uintptr_t)physical_addr;
 
     if (!kernel_pml4 || (v & (PAGE_SIZE - 1u)) != 0 ||
-        (p & (PAGE_SIZE - 1u)) != 0 || !is_canonical(v)) {
+        (p & (PAGE_SIZE - 1u)) != 0 || (p & ~PHYSICAL_ADDRESS_MASK) != 0 ||
+        !is_canonical(v)) {
         return 0;
     }
     if ((flags & PAGE_USER) && v >= USER_ADDRESS_LIMIT) return 0;
@@ -112,6 +113,7 @@ int VMM_UnmapPage(void *virtual_addr, int free_physical) {
 
     uint64_t entry = pt->entries[i1];
     if (!(entry & PAGE_PRESENT)) return 0;
+    if (free_physical && !(entry & PAGE_USER)) return 0;
 
     pt->entries[i1] = 0;
     __asm__ volatile ("invlpg (%0)" : : "r"(virtual_addr) : "memory");
