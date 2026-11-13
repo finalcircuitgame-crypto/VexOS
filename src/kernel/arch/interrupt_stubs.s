@@ -1,6 +1,8 @@
 .extern irq0_handler
 .extern syscall_handler
 .extern exception_handler
+.extern irq0_bad_frame_handler
+.extern irq0_debug_frame_once
 .global irq0_stub
 .global syscall_stub
 .global isr0_stub
@@ -99,14 +101,27 @@ irq0_stub:
     /* Save all registers */
     PUSH_GPRS
 
-    mov %rsp, %rdi /* Pass stack pointer as argument */
+    mov %rsp, %rdi /* Pass original interrupt frame */
+    andq $-16, %rsp /* Align the temporary C call stack per SysV ABI */
     call irq0_handler
 
-    /* If irq0_handler returns a new RSP, switch to it */
+    /* Log the first selected frame in CI, then switch to it. */
+    mov %rax, %rdi
+    call irq0_debug_frame_once
     mov %rax, %rsp
 
+    /* Validate the actual frame that will be consumed by IRETQ. */
+    cmpq $0x08, 128(%rsp)
+    je 1f
+    cmpq $0x1B, 128(%rsp)
+    je 1f
+    mov %rsp, %rdi
+    andq $-16, %rsp
+    call irq0_bad_frame_handler
+    cli
+    hlt
+1:
     POP_GPRS
-    
     iretq
 
 ISR_NOERR 0

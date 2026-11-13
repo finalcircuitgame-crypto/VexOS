@@ -8,6 +8,10 @@ extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 static Task tasks[10];
 static int task_count = 0;
 static int current_task = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+static volatile uint64_t ci_runtime_bad_frame_cs;
+static volatile int ci_runtime_setup_ok;
+#endif
 
 void Task_Init() {
   // Current execution becomes Task 0
@@ -17,20 +21,25 @@ void Task_Init() {
 }
 
 void Task_Create(void (*entry)(), void *stack_top) {
-  if (task_count >= 10)
+  if (!entry || !stack_top || task_count >= 10)
     return;
 
+  // The interrupt stub restores 15 GPRs, then executes IRETQ.
+  // In 64-bit mode the IRET frame includes RIP, CS, RFLAGS, RSP and SS.
+  // Put a fake return address at the top of the task stack so the initial
+  // RSP has the SysV x86-64 function-entry alignment (RSP % 16 == 8).
   uint64_t *stack = (uint64_t *)stack_top;
+  *(--stack) = 0; // Fake return address if entry returns.
+  uint64_t initial_rsp = (uint64_t)(uintptr_t)stack;
 
-  // iretq frame: x86-64 iretq ALWAYS pops all 5 values, even for
-  // same-privilege returns. Push them in reverse order (SS first).
-  *(--stack) = 0x10;                // SS  (kernel data)
-  *(--stack) = (uint64_t)stack_top; // RSP (clean stack for the new task)
-  *(--stack) = 0x202;               // RFLAGS (IF=1)
-  *(--stack) = 0x08;                // CS  (kernel code)
-  *(--stack) = (uint64_t)entry;     // RIP
+  // Build the IRETQ frame in reverse push order.
+  *(--stack) = 0x10;          // SS (kernel data segment).
+  *(--stack) = initial_rsp;   // RSP after IRETQ.
+  *(--stack) = 0x202;         // RFLAGS (interrupts enabled).
+  *(--stack) = 0x08;          // CS (kernel code segment).
+  *(--stack) = (uint64_t)(uintptr_t)entry; // RIP.
 
-  // Push dummy registers for PUSH_GPRS (15 registers)
+  // PUSH_GPRS saves/restores these 15 registers in the interrupt stub.
   for (int i = 0; i < 15; i++) {
     *(--stack) = 0;
   }
@@ -40,11 +49,64 @@ void Task_Create(void (*entry)(), void *stack_top) {
   task_count++;
 }
 
+
+uint64_t Task_Schedule(uint64_t current_rsp);
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_task_entry(void) {}
+
+int Task_CI_SelfTest(void) {
+  static uint64_t test_stack[64] __attribute__((aligned(16)));
+
+  Task_Init();
+  Task_Create(NULL, &test_stack[64]);
+  Task_Create(ci_task_entry, NULL);
+  if (task_count != 1)
+    return 0;
+
+  Task_Create(ci_task_entry, &test_stack[64]);
+  if (task_count != 2)
+    return 0;
+
+  uint64_t next_rsp = Task_Schedule(0x1111u);
+  if (!next_rsp || (next_rsp & 15u) != 8u)
+    return 0;
+
+  const uint64_t *frame = (const uint64_t *)(uintptr_t)next_rsp;
+  for (uint32_t i = 0; i < 15u; i++) {
+    if (frame[i] != 0)
+      return 0;
+  }
+  if (frame[15] != (uint64_t)(uintptr_t)ci_task_entry ||
+      frame[16] != 0x08u || frame[17] != 0x202u ||
+      frame[18] != (uint64_t)(uintptr_t)&test_stack[63] ||
+      frame[19] != 0x10u)
+    return 0;
+
+  if (Task_Schedule(0x2222u) != 0x1111u)
+    return 0;
+
+  // Restore the normal one-task state before kernel_main initializes tasks.
+  Task_Init();
+  return 1;
+}
+#endif
+
 uint64_t Task_Schedule(uint64_t current_rsp) {
   tasks[current_task].rsp = current_rsp;
   for (int i = 0; i < task_count; i++) {
     int next = (current_task + 1 + i) % task_count;
     if (tasks[next].active) {
+#ifdef VEXOS_CI_INPUT_TEST
+      if (ci_runtime_setup_ok && task_count > 1 && tasks[next].rsp) {
+        const uint64_t *frame =
+            (const uint64_t *)(uintptr_t)tasks[next].rsp;
+        if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
+          ci_runtime_bad_frame_cs = frame[16];
+          return current_rsp;
+        }
+      }
+#endif
       current_task = next;
       return tasks[current_task].rsp;
     }
@@ -68,3 +130,80 @@ uint64_t Task_Exit(uint64_t current_rsp) {
     __asm__ volatile("hlt");
   }
 }
+
+
+#ifdef VEXOS_CI_INPUT_TEST
+// Runtime proof that IRQ0 actually restores and executes multiple task stacks.
+// The timer interrupt must preempt each worker and resume the other worker.
+static volatile uint64_t ci_runtime_count_a;
+static volatile uint64_t ci_runtime_count_b;
+
+static void ci_runtime_task_a(void) {
+  for (;;) {
+    ci_runtime_count_a++;
+    __asm__ volatile("pause");
+  }
+}
+
+static void ci_runtime_task_b(void) {
+  for (;;) {
+    ci_runtime_count_b++;
+    __asm__ volatile("pause");
+  }
+}
+
+void Task_CI_StartRuntimeTest(void) {
+  ci_runtime_count_a = 0;
+  ci_runtime_count_b = 0;
+  ci_runtime_setup_ok = 0;
+  ci_runtime_bad_frame_cs = 0;
+
+  // Allocate worker stacks from the initialized, identity-mapped kernel heap.
+  // This avoids relying on the boot-time identity-map window covering .bss.
+  void *stack_a = kmalloc(4096u);
+  void *stack_b = kmalloc(4096u);
+  if (!stack_a || !stack_b) {
+    if (stack_a) kfree(stack_a);
+    if (stack_b) kfree(stack_b);
+    return;
+  }
+
+  Task_Create(ci_runtime_task_a, (uint8_t *)stack_a + 4096u);
+  Task_Create(ci_runtime_task_b, (uint8_t *)stack_b + 4096u);
+  ci_runtime_setup_ok = (task_count == 3);
+
+  if (ci_runtime_setup_ok) {
+    const uint64_t *frame_a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
+    const uint64_t *frame_b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
+    ci_runtime_setup_ok =
+        frame_a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
+        frame_a[16] == 0x08u && frame_a[17] == 0x202u &&
+        frame_a[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_a + 4096u - sizeof(uint64_t)) &&
+        frame_a[19] == 0x10u &&
+        frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
+        frame_b[16] == 0x08u && frame_b[17] == 0x202u &&
+        frame_b[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_b + 4096u - sizeof(uint64_t)) &&
+        frame_b[19] == 0x10u;
+  }
+
+  extern void serial_print(const char *str);
+  serial_print(ci_runtime_setup_ok
+      ? "[CI] Runtime task IRET frames validated\\n"
+      : "[CI] Runtime task IRET frame validation failed\\n");
+  if (!ci_runtime_setup_ok) {
+    // Keep the rest of the desktop CI alive if fixture validation fails.
+    Task_Init();
+  }
+}
+
+int Task_CI_RuntimeTestPassed(void) {
+  return ci_runtime_setup_ok &&
+         ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
+}
+#endif
+
+#ifdef VEXOS_CI_INPUT_TEST
+uint64_t Task_CI_RuntimeBadFrameCS(void) {
+  return ci_runtime_bad_frame_cs;
+}
+#endif

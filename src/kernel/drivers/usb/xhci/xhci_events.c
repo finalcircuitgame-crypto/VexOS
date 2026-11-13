@@ -233,16 +233,27 @@ void xhci_poll_events() {
             uint8_t shift = (uint8_t)(((mod & 0x02u) || (mod & 0x20u)) ? 1u : 0u);
             const uint8_t *keys = &r[2];
 
+            // Preserve character input for the shell and also expose raw
+            // HID transitions to applications such as DoomGeneric.
             for (uint32_t i = 0; i < 6; i++) {
               uint8_t k = keys[i];
-              if (!k)
-                continue;
-              if (!xhci_kbd_has_key(dev->kbd_prev_keys, k)) {
+              if (k && !xhci_kbd_has_key(dev->kbd_prev_keys, k)) {
+                input_kbd_push_event(k, 1);
                 char c = xhci_kbd_keycode_to_ascii(k, shift);
-                if (c) {
+                if (c)
                   input_kbd_push_char(c);
-                }
               }
+            }
+            for (uint32_t i = 0; i < 6; i++) {
+              uint8_t k = dev->kbd_prev_keys[i];
+              if (k && !xhci_kbd_has_key(keys, k))
+                input_kbd_push_event(k, 0);
+            }
+            for (uint32_t bit = 0; bit < 8; bit++) {
+              uint8_t mask = (uint8_t)(1u << bit);
+              if ((mod & mask) != (dev->kbd_prev_mod & mask))
+                input_kbd_push_event((uint8_t)(0xE0u + bit),
+                                     (mod & mask) != 0);
             }
 
             dev->kbd_prev_mod = mod;

@@ -1,0 +1,381 @@
+name: VexOS CI
+
+on:
+  push:
+    branches: [main, fix/filesystem-return-checks]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source and Doom submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and VM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb
+
+      - name: Verify UEFI toolchain paths
+        run: |
+          test -f /usr/include/efi/efi.h
+          test -f /usr/lib/crt0-efi-x86_64.o
+          test -f /usr/lib/elf_x86_64_efi.lds
+          command -v mformat
+          command -v mcopy
+          command -v qemu-system-x86_64
+
+      - name: Build normal and CI-instrumented bootloader, kernel, and disk images
+        run: |
+          # First compile the exact default configuration used outside CI.
+          make clean
+          make -j2 all
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+
+          # Compile the separate ring-3 DoomGeneric ELF (no WAD is bundled).
+          make doom
+          test -s dist/doom.elf
+          readelf -h dist/doom.elf | grep -q 'EXEC'
+
+          # Then rebuild with CI-only wizard/input instrumentation for QEMU tests.
+          make clean
+          make VEXOS_CI=1 -j2 all
+
+      - name: Verify build artifacts
+        run: |
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+          file dist/BOOTX64.EFI dist/kernel.elf dist/tiny64.img dist/storage.img
+          readelf -h dist/kernel.elf
+          echo "Kernel test symbol addresses:"
+          nm -n dist/kernel.elf | grep -E 'irq0_stub|irq0_handler|Task_Schedule|ci_runtime_task_[ab]|Task_CI_StartRuntimeTest' || true
+          echo "IRQ0 stub disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<irq0_stub>:/,/^$/p'
+          echo "IRQ0 handler disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<irq0_handler>:/,/^$/p'
+          echo "Task scheduler disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<Task_Schedule>:/,/^$/p'
+
+      - name: Boot desktop in QEMU and inject USB keyboard input
+        shell: bash
+        run: |
+          set -e
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS_TEMPLATE=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -s "$OVMF_CODE"
+          test -s "$OVMF_VARS_TEMPLATE"
+
+          # Prepare a minimal SFS1 disk with one known file for ATA/SimpleFS tests.
+          python3 - <<'PY'
+          import struct
+
+          image = "dist/storage.img"
+          payload = bytes((i * 37 + 11) & 0xFF for i in range(700))
+          superblock = struct.pack(
+              "<8I", 0x31465353, 1, 1, 8, 9, 11, 1, 0
+          )
+          table = bytearray(8 * 512)
+          entry = struct.pack(
+              "<B32sIII", 1, b"ci.txt".ljust(32, b"\0"), 9, len(payload), 0
+          )
+          table[:len(entry)] = entry
+          with open(image, "r+b") as disk:
+              disk.seek(0)
+              disk.write(superblock)
+              disk.write(bytes(512 - len(superblock)))
+              disk.seek(512)
+              disk.write(table)
+              disk.seek(9 * 512)
+              disk.write(payload.ljust(1024, b"\0"))
+          PY
+
+          cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
+          mkdir -p artifacts
+          rm -f artifacts/*.png /tmp/vexos-qmp.sock serial.log qemu.log
+
+          xvfb-run -a qemu-system-x86_64 \
+            -machine pc \
+            -m 512M \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device qemu-xhci,id=xhci \
+            -device usb-kbd,bus=xhci.0 \
+            -device usb-tablet,bus=xhci.0 \
+            -display sdl \
+            -monitor none \
+            -serial file:serial.log \
+            -qmp unix:/tmp/vexos-qmp.sock,server=on,wait=off \
+            -d int,cpu_reset -D qemu-debug.log \
+            -no-reboot -no-shutdown >qemu.log 2>&1 &
+          qemu_pid=$!
+          cleanup() {
+            kill "$qemu_pid" 2>/dev/null || true
+            wait "$qemu_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          echo "Waiting for VexOS desktop and main loop..."
+          for i in $(seq 1 200); do
+            if grep -Fq "[KERNEL] Starting main loop" serial.log 2>/dev/null; then
+              break
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before reaching the desktop."
+              cat qemu.log || true
+              cat serial.log || true
+              exit 1
+            fi
+            sleep 0.1
+          done
+
+          for marker in \
+            "[KERNEL] Entered kernel_main" \
+            "[KERNEL] Heap Initialized Successfully." \
+            "[CI] Heap allocator alignment/free/coalesce passed" \
+            "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
+            "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
+            "[CI] ELF header/segment validation and rollback passed" \
+            "[CI] Task IRET frame and scheduler checks passed" \
+            "[CI] Runtime task IRET frames validated" \
+            "[CI] Successful framebuffer syscall draw passed" \
+            "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
+            "[PCI] Enumeration Complete" \
+            "[xHCI] Controller Running" \
+            "[CI] Setup wizard skipped for automated desktop test" \
+            "[KERNEL] Desktop initialized" \
+            "[KERNEL] Starting main loop"; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Expected boot marker missing: $marker"
+              cat serial.log || true
+              cat qemu.log || true
+              tail -c 12000 qemu-debug.log || true
+              exit 1
+            fi
+          done
+
+          echo "Injecting a key through QEMU's emulated USB keyboard..."
+          python3 - <<'PY'
+          import json
+          import socket
+          import time
+
+          path = "/tmp/vexos-qmp.sock"
+          deadline = time.time() + 15
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          while True:
+              try:
+                  sock.connect(path)
+                  break
+              except (FileNotFoundError, ConnectionRefusedError):
+                  if time.time() >= deadline:
+                      raise
+                  time.sleep(0.1)
+
+          stream = sock.makefile("r", encoding="utf-8")
+          greeting = json.loads(stream.readline())
+          if "QMP" not in greeting:
+              raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
+
+          def command(payload):
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
+              while True:
+                  response = json.loads(stream.readline())
+                  if "return" in response:
+                      return response["return"]
+                  if "error" in response:
+                      print("QMP command failed:", response["error"])
+                      try:
+                          print("=== serial.log ===")
+                          print(open("serial.log", encoding="utf-8", errors="replace").read())
+                          print("=== qemu.log ===")
+                          print(open("qemu.log", encoding="utf-8", errors="replace").read())
+                          print("=== qemu-debug.log tail ===")
+                          print(open("qemu-debug.log", encoding="utf-8", errors="replace").read()[-12000:])
+                      except OSError as exc:
+                          print("Could not read debug output:", exc)
+                      raise RuntimeError(response["error"])
+
+          command({"execute": "qmp_capabilities"})
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/01-desktop.png"}})
+          command({
+              "execute": "send-key",
+              "arguments": {
+                  "keys": [{"type": "qcode", "data": "a"}],
+                  "hold-time": 100
+              }
+          })
+          # Move the absolute USB tablet pointer onto the taskbar Start button.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 1200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 32000}}
+              ]}
+          })
+          time.sleep(0.2)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          # Capture the opened Start menu before selecting Shell.
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/02-start-menu.png"}})
+          # Select the first Start-menu item (Shell).
+          time.sleep(0.2)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 1200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 25000}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          # Capture Shell before exercising its commands.
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/03-shell.png"}})
+          # Exercise shell commands, then open Notepad and type into it.
+          sequences = [
+              ["h", "e", "l", "p", "ret"],
+              ["m", "e", "m", "ret"],
+              ["s", "p", "e", "c", "s", "ret"],
+              ["r", "i", "n", "g", "3", "ret"],
+              ["n", "o", "t", "e", "p", "a", "d", "ret"],
+              ["v", "e", "x"],
+          ]
+          for sequence in sequences:
+              for key in sequence:
+                  command({
+                      "execute": "send-key",
+                      "arguments": {
+                          "keys": [{"type": "qcode", "data": key}],
+                          "hold-time": 100
+                      }
+                  })
+                  time.sleep(0.25)
+          # Let the desktop process the final key and redraw Notepad before capture.
+          time.sleep(0.5)
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
+
+          # Open Files from the centered taskbar dock and capture the redesigned file manager.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 13200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 31600}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.5)
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/05-files.png"}})
+          stream.close()
+          sock.close()
+          print("QMP injected keyboard input, USB tablet movement, three mouse clicks, and captured five PNG screenshots.")
+          PY
+
+          echo "Waiting for keyboard, mouse movement, Start menu, and shell input..."
+          markers=(
+            "[CI] Keyboard character reached desktop input queue"
+            "[CI] IRQ0 preempted and executed both runtime tasks"
+            "[CI] Mouse pointer movement reached desktop_tick"
+            "[CI] Start menu opened by USB mouse click"
+            "[CI] Shell opened from Start menu mouse click"
+            "[CI] Shell received printable keyboard input"
+            "[CI] Shell command submitted through keyboard"
+            "[CI] Shell help command executed"
+            "[CI] Shell mem command executed"
+            "[CI] Shell specs command executed"
+            "[CI] Ring3 int80 syscall and exit passed"
+            "[USERMODE] exiting ring3"
+            "[CI] Notepad opened by shell command"
+            "[CI] Notepad accepted the full typed text vex"
+          )
+          for i in $(seq 1 150); do
+            all_seen=1
+            for marker in "${markers[@]}"; do
+              if ! grep -Fq "$marker" serial.log; then
+                all_seen=0
+                break
+              fi
+            done
+            if [ "$all_seen" -eq 1 ]; then
+              break
+            fi
+            sleep 0.1
+          done
+
+          for marker in "${markers[@]}"; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Expected input/desktop marker missing: $marker"
+              cat serial.log || true
+              cat qemu.log || true
+              tail -c 12000 qemu-debug.log || true
+              exit 1
+            fi
+          done
+
+          if grep -Fq "[KERNEL] FATAL:" serial.log; then
+            echo "Kernel reported a fatal error:"
+            cat serial.log
+            exit 1
+          fi
+
+          echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, and typed command."
+          tail -c 5000 serial.log
+
+      - name: Upload QEMU desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vexos-qemu-screenshots
+          path: artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 7

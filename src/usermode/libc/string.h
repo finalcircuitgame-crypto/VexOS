@@ -17,5 +17,8 @@ char* strstr(const char* haystack, const char* needle);
 char* strchr(const char* s, int c);
 char* strrchr(const char* s, int c);
 char* strcat(char* dest, const char* src);
+char* strdup(const char* src);
+int strcasecmp(const char* a, const char* b);
+int strncasecmp(const char* a, const char* b, size_t n);
 
 #endif

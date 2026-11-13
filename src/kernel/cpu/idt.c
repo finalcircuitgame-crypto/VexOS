@@ -1,6 +1,7 @@
 #include "../../include/idt.h"
 #include "../../include/interrupts.h"
 #include <stdint.h>
+extern void serial_print(const char *str);
 
 __attribute__((aligned(0x10))) static struct IDTEntry idt[256];
 static struct IDTR idtr;
@@ -104,4 +105,51 @@ void SetupIDT() {
   SetIDTGate(0x80, syscall_stub, 0xEE);
 
   __asm__ volatile("lidt %0" : : "m"(idtr));
+}
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_serial_hex64(uint64_t value) {
+  static const char digits[] = "0123456789ABCDEF";
+  char out[17];
+  for (int i = 15; i >= 0; i--) {
+    out[15 - i] = digits[(value >> (i * 4)) & 0xFu];
+  }
+  out[16] = 0;
+  serial_print(out);
+}
+#endif
+
+void irq0_bad_frame_handler(uint64_t rsp) {
+#ifdef VEXOS_CI_INPUT_TEST
+  const uint64_t *frame = (const uint64_t *)(uintptr_t)rsp;
+  serial_print("[CI] IRQ0 returned invalid frame: RIP=");
+  ci_serial_hex64(frame[15]);
+  serial_print(" CS=");
+  ci_serial_hex64(frame[16]);
+  serial_print(" RFLAGS=");
+  ci_serial_hex64(frame[17]);
+  serial_print("\\n");
+#else
+  (void)rsp;
+#endif
+}
+
+uint64_t irq0_debug_frame_once(uint64_t rsp) {
+#ifdef VEXOS_CI_INPUT_TEST
+  static int logged;
+  if (!logged && rsp) {
+    const uint64_t *frame = (const uint64_t *)(uintptr_t)rsp;
+    serial_print("[CI] IRQ0 target frame RIP=");
+    ci_serial_hex64(frame[15]);
+    serial_print(" CS=");
+    ci_serial_hex64(frame[16]);
+    serial_print(" RFLAGS=");
+    ci_serial_hex64(frame[17]);
+    serial_print(" NEXT=");
+    ci_serial_hex64(frame[18]);
+    serial_print("\\n");
+    logged = 1;
+  }
+#endif
+  return rsp;
 }

@@ -3,119 +3,343 @@
 #include <elf.h>
 #include "bootinfo.h"
 
-EFI_FILE *LoadFile(EFI_FILE *Directory, CHAR16 *Path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-    EFI_FILE *LoadedFile;
-    EFI_LOADED_IMAGE_PROTOCOL *LoadedImage;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *FileSystem;
+#define ELF_MAX_LOAD_SEGMENTS 128u
+#define ELF_PF_X 1u
+#define ELF_PT_LOAD 1u
 
-    SystemTable->BootServices->HandleProtocol(ImageHandle, &gEfiLoadedImageProtocolGuid, (void**)&LoadedImage);
-    SystemTable->BootServices->HandleProtocol(LoadedImage->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (void**)&FileSystem);
+typedef struct {
+    EFI_PHYSICAL_ADDRESS base;
+    UINTN pages;
+} LoadedSegment;
 
-    if (Directory == NULL) {
-        FileSystem->OpenVolume(FileSystem, &Directory);
-    }
+static EFI_STATUS LoadKernelFile(EFI_HANDLE image_handle,
+                                 EFI_SYSTEM_TABLE *system_table,
+                                 void **out_buffer, UINTN *out_size) {
+    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *filesystem = NULL;
+    EFI_FILE *root = NULL;
+    EFI_FILE *file = NULL;
+    EFI_FILE_INFO *file_info = NULL;
+    UINTN info_size = 0;
+    void *buffer = NULL;
+    EFI_STATUS status;
 
-    EFI_STATUS Status = Directory->Open(Directory, &LoadedFile, Path, EFI_FILE_MODE_READ, EFI_FILE_READ_ONLY);
-    if (EFI_ERROR(Status)) {
-        return NULL;
-    }
-    return LoadedFile;
-}
+    if (!out_buffer || !out_size) return EFI_INVALID_PARAMETER;
+    *out_buffer = NULL;
+    *out_size = 0;
 
-EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-    InitializeLib(ImageHandle, SystemTable);
-    Print(L"Tiny64 Bootloader Initializing...\n");
+    status = system_table->BootServices->HandleProtocol(
+        image_handle, &gEfiLoadedImageProtocolGuid, (void **)&loaded_image);
+    if (EFI_ERROR(status)) return status;
+    if (!loaded_image) return EFI_NOT_FOUND;
 
-    EFI_FILE *KernelFile = LoadFile(NULL, L"kernel.elf", ImageHandle, SystemTable);
-    if (KernelFile == NULL) {
-        Print(L"Error: Could not load kernel.elf\n");
-        return EFI_NOT_FOUND;
-    }
+    status = system_table->BootServices->HandleProtocol(
+        loaded_image->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid,
+        (void **)&filesystem);
+    if (EFI_ERROR(status)) return status;
+    if (!filesystem) return EFI_UNSUPPORTED;
 
-    // Get File Size
-    EFI_FILE_INFO *FileInfo;
-    UINTN FileInfoSize = 0;
-    KernelFile->GetInfo(KernelFile, &gEfiFileInfoGuid, &FileInfoSize, NULL);
-    SystemTable->BootServices->AllocatePool(EfiLoaderData, FileInfoSize, (void**)&FileInfo);
-    KernelFile->GetInfo(KernelFile, &gEfiFileInfoGuid, &FileInfoSize, FileInfo);
-    
-    UINTN KernelSize = FileInfo->FileSize;
-    void *KernelBuffer;
-    SystemTable->BootServices->AllocatePool(EfiLoaderData, KernelSize, &KernelBuffer);
-    KernelFile->Read(KernelFile, &KernelSize, KernelBuffer);
-    KernelFile->Close(KernelFile);
+    status = filesystem->OpenVolume(filesystem, &root);
+    if (EFI_ERROR(status)) return status;
+    if (!root) return EFI_NOT_FOUND;
 
-    Elf64_Ehdr *Header = (Elf64_Ehdr*)KernelBuffer;
-    if (Header->e_ident[0] != 0x7f || Header->e_ident[1] != 'E' || Header->e_ident[2] != 'L' || Header->e_ident[3] != 'F') {
-        Print(L"Error: Invalid ELF Magic\n");
+    status = root->Open(root, &file, L"kernel.elf",
+                        EFI_FILE_MODE_READ, 0);
+    root->Close(root);
+    if (EFI_ERROR(status)) return status;
+    if (!file) return EFI_NOT_FOUND;
+
+    status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL || info_size == 0) {
+        file->Close(file);
         return EFI_LOAD_ERROR;
     }
 
-    Print(L"Kernel ELF Loaded. Parsing Segments...\n");
+    status = system_table->BootServices->AllocatePool(
+        EfiLoaderData, info_size, (void **)&file_info);
+    if (EFI_ERROR(status)) {
+        file->Close(file);
+        return status;
+    }
 
-    Elf64_Phdr *Phdrs = (Elf64_Phdr*)((char*)KernelBuffer + Header->e_phoff);
-    for (int i = 0; i < Header->e_phnum; i++) {
-        Elf64_Phdr *Phdr = &Phdrs[i];
-        if (Phdr->p_type == PT_LOAD) {
-            int pages = (Phdr->p_memsz + 0x1000 - 1) / 0x1000;
-            EFI_PHYSICAL_ADDRESS SegmentAddr = Phdr->p_vaddr;
-            SystemTable->BootServices->AllocatePages(AllocateAddress, EfiLoaderData, pages, &SegmentAddr);
-            
-            // Zero out memory first (BSS)
-            SetMem((void*)SegmentAddr, Phdr->p_memsz, 0);
-            // Copy data
-            CopyMem((void*)SegmentAddr, (char*)KernelBuffer + Phdr->p_offset, Phdr->p_filesz);
+    status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, file_info);
+    if (EFI_ERROR(status) || file_info->FileSize == 0 ||
+        file_info->FileSize > (UINT64)(~(UINTN)0)) {
+        system_table->BootServices->FreePool(file_info);
+        file->Close(file);
+        return EFI_LOAD_ERROR;
+    }
+
+    UINTN file_size = (UINTN)file_info->FileSize;
+    status = system_table->BootServices->AllocatePool(
+        EfiLoaderData, file_size, &buffer);
+    system_table->BootServices->FreePool(file_info);
+    if (EFI_ERROR(status)) {
+        file->Close(file);
+        return status;
+    }
+
+    UINTN bytes_read = file_size;
+    status = file->Read(file, &bytes_read, buffer);
+    file->Close(file);
+    if (EFI_ERROR(status) || bytes_read != file_size) {
+        system_table->BootServices->FreePool(buffer);
+        return EFI_LOAD_ERROR;
+    }
+
+    *out_buffer = buffer;
+    *out_size = file_size;
+    return EFI_SUCCESS;
+}
+
+static void FreeLoadedSegments(EFI_BOOT_SERVICES *boot_services,
+                               LoadedSegment *segments, UINTN count) {
+    while (count > 0) {
+        count--;
+        boot_services->FreePages(segments[count].base, segments[count].pages);
+    }
+}
+
+static EFI_STATUS LoadElfSegments(EFI_SYSTEM_TABLE *system_table,
+                                  const void *kernel_buffer,
+                                  UINTN kernel_size,
+                                  UINT64 *entry_out) {
+    const Elf64_Ehdr *header = (const Elf64_Ehdr *)kernel_buffer;
+    const UINT8 *bytes = (const UINT8 *)kernel_buffer;
+    LoadedSegment loaded[ELF_MAX_LOAD_SEGMENTS];
+    UINTN loaded_count = 0;
+    int entry_is_executable = 0;
+
+    if (!header || kernel_size < sizeof(Elf64_Ehdr)) return EFI_LOAD_ERROR;
+    if (header->e_ident[EI_MAG0] != ELFMAG0 ||
+        header->e_ident[EI_MAG1] != ELFMAG1 ||
+        header->e_ident[EI_MAG2] != ELFMAG2 ||
+        header->e_ident[EI_MAG3] != ELFMAG3 ||
+        header->e_ident[EI_CLASS] != ELFCLASS64 ||
+        header->e_ident[EI_DATA] != ELFDATA2LSB ||
+        header->e_ident[EI_VERSION] != EV_CURRENT ||
+        header->e_type != ET_EXEC || header->e_machine != EM_X86_64 ||
+        header->e_version != EV_CURRENT ||
+        header->e_ehsize != sizeof(Elf64_Ehdr) ||
+        header->e_phentsize != sizeof(Elf64_Phdr) ||
+        header->e_phnum == 0 || header->e_phnum > ELF_MAX_LOAD_SEGMENTS) {
+        return EFI_LOAD_ERROR;
+    }
+
+    if (header->e_phoff > kernel_size) return EFI_LOAD_ERROR;
+    UINT64 ph_bytes = (UINT64)header->e_phnum * sizeof(Elf64_Phdr);
+    if (ph_bytes > (UINT64)kernel_size - header->e_phoff)
+        return EFI_LOAD_ERROR;
+
+    const Elf64_Phdr *program_headers =
+        (const Elf64_Phdr *)(bytes + header->e_phoff);
+
+    for (UINTN i = 0; i < header->e_phnum; i++) {
+        const Elf64_Phdr *ph = &program_headers[i];
+        if (ph->p_type != ELF_PT_LOAD || ph->p_memsz == 0) continue;
+
+        if (loaded_count >= ELF_MAX_LOAD_SEGMENTS ||
+            ph->p_filesz > ph->p_memsz ||
+            ph->p_offset > kernel_size ||
+            ph->p_filesz > (UINT64)kernel_size - ph->p_offset ||
+            ph->p_vaddr > (~(UINT64)0) - ph->p_memsz ||
+            ph->p_vaddr == 0 ||
+            (ph->p_vaddr & (EFI_PAGE_SIZE - 1u)) != 0 ||
+            ph->p_memsz > (~(UINT64)0) - (EFI_PAGE_SIZE - 1u)) {
+            FreeLoadedSegments(system_table->BootServices, loaded, loaded_count);
+            return EFI_LOAD_ERROR;
         }
-    }
 
-    Print(L"Kernel Loaded. Setting up Graphics...\n");
-
-    EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop;
-    EFI_STATUS Status = SystemTable->BootServices->LocateProtocol(&GopGuid, NULL, (void**)&Gop);
-    if (EFI_ERROR(Status)) {
-        Print(L"Error: GOP not found\n");
-        return Status;
-    }
-
-    BootInfo bootInfo;
-    bootInfo.framebuffer = (uint32_t*)Gop->Mode->FrameBufferBase;
-    bootInfo.width = Gop->Mode->Info->HorizontalResolution;
-    bootInfo.height = Gop->Mode->Info->VerticalResolution;
-    bootInfo.pitch = Gop->Mode->Info->PixelsPerScanLine;
-
-    // Get Memory Map to find a free region for PMM
-    UINTN MemoryMapSize = 0;
-    EFI_MEMORY_DESCRIPTOR *MemoryMap = NULL;
-    UINTN MapKey, DescriptorSize;
-    UINT32 DescriptorVersion;
-
-    SystemTable->BootServices->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
-    MemoryMapSize += 2 * DescriptorSize;
-    SystemTable->BootServices->AllocatePool(EfiLoaderData, MemoryMapSize, (void**)&MemoryMap);
-    SystemTable->BootServices->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
-
-    // Find the largest conventional memory region
-    bootInfo.LargestFreeRegion.Base = 0;
-    bootInfo.LargestFreeRegion.Size = 0;
-
-    for (UINTN i = 0; i < MemoryMapSize / DescriptorSize; i++) {
-        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR*)((char*)MemoryMap + (i * DescriptorSize));
-        if (desc->Type == EfiConventionalMemory) {
-            if (desc->NumberOfPages * 4096 > bootInfo.LargestFreeRegion.Size) {
-                bootInfo.LargestFreeRegion.Base = desc->PhysicalStart;
-                bootInfo.LargestFreeRegion.Size = desc->NumberOfPages * 4096;
+        if (ph->p_align > 1) {
+            if ((ph->p_align & (ph->p_align - 1u)) != 0 ||
+                (ph->p_vaddr & (ph->p_align - 1u)) !=
+                (ph->p_offset & (ph->p_align - 1u))) {
+                FreeLoadedSegments(system_table->BootServices, loaded, loaded_count);
+                return EFI_LOAD_ERROR;
             }
         }
+
+        UINT64 pages64 = (ph->p_memsz + EFI_PAGE_SIZE - 1u) / EFI_PAGE_SIZE;
+        if (pages64 == 0 || pages64 > (UINT64)(~(UINTN)0)) {
+            FreeLoadedSegments(system_table->BootServices, loaded, loaded_count);
+            return EFI_LOAD_ERROR;
+        }
+
+        EFI_PHYSICAL_ADDRESS segment_address = ph->p_vaddr;
+        UINTN pages = (UINTN)pages64;
+        EFI_STATUS status = system_table->BootServices->AllocatePages(
+            AllocateAddress, EfiLoaderData, pages, &segment_address);
+        if (EFI_ERROR(status)) {
+            FreeLoadedSegments(system_table->BootServices, loaded, loaded_count);
+            return status;
+        }
+
+        loaded[loaded_count].base = segment_address;
+        loaded[loaded_count].pages = pages;
+        loaded_count++;
+
+        SetMem((void *)(UINTN)segment_address, (UINTN)ph->p_memsz, 0);
+        if (ph->p_filesz) {
+            CopyMem((void *)(UINTN)segment_address,
+                    (const void *)(bytes + ph->p_offset),
+                    (UINTN)ph->p_filesz);
+        }
+
+        if ((ph->p_flags & ELF_PF_X) &&
+            header->e_entry >= ph->p_vaddr &&
+            header->e_entry < ph->p_vaddr + ph->p_memsz) {
+            entry_is_executable = 1;
+        }
     }
 
-    Print(L"FrameBuffer: 0x%lx (%dx%d)\n", bootInfo.framebuffer, bootInfo.width, bootInfo.height);
+    if (loaded_count == 0 || !entry_is_executable) {
+        FreeLoadedSegments(system_table->BootServices, loaded, loaded_count);
+        return EFI_LOAD_ERROR;
+    }
 
-    SystemTable->BootServices->ExitBootServices(ImageHandle, MapKey);
-
-    // Jump to Kernel
-    void (*KernelEntry)(BootInfo*) = (void (*)(BootInfo*))Header->e_entry;
-    KernelEntry(&bootInfo);
-
+    *entry_out = header->e_entry;
     return EFI_SUCCESS;
+}
+
+static EFI_STATUS GetMemoryMapWithPool(EFI_SYSTEM_TABLE *system_table,
+                                       EFI_MEMORY_DESCRIPTOR **map_out,
+                                       UINTN *map_size_out,
+                                       UINTN *map_key_out,
+                                       UINTN *descriptor_size_out,
+                                       UINT32 *descriptor_version_out) {
+    UINTN required_size = 0;
+    EFI_STATUS status = system_table->BootServices->GetMemoryMap(
+        &required_size, NULL, map_key_out, descriptor_size_out,
+        descriptor_version_out);
+    if (status != EFI_BUFFER_TOO_SMALL || *descriptor_size_out == 0)
+        return status;
+
+    UINTN extra = (*descriptor_size_out) * 8u;
+    if (required_size > (~(UINTN)0) - extra) return EFI_OUT_OF_RESOURCES;
+    required_size += extra;
+
+    EFI_MEMORY_DESCRIPTOR *map = NULL;
+    status = system_table->BootServices->AllocatePool(
+        EfiLoaderData, required_size, (void **)&map);
+    if (EFI_ERROR(status)) return status;
+
+    UINTN actual_size = required_size;
+    status = system_table->BootServices->GetMemoryMap(
+        &actual_size, map, map_key_out, descriptor_size_out,
+        descriptor_version_out);
+    if (EFI_ERROR(status)) {
+        system_table->BootServices->FreePool(map);
+        return status;
+    }
+
+    *map_out = map;
+    *map_size_out = actual_size;
+    return EFI_SUCCESS;
+}
+
+static int FindLargestConventionalRegion(EFI_MEMORY_DESCRIPTOR *map,
+                                         UINTN map_size,
+                                         UINTN descriptor_size,
+                                         MemoryRegion *region) {
+    if (!map || !region || descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR) ||
+        descriptor_size == 0) return 0;
+
+    region->Base = 0;
+    region->Size = 0;
+    for (UINTN offset = 0; offset + descriptor_size <= map_size;
+         offset += descriptor_size) {
+        EFI_MEMORY_DESCRIPTOR *desc =
+            (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + offset);
+        if (desc->Type != EfiConventionalMemory) continue;
+        if (desc->NumberOfPages > (~(UINT64)0) / EFI_PAGE_SIZE) continue;
+
+        UINT64 size = desc->NumberOfPages * EFI_PAGE_SIZE;
+        if (size > region->Size) {
+            region->Base = desc->PhysicalStart;
+            region->Size = size;
+        }
+    }
+    return region->Size >= EFI_PAGE_SIZE;
+}
+
+EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
+    void *kernel_buffer = NULL;
+    UINTN kernel_size = 0;
+    UINT64 kernel_entry = 0;
+    EFI_STATUS status;
+
+    InitializeLib(ImageHandle, SystemTable);
+    Print(L"VexOS UEFI bootloader initializing...\n");
+
+    status = LoadKernelFile(ImageHandle, SystemTable,
+                            &kernel_buffer, &kernel_size);
+    if (EFI_ERROR(status)) {
+        Print(L"VexOS: unable to read kernel.elf (status %r)\n", status);
+        return status;
+    }
+
+    status = LoadElfSegments(SystemTable, kernel_buffer, kernel_size,
+                             &kernel_entry);
+    SystemTable->BootServices->FreePool(kernel_buffer);
+    if (EFI_ERROR(status)) {
+        Print(L"VexOS: invalid or unloadable kernel ELF (status %r)\n", status);
+        return status;
+    }
+
+    EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+    status = SystemTable->BootServices->LocateProtocol(
+        &gop_guid, NULL, (void **)&gop);
+    if (EFI_ERROR(status) || !gop || !gop->Mode || !gop->Mode->Info) {
+        Print(L"VexOS: GOP framebuffer unavailable\n");
+        return EFI_UNSUPPORTED;
+    }
+
+    BootInfo boot_info;
+    boot_info.framebuffer = (uint32_t *)(UINTN)gop->Mode->FrameBufferBase;
+    boot_info.width = gop->Mode->Info->HorizontalResolution;
+    boot_info.height = gop->Mode->Info->VerticalResolution;
+    boot_info.pitch = gop->Mode->Info->PixelsPerScanLine;
+    boot_info.LargestFreeRegion.Base = 0;
+    boot_info.LargestFreeRegion.Size = 0;
+
+    // ExitBootServices requires a fresh map key. Retry a few times if the
+    // firmware reports that the key changed between GetMemoryMap and exit.
+    for (UINTN attempt = 0; attempt < 4; attempt++) {
+        EFI_MEMORY_DESCRIPTOR *memory_map = NULL;
+        UINTN memory_map_size = 0;
+        UINTN map_key = 0;
+        UINTN descriptor_size = 0;
+        UINT32 descriptor_version = 0;
+
+        status = GetMemoryMapWithPool(SystemTable, &memory_map,
+                                      &memory_map_size, &map_key,
+                                      &descriptor_size, &descriptor_version);
+        if (EFI_ERROR(status)) {
+            Print(L"VexOS: unable to obtain UEFI memory map (status %r)\n", status);
+            return status;
+        }
+
+        if (!FindLargestConventionalRegion(memory_map, memory_map_size,
+                                           descriptor_size,
+                                           &boot_info.LargestFreeRegion)) {
+            SystemTable->BootServices->FreePool(memory_map);
+            Print(L"VexOS: no usable conventional memory region\n");
+            return EFI_OUT_OF_RESOURCES;
+        }
+
+        status = SystemTable->BootServices->ExitBootServices(ImageHandle, map_key);
+        if (!EFI_ERROR(status)) {
+            void (*kernel_main)(BootInfo *) =
+                (void (*)(BootInfo *))(UINTN)kernel_entry;
+            kernel_main(&boot_info);
+            return EFI_SUCCESS;
+        }
+
+        SystemTable->BootServices->FreePool(memory_map);
+        if (status != EFI_INVALID_PARAMETER) return status;
+    }
+
+    Print(L"VexOS: ExitBootServices failed after retries\n");
+    return EFI_LOAD_ERROR;
 }

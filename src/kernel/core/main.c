@@ -54,6 +54,14 @@ void serial_print(const char *str) {
   }
 }
 
+static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
+                            uint64_t flags) {
+  if (!VMM_MapPage(virtual_addr, physical_addr, flags)) {
+    serial_print("[KERNEL] FATAL: page mapping failed\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
+}
+
 #include "interrupts.h"
 
 void PIC_Remap();
@@ -75,6 +83,496 @@ void taskB() {
       ;
   }
 }
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_memory_test_fail(const char *reason) {
+  serial_print("[KERNEL] FATAL: CI memory self-test: ");
+  serial_print(reason);
+  serial_print("\n");
+  for (;;) { __asm__ volatile("cli; hlt"); }
+}
+
+static void ci_memory_self_test(void) {
+  // Heap: alignment, overflow/zero rejection, invalid/double-free tolerance,
+  // and coalescing of adjacent blocks.
+  void *h1 = kmalloc(1);
+  void *h2 = kmalloc(513);
+  void *h3 = kmalloc(4097);
+  if (!h1 || !h2 || !h3) ci_memory_test_fail("heap allocation");
+  if (((uintptr_t)h1 & 15u) || ((uintptr_t)h2 & 15u) ||
+      ((uintptr_t)h3 & 15u)) ci_memory_test_fail("heap alignment");
+  if (kmalloc(0) != NULL || kmalloc((size_t)-1) != NULL)
+    ci_memory_test_fail("heap invalid-size rejection");
+  ((uint8_t *)h1)[0] = 0xA5u;
+  ((uint8_t *)h2)[512] = 0x5Au;
+  ((uint8_t *)h3)[4096] = 0xC3u;
+  if (((uint8_t *)h1)[0] != 0xA5u ||
+      ((uint8_t *)h2)[512] != 0x5Au ||
+      ((uint8_t *)h3)[4096] != 0xC3u)
+    ci_memory_test_fail("heap data integrity");
+  kfree(h2);
+  kfree(h2); // A double free must be ignored.
+  kfree((void *)(uintptr_t)0x12345u); // A foreign pointer must be ignored.
+  kfree(h1);
+  kfree(h3);
+  void *merged = kmalloc(8192);
+  if (!merged) ci_memory_test_fail("heap free-block coalescing");
+  kfree(merged);
+  serial_print("[CI] Heap allocator alignment/free/coalesce passed\n");
+
+  // PMM: page alignment, misaligned-free rejection, double-free safety, and reuse.
+  void *p1 = PMM_AllocatePage();
+  if (!p1 || ((uintptr_t)p1 & 0xFFFu))
+    ci_memory_test_fail("PMM page allocation/alignment");
+  PMM_FreePage((void *)((uintptr_t)p1 + 1u));
+  void *p2 = PMM_AllocatePage();
+  if (!p2 || p2 == p1)
+    ci_memory_test_fail("PMM misaligned free was accepted");
+  PMM_FreePage(p1);
+  PMM_FreePage(p1); // A duplicate free must not corrupt the bitmap.
+  PMM_FreePage(p2);
+  void *p3 = PMM_AllocatePage();
+  void *p4 = PMM_AllocatePage();
+  if (p3 != p1 || p4 != p2)
+    ci_memory_test_fail("PMM freed-page reuse/double-free handling");
+  PMM_FreePage(p3);
+  PMM_FreePage(p4);
+  serial_print("[CI] PMM alignment/misaligned-free/double-free/reuse passed\n");
+
+  // VMM: supervisor/user mappings, range permissions, alignment, and teardown.
+  const uintptr_t test_va = 0x0000400000000000ull;
+  void *phys1 = PMM_AllocatePage();
+  void *phys2 = PMM_AllocatePage();
+  if (!phys1 || !phys2) ci_memory_test_fail("VMM backing-page allocation");
+  if (!VMM_MapPage((void *)test_va, phys1, PAGE_WRITE))
+    ci_memory_test_fail("VMM supervisor map");
+  volatile uint64_t *mapped = (volatile uint64_t *)test_va;
+  *mapped = 0x5645584F53434931ull;
+  if (*mapped != 0x5645584F53434931ull)
+    ci_memory_test_fail("VMM mapped-page data integrity");
+  if (VMM_MapPage((void *)test_va, phys2, PAGE_WRITE))
+    ci_memory_test_fail("VMM conflicting remap accepted");
+  if (VMM_IsUserRange((void *)test_va, sizeof(uint64_t), 0))
+    ci_memory_test_fail("VMM supervisor page accepted as user memory");
+  if (VMM_UnmapPage((void *)test_va, 1))
+    ci_memory_test_fail("VMM freed a supervisor page");
+  if (*mapped != 0x5645584F53434931ull)
+    ci_memory_test_fail("VMM rejected unmap changed mapping");
+  if (!VMM_UnmapPage((void *)test_va, 0))
+    ci_memory_test_fail("VMM supervisor unmap");
+  if (VMM_UnmapPage((void *)test_va, 0))
+    ci_memory_test_fail("VMM unmapped a missing page");
+  PMM_FreePage(phys1);
+  PMM_FreePage(phys2);
+
+  void *user_phys = PMM_AllocatePage();
+  void *readonly_phys = PMM_AllocatePage();
+  if (!user_phys || !readonly_phys ||
+      !VMM_MapPage((void *)test_va, user_phys, PAGE_WRITE | PAGE_USER))
+    ci_memory_test_fail("VMM user map");
+  if (!VMM_IsUserRange((void *)test_va, PAGE_SIZE, 1))
+    ci_memory_test_fail("VMM valid writable user range rejected");
+  if (VMM_IsUserRange((void *)test_va, PAGE_SIZE + 1u, 0))
+    ci_memory_test_fail("VMM range crossing into an unmapped page accepted");
+  if (!VMM_MapPage((void *)(test_va + PAGE_SIZE), readonly_phys, PAGE_USER))
+    ci_memory_test_fail("VMM read-only user map");
+  if (!VMM_IsUserRange((void *)test_va, PAGE_SIZE * 2u, 0))
+    ci_memory_test_fail("VMM valid two-page user range rejected");
+  if (VMM_IsUserRange((void *)test_va, PAGE_SIZE * 2u, 1))
+    ci_memory_test_fail("VMM writable range accepted a read-only page");
+  if (!VMM_UnmapPage((void *)(test_va + PAGE_SIZE), 1))
+    ci_memory_test_fail("VMM read-only user unmap/free");
+  if (!VMM_UnmapPage((void *)test_va, 1))
+    ci_memory_test_fail("VMM user unmap/free");
+  if (VMM_IsUserRange((void *)test_va, 1, 0))
+    ci_memory_test_fail("VMM unmapped user range accepted");
+  if (VMM_MapPage((void *)test_va, (void *)((uintptr_t)user_phys + 1u), PAGE_WRITE))
+    ci_memory_test_fail("VMM misaligned physical address accepted");
+  if (VMM_MapPage((void *)(test_va + 1u), user_phys, PAGE_WRITE))
+    ci_memory_test_fail("VMM misaligned virtual address accepted");
+  if (VMM_MapPage((void *)0xFFFF800000000000ull, user_phys, PAGE_WRITE | PAGE_USER))
+    ci_memory_test_fail("VMM supervisor address accepted as user memory");
+  if (VMM_MapPage((void *)0x0000800000000000ull, user_phys, PAGE_WRITE))
+    ci_memory_test_fail("VMM noncanonical virtual address accepted");
+  if (VMM_UnmapPage((void *)0x0000800000000000ull, 0))
+    ci_memory_test_fail("VMM noncanonical unmap accepted");
+  if (VMM_IsUserRange((void *)0x00007FFFFFFFF000ull, PAGE_SIZE * 2u, 0))
+    ci_memory_test_fail("VMM range crossing user limit accepted");
+  serial_print("[CI] VMM user ranges/write permissions/alignment/unmapping passed\n");
+}
+extern uint64_t syscall_handler(uint64_t rsp);
+extern int usermode_ci_self_test(void);
+extern int Task_CI_SelfTest(void);
+
+
+#ifdef VEXOS_CI_INPUT_TEST
+typedef struct {
+  uint8_t ident[16];
+  uint16_t type;
+  uint16_t machine;
+  uint32_t version;
+  uint64_t entry;
+  uint64_t phoff;
+  uint64_t shoff;
+  uint32_t flags;
+  uint16_t ehsize;
+  uint16_t phentsize;
+  uint16_t phnum;
+  uint16_t shentsize;
+  uint16_t shnum;
+  uint16_t shstrndx;
+} __attribute__((packed)) ci_elf64_ehdr_t;
+
+typedef struct {
+  uint32_t type;
+  uint32_t flags;
+  uint64_t offset;
+  uint64_t vaddr;
+  uint64_t paddr;
+  uint64_t filesz;
+  uint64_t memsz;
+  uint64_t align;
+} __attribute__((packed)) ci_elf64_phdr_t;
+
+static void ci_install_ring3_elf_fixture(void) {
+  static uint8_t image[0x1100];
+  static const char message[] =
+      "[CI] Ring3 int80 syscall and exit passed\\n";
+  const uint32_t message_len = (uint32_t)sizeof(message) - 1u;
+  const uint32_t data_offset = 0x20u;
+  const uint32_t code_len = 31u;
+  const uint32_t file_size = 0x1000u + data_offset + message_len;
+
+  for (uint32_t i = 0; i < sizeof(image); i++)
+    image[i] = 0;
+
+  ci_elf64_ehdr_t *eh = (ci_elf64_ehdr_t *)image;
+  eh->ident[0] = 0x7F;
+  eh->ident[1] = 'E';
+  eh->ident[2] = 'L';
+  eh->ident[3] = 'F';
+  eh->ident[4] = 2;
+  eh->ident[5] = 1;
+  eh->ident[6] = 1;
+  eh->type = 2;
+  eh->machine = 62;
+  eh->version = 1;
+  eh->entry = 0x4000000000ull;
+  eh->phoff = sizeof(*eh);
+  eh->ehsize = sizeof(*eh);
+  eh->phentsize = sizeof(ci_elf64_phdr_t);
+  eh->phnum = 1;
+
+  ci_elf64_phdr_t *ph = (ci_elf64_phdr_t *)(image + eh->phoff);
+  ph->type = 1;       // PT_LOAD
+  ph->flags = 5;      // PF_R | PF_X
+  ph->offset = 0x1000u;
+  ph->vaddr = 0x4000000000ull;
+  ph->paddr = 0x4000000000ull;
+  ph->filesz = data_offset + message_len;
+  ph->memsz = PAGE_SIZE;
+  ph->align = PAGE_SIZE;
+
+  // mov eax, 1; movabs rdi, 0x4000000020; mov esi, message_len;
+  // int 0x80; mov eax, 0; int 0x80; jmp $.
+  uint8_t code[31] = {
+      0xB8, 0x01, 0x00, 0x00, 0x00,
+      0x48, 0xBF, 0x20, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+      0xBE, 0, 0, 0, 0,
+      0xCD, 0x80,
+      0xB8, 0x00, 0x00, 0x00, 0x00,
+      0xCD, 0x80,
+      0xEB, 0xFE
+  };
+  code[16] = (uint8_t)(message_len & 0xFFu);
+  code[17] = (uint8_t)((message_len >> 8) & 0xFFu);
+  code[18] = (uint8_t)((message_len >> 16) & 0xFFu);
+  code[19] = (uint8_t)((message_len >> 24) & 0xFFu);
+
+  for (uint32_t i = 0; i < code_len; i++)
+    image[0x1000u + i] = code[i];
+  for (uint32_t i = 0; i < message_len; i++)
+    image[0x1000u + data_offset + i] = (uint8_t)message[i];
+
+  if (!simplefs_write_file("doom.elf", image, file_size))
+    ci_memory_test_fail("write ring3 ELF fixture to SimpleFS");
+  serial_print("[CI] Valid ring3 ELF fixture installed in SimpleFS\\n");
+}
+#endif
+
+static void ci_syscall_self_test(void) {
+  struct InterruptFrame frame = {0};
+
+  // CI prepares a small SFS1 image with ci.txt on the ATA primary slave.
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS fixture mount");
+
+  // Unknown syscall numbers and invalid user pointers must fail safely.
+  frame.rax = 0xFFFFFFFFu;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall unknown-number rejection");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 1;
+  frame.rdi = 0x12345u;
+  frame.rsi = 4;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall write rejected invalid user pointer");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = 0;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted zero length");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = 16u * 1024u * 1024u + 1u;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted oversized length");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rdi = 0x1000u;
+  frame.rsi = PAGE_SIZE;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted out-of-range requested address");
+
+  // A two-page mapping must be user-accessible, writable, and zero-filled.
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = PAGE_SIZE + 1u;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  void *user_buf = (void *)(uintptr_t)frame.rax;
+  if (!user_buf || frame.rax == UINT64_MAX ||
+      !VMM_IsUserRange(user_buf, PAGE_SIZE + 1u, 1))
+    ci_memory_test_fail("syscall mmap failed valid two-page allocation");
+
+  volatile uint8_t *bytes = (volatile uint8_t *)user_buf;
+  volatile uint8_t *last_page = (volatile uint8_t *)((uintptr_t)user_buf + PAGE_SIZE);
+  if (bytes[0] != 0 || bytes[PAGE_SIZE - 1u] != 0 || last_page[0] != 0)
+    ci_memory_test_fail("syscall mmap did not zero mapped pages");
+
+  bytes[0] = 'C';
+  bytes[1] = 'I';
+  bytes[2] = '\n';
+  frame = (struct InterruptFrame){0};
+  frame.rax = 1;
+  frame.rdi = (uint64_t)(uintptr_t)user_buf;
+  frame.rsi = 3;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 3)
+    ci_memory_test_fail("syscall write failed valid user buffer");
+
+  // Open/read/seek/close a real file through the syscall ABI.
+  const uint32_t expected_file_len = 700u;
+  uint32_t mounted_file_size = 0;
+  if (!simplefs_file_size("ci.txt", &mounted_file_size) ||
+      mounted_file_size != expected_file_len)
+    ci_memory_test_fail("SimpleFS fixture file metadata");
+
+  char *user_name = (char *)user_buf + 16u;
+  static const char file_name[] = "ci.txt";
+  for (uint32_t i = 0; i < sizeof(file_name); i++)
+    user_name[i] = file_name[i];
+  char *user_read = (char *)user_buf + 128u;
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 3;
+  frame.rdi = (uint64_t)(uintptr_t)user_name;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  int test_fd = (int)frame.rax;
+  if (test_fd < 3)
+    ci_memory_test_fail("syscall open valid SimpleFS file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = expected_file_len;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != expected_file_len)
+    ci_memory_test_fail("syscall read valid SimpleFS file");
+  for (uint32_t i = 0; i < expected_file_len; i++) {
+    uint8_t expected = (uint8_t)((i * 37u + 11u) & 0xFFu);
+    if ((uint8_t)user_read[i] != expected)
+      ci_memory_test_fail("syscall multi-sector file content mismatch");
+  }
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = 0;
+  frame.rdx = 0;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall seek to beginning");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = 0;
+  frame.rdx = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != expected_file_len)
+    ci_memory_test_fail("syscall seek to end");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = (uint64_t)test_fd;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall close valid SimpleFS file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall read succeeded after close");
+
+  // Exercise SFS writes, metadata updates, and remount persistence.
+  uint8_t write_data[700];
+  const uint32_t write_len = (uint32_t)sizeof(write_data);
+  for (uint32_t i = 0; i < write_len; i++)
+    write_data[i] = (uint8_t)((i * 19u + 7u) & 0xFFu);
+  if (!simplefs_write_file("ci-out.txt", write_data, write_len))
+    ci_memory_test_fail("SimpleFS multi-sector write file");
+  char verify_data[768];
+  uint32_t verify_len = 0;
+  if (!simplefs_read_file("ci-out.txt", verify_data, sizeof(verify_data),
+                          &verify_len) || verify_len != write_len)
+    ci_memory_test_fail("SimpleFS read-after-write");
+  for (uint32_t i = 0; i < write_len; i++) {
+    if ((uint8_t)verify_data[i] != write_data[i])
+      ci_memory_test_fail("SimpleFS multi-sector write content mismatch");
+  }
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS remount after write");
+  verify_len = 0;
+  if (!simplefs_read_file("ci-out.txt", verify_data, sizeof(verify_data),
+                          &verify_len) || verify_len != write_len)
+    ci_memory_test_fail("SimpleFS remount read");
+  for (uint32_t i = 0; i < write_len; i++) {
+    if ((uint8_t)verify_data[i] != write_data[i])
+      ci_memory_test_fail("SimpleFS remount content mismatch");
+  }
+
+  // Zero-length files must still open and close cleanly through syscalls.
+  if (!simplefs_write_file("empty.txt", "", 0))
+    ci_memory_test_fail("SimpleFS empty-file write");
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS empty-file remount");
+  uint32_t empty_size = 1;
+  if (!simplefs_file_size("empty.txt", &empty_size) || empty_size != 0)
+    ci_memory_test_fail("SimpleFS empty-file metadata");
+  static const char empty_name[] = "empty.txt";
+  for (uint32_t i = 0; i < sizeof(empty_name); i++)
+    user_name[i] = empty_name[i];
+  frame = (struct InterruptFrame){0};
+  frame.rax = 3;
+  frame.rdi = (uint64_t)(uintptr_t)user_name;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  int empty_fd = (int)frame.rax;
+  if (empty_fd < 3)
+    ci_memory_test_fail("syscall open empty file");
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)empty_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall read empty file");
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = (uint64_t)empty_fd;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall close empty file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = 2;
+  frame.rsi = (uint64_t)(uintptr_t)user_buf;
+  frame.rdx = 3;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall read accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall close accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall seek accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 9;
+  frame.rsi = 0;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall framebuffer rejected invalid-dimension test");
+
+  if (!VMM_UnmapPage(user_buf, 1) ||
+      !VMM_UnmapPage((void *)((uintptr_t)user_buf + PAGE_SIZE), 1))
+    ci_memory_test_fail("syscall mmap teardown");
+  if (VMM_IsUserRange(user_buf, 1, 0))
+    ci_memory_test_fail("syscall mmap left stale user mapping");
+
+  serial_print("[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed\n");
+}
+
+static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
+  struct InterruptFrame frame = {0};
+  frame.rax = 2;
+  frame.rsi = sizeof(uint32_t);
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+
+  void *user_pixel = (void *)(uintptr_t)frame.rax;
+  if (!user_pixel || frame.rax == UINT64_MAX ||
+      !VMM_IsUserRange(user_pixel, sizeof(uint32_t), 1))
+    ci_memory_test_fail("framebuffer test mmap");
+
+  const uint32_t expected = 0x0055AA33u;
+  *(volatile uint32_t *)user_pixel = expected;
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 9;
+  frame.rdi = (uint64_t)(uintptr_t)user_pixel;
+  frame.rsi = 1;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+
+  if (frame.rax != 0)
+    ci_memory_test_fail("framebuffer syscall rejected valid 1x1 frame");
+  if (!bootInfo || !bootInfo->framebuffer ||
+      bootInfo->framebuffer[0] != expected)
+    ci_memory_test_fail("framebuffer syscall did not draw pixel");
+
+  if (!VMM_UnmapPage(user_pixel, 1) ||
+      VMM_IsUserRange(user_pixel, sizeof(uint32_t), 0))
+    ci_memory_test_fail("framebuffer test mmap teardown");
+
+  serial_print("[CI] Successful framebuffer syscall draw passed\n");
+}
+
+#endif
 
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
@@ -135,9 +633,15 @@ void kernel_main(BootInfo *bootInfo) {
 
   PMM_Init(mem_size, bitmap_addr);
 
-  uint64_t bitmap_pages = ((mem_size / 4096 / 8) + 4095) / 4096;
+  uint64_t total_pages = mem_size / 4096ull;
+  uint64_t bitmap_bytes = (total_pages + 7ull) / 8ull;
+  uint64_t bitmap_pages = (bitmap_bytes + 4095ull) / 4096ull;
   if (bitmap_pages == 0)
     bitmap_pages = 1;
+  if (bitmap_pages >= total_pages) {
+    serial_print("[KERNEL] FATAL: PMM region is too small for its bitmap\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
   serial_print("[KERNEL] Reserving ");
   {
     char s[32];
@@ -162,16 +666,19 @@ void kernel_main(BootInfo *bootInfo) {
 
   PMM_FreePages(
       (void *)(bootInfo->LargestFreeRegion.Base + (bitmap_pages * 4096)),
-      (mem_size / 4096) - bitmap_pages);
+      total_pages - bitmap_pages);
   PrintString("PMM Initialized.\n", 0x00FF00);
 
   // VMM
   serial_print("[KERNEL] Initializing VMM...\n");
-  VMM_Init();
+  if (!VMM_Init()) {
+    serial_print("[KERNEL] FATAL: VMM root allocation failed\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
   // Identity map first 128MB
   serial_print("[KERNEL] Mapping first 128MB...\n");
   for (uint64_t i = 0; i < 0x8000000; i += 4096)
-    VMM_MapPage((void *)i, (void *)i, PAGE_WRITE);
+    vmm_map_or_halt((void *)i, (void *)i, PAGE_WRITE);
 
   // Identity map the PMM region itself so we can access it
   serial_print("[KERNEL] Mapping PMM Region...\n");
@@ -181,14 +688,14 @@ void kernel_main(BootInfo *bootInfo) {
   }
   for (uint64_t i = 0; i < pmm_map_bytes; i += 4096) {
     uint64_t addr = bootInfo->LargestFreeRegion.Base + i;
-    VMM_MapPage((void *)addr, (void *)addr, PAGE_WRITE);
+    vmm_map_or_halt((void *)addr, (void *)addr, PAGE_WRITE);
   }
 
   uint64_t fb_base = (uint64_t)bootInfo->framebuffer;
   uint64_t fb_size = (uint64_t)bootInfo->height * bootInfo->pitch * 4;
   serial_print("[KERNEL] Mapping Framebuffer...\n");
   for (uint64_t i = 0; i < fb_size; i += 4096)
-    VMM_MapPage((void *)(fb_base + i), (void *)(fb_base + i), PAGE_WRITE);
+    vmm_map_or_halt((void *)(fb_base + i), (void *)(fb_base + i), PAGE_WRITE);
 
   uint64_t rip = 0;
   __asm__ volatile("lea (%%rip), %0" : "=r"(rip));
@@ -198,7 +705,7 @@ void kernel_main(BootInfo *bootInfo) {
   rip_start &= ~0xFFFULL;
   uint64_t rip_end = (rip + 0x800000) & ~0xFFFULL;
   for (uint64_t a = rip_start; a <= rip_end; a += 4096) {
-    VMM_MapPage((void *)a, (void *)a, PAGE_WRITE);
+    vmm_map_or_halt((void *)a, (void *)a, PAGE_WRITE);
   }
 
   uint64_t sp_start =
@@ -206,7 +713,7 @@ void kernel_main(BootInfo *bootInfo) {
   sp_start &= ~0xFFFULL;
   uint64_t sp_end = (stack_addr_pre + 0x200000) & ~0xFFFULL;
   for (uint64_t a = sp_start; a <= sp_end; a += 4096) {
-    VMM_MapPage((void *)a, (void *)a, PAGE_WRITE);
+    vmm_map_or_halt((void *)a, (void *)a, PAGE_WRITE);
   }
 
   serial_print("[KERNEL] Activating VMM...\n");
@@ -264,7 +771,7 @@ void kernel_main(BootInfo *bootInfo) {
 
   // Allocate and map remaining heap pages, requiring contiguity.
   uint64_t heap_base = (uint64_t)heap_start;
-  VMM_MapPage((void *)heap_base, (void *)heap_base, PAGE_WRITE);
+  vmm_map_or_halt((void *)heap_base, (void *)heap_base, PAGE_WRITE);
   for (uint64_t p = 1; p < heap_pages; p++) {
     void *next = PMM_AllocatePage();
     if (next == NULL) {
@@ -279,10 +786,21 @@ void kernel_main(BootInfo *bootInfo) {
       while (1)
         ;
     }
-    VMM_MapPage((void *)want, (void *)want, PAGE_WRITE);
+    vmm_map_or_halt((void *)want, (void *)want, PAGE_WRITE);
   }
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
+#ifdef VEXOS_CI_INPUT_TEST
+  ci_memory_self_test();
+  if (!usermode_ci_self_test())
+    ci_memory_test_fail("ELF validation/rollback self-test");
+  serial_print("[CI] ELF header/segment validation and rollback passed\n");
+  if (!Task_CI_SelfTest())
+    ci_memory_test_fail("task frame/scheduler self-test");
+  serial_print("[CI] Task IRET frame and scheduler checks passed\n");
+  ci_syscall_self_test();
+  ci_install_ring3_elf_fixture();
+#endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
 
@@ -293,18 +811,36 @@ void kernel_main(BootInfo *bootInfo) {
   hw_profile_update_pci_gpu();
   serial_print("[KERNEL] PCI enumeration returned\n");
 
-  // Run fullscreen setup wizard on first boot (now with working xHCI)
+#ifdef VEXOS_CI_SKIP_WIZARD
+  // CI-only path: bypass the interactive first-boot wizard for automated QEMU input.
+  serial_print("[CI] Setup wizard skipped for automated desktop test\n");
+#else
+  // Run fullscreen setup wizard on first boot (now with working xHCI input)
   serial_print("[KERNEL] Starting Fullscreen Setup Wizard...\n");
   desktop_run_fullscreen_wizard(bootInfo);
+#endif
 
-  // After setup completes, initialize desktop
+  // Initialize desktop after setup (or the CI-only wizard bypass).
   serial_print("[KERNEL] Setup complete, initializing desktop...\n");
   desktop_init(bootInfo);
 
-  // Stop drawing serial/boot text to the framebuffer
+  // Keep subsequent diagnostics on COM1 only; do not paint boot text over
+  // the newly initialized desktop and taskbar.
   g_ConsoleReady = 0;
+  serial_print("[KERNEL] Desktop initialized\n");
+
+#ifdef VEXOS_CI_INPUT_TEST
+  // Run only after desktop_init has installed the framebuffer target.
+  ci_framebuffer_syscall_self_test(bootInfo);
+#endif
 
   Task_Init();
+#ifdef VEXOS_CI_INPUT_TEST
+  extern void Task_CI_StartRuntimeTest(void);
+  extern int Task_CI_RuntimeTestPassed(void);
+  extern uint64_t Task_CI_RuntimeBadFrameCS(void);
+  Task_CI_StartRuntimeTest();
+#endif
   serial_print("[KERNEL] Task_Init done\n");
 
   // Setup Timer
@@ -345,7 +881,18 @@ void kernel_main(BootInfo *bootInfo) {
   uint32_t frame_delay = 1000 / target_fps;
   uint64_t last_frame_ticks = Timer_Ticks();
 
+  int ci_task_runtime_reported = 0;
   while (1) {
+#ifdef VEXOS_CI_INPUT_TEST
+    if (!ci_task_runtime_reported && Task_CI_RuntimeTestPassed()) {
+      serial_print("[CI] IRQ0 preempted and executed both runtime tasks\n");
+      ci_task_runtime_reported = 1;
+    }
+    if (!ci_task_runtime_reported && Task_CI_RuntimeBadFrameCS() != 0) {
+      serial_print("[CI] IRQ scheduler rejected an invalid task CS frame\n");
+      ci_task_runtime_reported = 1;
+    }
+#endif
     // Keep xHCI polling frequent so mouse/keyboard remain responsive
     xhci_poll_events();
 
