@@ -109,6 +109,7 @@ static uint8_t g_ci_start_click_seen;
 #endif
 
 static uint8_t g_ring3_task_started;
+static uint8_t g_fullscreen_app_active;
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                       uint32_t c);
@@ -814,6 +815,9 @@ static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y
 
 void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   if (!g_bi || !src) return;
+  // A userspace framebuffer client owns the display after its first frame.
+  // Otherwise the desktop compositor would overwrite every game frame.
+  g_fullscreen_app_active = 1;
   uint32_t* dst = g_bi->framebuffer;
   uint32_t copy_w = (w > g_bi->width) ? g_bi->width : w;
   uint32_t copy_h = (h > g_bi->height) ? g_bi->height : h;
@@ -1993,7 +1997,7 @@ void desktop_init(BootInfo *bootInfo) {
 }
 
 void desktop_tick(void) {
-  if (!g_bi)
+  if (!g_bi || g_fullscreen_app_active)
     return;
 
   static uint32_t prev_buttons = 0;
