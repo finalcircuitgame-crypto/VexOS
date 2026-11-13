@@ -2048,6 +2048,13 @@ void desktop_tick(void) {
           shell_run_line();
           ui_changed = 1;
         } else if (c >= 32 && c <= 126) {
+#ifdef VEXOS_CI_INPUT_TEST
+          static uint8_t ci_shell_char_seen;
+          if (!ci_shell_char_seen) {
+            ci_shell_char_seen = 1;
+            serial_print("[CI] Shell received printable keyboard input\\n");
+          }
+#endif
           if (g_shell_line_len + 1u < (uint32_t)sizeof(g_shell_line)) {
             g_shell_line[g_shell_line_len++] = c;
             g_shell_line[g_shell_line_len] = 0;
