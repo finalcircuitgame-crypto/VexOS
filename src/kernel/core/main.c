@@ -149,7 +149,7 @@ void kernel_main(BootInfo *bootInfo) {
   if (bitmap_pages == 0)
     bitmap_pages = 1;
   if (bitmap_pages >= total_pages) {
-    serial_print("[KERNEL] FATAL: PMM region is too small for its bitmap\\n");
+    serial_print("[KERNEL] FATAL: PMM region is too small for its bitmap\n");
     while (1) { __asm__ volatile("cli; hlt"); }
   }
   serial_print("[KERNEL] Reserving ");
@@ -312,17 +312,17 @@ void kernel_main(BootInfo *bootInfo) {
 
 #ifdef VEXOS_CI_SKIP_WIZARD
   // CI-only path: bypass the interactive first-boot wizard for automated QEMU input.
-  serial_print("[CI] Setup wizard skipped for automated desktop test\\n");
+  serial_print("[CI] Setup wizard skipped for automated desktop test\n");
 #else
   // Run fullscreen setup wizard on first boot (now with working xHCI input)
-  serial_print("[KERNEL] Starting Fullscreen Setup Wizard...\\n");
+  serial_print("[KERNEL] Starting Fullscreen Setup Wizard...\n");
   desktop_run_fullscreen_wizard(bootInfo);
 #endif
 
   // Initialize desktop after setup (or the CI-only wizard bypass).
-  serial_print("[KERNEL] Setup complete, initializing desktop...\\n");
+  serial_print("[KERNEL] Setup complete, initializing desktop...\n");
   desktop_init(bootInfo);
-  serial_print("[KERNEL] Desktop initialized\\n");
+  serial_print("[KERNEL] Desktop initialized\n");
 
   // Stop drawing serial/boot text to the framebuffer
   g_ConsoleReady = 0;
