@@ -151,9 +151,64 @@ jobs:
                   "hold-time": 100
               }
           })
+          # Move the absolute USB tablet pointer onto the taskbar Start button.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 1200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 32000}}
+              ]}
+          })
+          time.sleep(0.2)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          # Select the first Start-menu item (Shell).
+          time.sleep(0.2)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 1200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 25000}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          # Exercise keyboard input in the opened shell.
+          for key in ["h", "e", "l", "p", "ret"]:
+              command({
+                  "execute": "send-key",
+                  "arguments": {
+                      "keys": [{"type": "qcode", "data": key}],
+                      "hold-time": 100
+                  }
+              })
+              time.sleep(0.05)
           stream.close()
           sock.close()
-          print("QMP successfully injected USB keyboard key 'a'.")
+          print("QMP injected keyboard input, USB tablet movement, and two mouse clicks.")
           PY
 
           echo "Waiting for the character to reach desktop input..."
