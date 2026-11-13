@@ -40,6 +40,45 @@ void Task_Create(void (*entry)(), void *stack_top) {
   task_count++;
 }
 
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_task_entry(void) {}
+
+int Task_CI_SelfTest(void) {
+  static uint64_t test_stack[64] __attribute__((aligned(16)));
+
+  Task_Init();
+  Task_Create(NULL, &test_stack[64]);
+  Task_Create(ci_task_entry, NULL);
+  if (task_count != 1)
+    return 0;
+
+  Task_Create(ci_task_entry, &test_stack[64]);
+  if (task_count != 2)
+    return 0;
+
+  uint64_t next_rsp = Task_Schedule(0x1111u);
+  if (!next_rsp || (next_rsp & 15u) != 8u)
+    return 0;
+
+  const uint64_t *frame = (const uint64_t *)(uintptr_t)next_rsp;
+  for (uint32_t i = 0; i < 15u; i++) {
+    if (frame[i] != 0)
+      return 0;
+  }
+  if (frame[15] != (uint64_t)(uintptr_t)ci_task_entry ||
+      frame[16] != 0x08u || frame[17] != 0x202u || frame[18] != 0)
+    return 0;
+
+  if (Task_Schedule(0x2222u) != 0x1111u)
+    return 0;
+
+  // Restore the normal one-task state before kernel_main initializes tasks.
+  Task_Init();
+  return 1;
+}
+#endif
+
 uint64_t Task_Schedule(uint64_t current_rsp) {
   tasks[current_task].rsp = current_rsp;
   for (int i = 0; i < task_count; i++) {
