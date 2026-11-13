@@ -133,3 +133,23 @@ void irq0_bad_frame_handler(uint64_t rsp) {
   (void)rsp;
 #endif
 }
+
+uint64_t irq0_debug_frame_once(uint64_t rsp) {
+#ifdef VEXOS_CI_INPUT_TEST
+  static int logged;
+  if (!logged && rsp) {
+    const uint64_t *frame = (const uint64_t *)(uintptr_t)rsp;
+    serial_print("[CI] IRQ0 target frame RIP=");
+    ci_serial_hex64(frame[15]);
+    serial_print(" CS=");
+    ci_serial_hex64(frame[16]);
+    serial_print(" RFLAGS=");
+    ci_serial_hex64(frame[17]);
+    serial_print(" NEXT=");
+    ci_serial_hex64(frame[18]);
+    serial_print("\\n");
+    logged = 1;
+  }
+#endif
+  return rsp;
+}
