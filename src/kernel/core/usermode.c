@@ -271,7 +271,10 @@ void usermode_launch(void) {
     TSS_Load((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     serial_print("[USERMODE] entering ring3\n");
 
-    uint64_t user_rsp = USER_STACK_TOP;
+    // A C function entered without CALL must see the ABI's 16-byte
+    // stack alignment (RSP % 16 == 8) and a harmless fake return slot.
+    uint64_t user_rsp = USER_STACK_TOP - sizeof(uint64_t);
+    *(uint64_t *)(uintptr_t)user_rsp = 0;
     uint64_t user_cs = 0x1B;
     uint64_t user_ss = 0x23;
 
