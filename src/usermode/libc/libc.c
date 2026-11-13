@@ -586,3 +586,106 @@ int tolower(int c) { return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c; }
 int isspace(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'; }
 int isdigit(int c) { return c >= '0' && c <= '9'; }
 int isalpha(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+/* POSIX/C library compatibility used by the DoomGeneric core. */
+static int g_errno_value;
+int *__errno_location(void) { return &g_errno_value; }
+int errno_value(void) { return g_errno_value; }
+
+char *strdup(const char *src) {
+    if (!src) return 0;
+    size_t n = strlen(src) + 1;
+    char *copy = malloc(n);
+    if (copy) memcpy(copy, src, n);
+    return copy;
+}
+static int ascii_lower(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+int strcasecmp(const char *a, const char *b) {
+    while (*a && ascii_lower((unsigned char)*a) == ascii_lower((unsigned char)*b)) { a++; b++; }
+    return ascii_lower((unsigned char)*a) - ascii_lower((unsigned char)*b);
+}
+int strncasecmp(const char *a, const char *b, size_t n) {
+    while (n && *a && ascii_lower((unsigned char)*a) == ascii_lower((unsigned char)*b)) { a++; b++; n--; }
+    return n ? ascii_lower((unsigned char)*a) - ascii_lower((unsigned char)*b) : 0;
+}
+int abs(int value) { return value < 0 ? -value : value; }
+double fabs(double value) { return value < 0.0 ? -value : value; }
+double atof(const char *s) {
+    if (!s) return 0.0;
+    while (isspace((unsigned char)*s)) s++;
+    int sign = 1; if (*s == '-' || *s == '+') { if (*s++ == '-') sign = -1; }
+    double v = 0.0, scale = 1.0;
+    while (isdigit((unsigned char)*s)) v = v * 10.0 + (*s++ - '0');
+    if (*s == '.') { s++; while (isdigit((unsigned char)*s)) { scale *= 0.1; v += (*s++ - '0') * scale; } }
+    return sign * v;
+}
+int fflush(FILE *stream) { (void)stream; return 0; }
+size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+    (void)ptr; (void)size; (void)count; (void)stream;
+    return 0; /* VexOS userland filesystem is read-only through stdio. */
+}
+int vfprintf(FILE *stream, const char *format, va_list ap) {
+    (void)stream;
+    char buffer[1024];
+    int n = vsnprintf(buffer, sizeof(buffer), format, ap);
+    if (n > 0) {
+        size_t len = (size_t)n < sizeof(buffer) ? (size_t)n : sizeof(buffer)-1;
+        syscall2(1, (uint64_t)buffer, len);
+    }
+    return n;
+}
+int remove(const char *path) { (void)path; g_errno_value = 30; return -1; }
+int rename(const char *oldpath, const char *newpath) { (void)oldpath; (void)newpath; g_errno_value = 30; return -1; }
+int mkdir(const char *path, unsigned int mode) { (void)path; (void)mode; g_errno_value = 30; return -1; }
+int system(const char *command) { (void)command; g_errno_value = 38; return -1; }
+
+/* A deliberately small scanf implementation for Doom's numeric config fields. */
+int sscanf(const char *input, const char *format, ...) {
+    if (!input || !format) return 0;
+    va_list ap; va_start(ap, format);
+    int assigned = 0;
+    while (*format) {
+        if (isspace((unsigned char)*format)) {
+            while (isspace((unsigned char)*format)) format++;
+            while (isspace((unsigned char)*input)) input++;
+            continue;
+        }
+        if (*format != '%') {
+            if (*input != *format) break;
+            input++; format++; continue;
+        }
+        format++;
+        if (*format == '%') { if (*input != '%') break; input++; format++; continue; }
+        int suppress = 0; if (*format == '*') { suppress = 1; format++; }
+        int width = 0; while (isdigit((unsigned char)*format)) { width = width*10 + (*format++-'0'); }
+        char spec = *format++;
+        while (isspace((unsigned char)*input)) input++;
+        if (spec == 'd' || spec == 'i' || spec == 'u' || spec == 'x') {
+            int sign = 1; if (*input == '-' || *input == '+') { if (*input++ == '-') sign = -1; }
+            unsigned base = spec == 'x' ? 16u : 10u; unsigned long value = 0; int digits = 0;
+            while (*input && (!width || digits < width)) {
+                int c = ascii_lower((unsigned char)*input), d = c >= '0' && c <= '9' ? c-'0' : (c >= 'a' && c <= 'f' ? c-'a'+10 : 99);
+                if ((unsigned)d >= base) break;
+                value = value*base + (unsigned)d; input++; digits++;
+            }
+            if (!digits) break;
+            if (!suppress) { if (spec == 'u' || spec == 'x') *va_arg(ap, unsigned int*) = (unsigned int)value; else *va_arg(ap, int*) = (int)value * sign; assigned++; }
+        } else if (spec == 'f' || spec == 'g' || spec == 'e') {
+            const char *start = input; if (*input == '-' || *input == '+') input++;
+            while (isdigit((unsigned char)*input)) input++;
+            if (*input == '.') { input++; while (isdigit((unsigned char)*input)) input++; }
+            if (input == start || (input == start+1 && (*start=='-' || *start=='+'))) break;
+            if (!suppress) { *va_arg(ap, float*) = (float)atof(start); assigned++; }
+        } else if (spec == 's') {
+            char *out = suppress ? 0 : va_arg(ap, char*); int n = 0;
+            while (*input && !isspace((unsigned char)*input) && (!width || n < width)) { if (out) out[n] = *input; input++; n++; }
+            if (!n) break; if (out) out[n] = 0; if (!suppress) assigned++;
+        } else if (spec == 'c') {
+            int n = width ? width : 1; char *out = suppress ? 0 : va_arg(ap, char*);
+            for (int i=0; i<n; i++) { if (!input[i]) { va_end(ap); return assigned; } if (out) out[i]=input[i]; }
+            input += n; if (!suppress) assigned++;
+        } else break;
+    }
+    va_end(ap);
+    return assigned;
+}

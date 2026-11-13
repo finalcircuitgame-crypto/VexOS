@@ -9,7 +9,7 @@ typedef struct {
 } FILE;
 
 FILE* fopen(const char* filename, const char* mode);
-int fclose(FILE* stream);
+int fclose(FILE* stream);\nint fflush(FILE* stream);\nsize_t fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream);\nint vfprintf(FILE* stream, const char* format, va_list ap);\nint sscanf(const char* input, const char* format, ...);
 size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream);
 int fseek(FILE* stream, long int offset, int whence);
 long int ftell(FILE* stream);
