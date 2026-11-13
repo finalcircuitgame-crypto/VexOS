@@ -35,7 +35,6 @@ run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into th
 
 ## Notes & warnings
 - Large binary artifacts (dist/tiny64.img, dist/storage.img) exceed GitHub recommended sizes; consider using git-lfs or excluding build artifacts from the repository.
-- There is an embedded/added path at `src/doom` that may be a nested repo/submodule. If accidental, remove from the index with `git rm --cached src/doom` and add `.gitignore` entries.
 
 ## Contributing
 Please open issues or PRs. Keep changes small and document new build dependencies.
