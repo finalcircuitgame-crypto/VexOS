@@ -68,6 +68,7 @@ jobs:
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
             -device qemu-xhci,id=xhci \
             -device usb-kbd,bus=xhci.0 \
+            -device usb-tablet,bus=xhci.0 \
             -display none \
             -monitor none \
             -serial file:serial.log \
