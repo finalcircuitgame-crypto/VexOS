@@ -240,7 +240,7 @@ static void ci_install_ring3_elf_fixture(void) {
       "[CI] Ring3 int80 syscall and exit passed\\n";
   const uint32_t message_len = (uint32_t)sizeof(message) - 1u;
   const uint32_t data_offset = 0x20u;
-  const uint32_t code_len = 26u;
+  const uint32_t code_len = 31u;
   const uint32_t file_size = 0x1000u + data_offset + message_len;
 
   for (uint32_t i = 0; i < sizeof(image); i++)
@@ -257,7 +257,7 @@ static void ci_install_ring3_elf_fixture(void) {
   eh->type = 2;
   eh->machine = 62;
   eh->version = 1;
-  eh->entry = 0x400000u;
+  eh->entry = 0x4000000000ull;
   eh->phoff = sizeof(*eh);
   eh->ehsize = sizeof(*eh);
   eh->phentsize = sizeof(ci_elf64_phdr_t);
@@ -267,27 +267,27 @@ static void ci_install_ring3_elf_fixture(void) {
   ph->type = 1;       // PT_LOAD
   ph->flags = 5;      // PF_R | PF_X
   ph->offset = 0x1000u;
-  ph->vaddr = 0x400000u;
-  ph->paddr = 0x400000u;
+  ph->vaddr = 0x4000000000ull;
+  ph->paddr = 0x4000000000ull;
   ph->filesz = data_offset + message_len;
   ph->memsz = PAGE_SIZE;
   ph->align = PAGE_SIZE;
 
-  // mov eax, 1; mov edi, 0x400020; mov esi, message_len;
+  // mov eax, 1; movabs rdi, 0x4000000020; mov esi, message_len;
   // int 0x80; mov eax, 0; int 0x80; jmp $.
-  uint8_t code[26] = {
+  uint8_t code[31] = {
       0xB8, 0x01, 0x00, 0x00, 0x00,
-      0xBF, 0x20, 0x00, 0x40, 0x00,
+      0x48, 0xBF, 0x20, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
       0xBE, 0, 0, 0, 0,
       0xCD, 0x80,
       0xB8, 0x00, 0x00, 0x00, 0x00,
       0xCD, 0x80,
       0xEB, 0xFE
   };
-  code[11] = (uint8_t)(message_len & 0xFFu);
-  code[12] = (uint8_t)((message_len >> 8) & 0xFFu);
-  code[13] = (uint8_t)((message_len >> 16) & 0xFFu);
-  code[14] = (uint8_t)((message_len >> 24) & 0xFFu);
+  code[16] = (uint8_t)(message_len & 0xFFu);
+  code[17] = (uint8_t)((message_len >> 8) & 0xFFu);
+  code[18] = (uint8_t)((message_len >> 16) & 0xFFu);
+  code[19] = (uint8_t)((message_len >> 24) & 0xFFu);
 
   for (uint32_t i = 0; i < code_len; i++)
     image[0x1000u + i] = code[i];
