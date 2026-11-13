@@ -65,6 +65,31 @@ jobs:
           OVMF_VARS_TEMPLATE=/usr/share/OVMF/OVMF_VARS_4M.fd
           test -s "$OVMF_CODE"
           test -s "$OVMF_VARS_TEMPLATE"
+
+          # Prepare a minimal SFS1 disk with one known file for ATA/SimpleFS tests.
+          python3 - <<'PY'
+          import struct
+
+          image = "dist/storage.img"
+          payload = b"VexOS SimpleFS syscall test\\n"
+          superblock = struct.pack(
+              "<8I", 0x31465353, 1, 1, 8, 9, 10, 1, 0
+          )
+          table = bytearray(8 * 512)
+          entry = struct.pack(
+              "<B32sIII", 1, b"ci.txt".ljust(32, b"\\0"), 9, len(payload), 0
+          )
+          table[:len(entry)] = entry
+          with open(image, "r+b") as disk:
+              disk.seek(0)
+              disk.write(superblock)
+              disk.write(bytes(512 - len(superblock)))
+              disk.seek(512)
+              disk.write(table)
+              disk.seek(9 * 512)
+              disk.write(payload.ljust(512, b"\\0"))
+          PY
+
           cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
           rm -f /tmp/vexos-qmp.sock serial.log qemu.log
 
@@ -110,7 +135,7 @@ jobs:
             "[CI] Heap allocator alignment/free/coalesce passed" \
             "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
             "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
-            "[CI] Syscall validation/user mmap/write/read/close/seek checks passed" \
+            "[CI] SimpleFS mount/read/write/remount and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
