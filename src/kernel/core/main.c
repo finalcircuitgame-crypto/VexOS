@@ -205,6 +205,10 @@ extern uint64_t syscall_handler(uint64_t rsp);
 static void ci_syscall_self_test(void) {
   struct InterruptFrame frame = {0};
 
+  // CI prepares a small SFS1 image with ci.txt on the ATA primary slave.
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS fixture mount");
+
   // Unknown syscall numbers and invalid user pointers must fail safely.
   frame.rax = 0xFFFFFFFFu;
   syscall_handler((uint64_t)(uintptr_t)&frame);
@@ -267,6 +271,100 @@ static void ci_syscall_self_test(void) {
   if (frame.rax != 3)
     ci_memory_test_fail("syscall write failed valid user buffer");
 
+  // Open/read/seek/close a real file through the syscall ABI.
+  static const char expected_file[] = "VexOS SimpleFS syscall test\n";
+  const uint32_t expected_file_len = (uint32_t)sizeof(expected_file) - 1u;
+  uint32_t mounted_file_size = 0;
+  if (!simplefs_file_size("ci.txt", &mounted_file_size) ||
+      mounted_file_size != expected_file_len)
+    ci_memory_test_fail("SimpleFS fixture file metadata");
+
+  char *user_name = (char *)user_buf + 16u;
+  static const char file_name[] = "ci.txt";
+  for (uint32_t i = 0; i < sizeof(file_name); i++)
+    user_name[i] = file_name[i];
+  char *user_read = (char *)user_buf + 128u;
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 3;
+  frame.rdi = (uint64_t)(uintptr_t)user_name;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  int test_fd = (int)frame.rax;
+  if (test_fd < 3)
+    ci_memory_test_fail("syscall open valid SimpleFS file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = expected_file_len;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != expected_file_len)
+    ci_memory_test_fail("syscall read valid SimpleFS file");
+  for (uint32_t i = 0; i < expected_file_len; i++) {
+    if (user_read[i] != expected_file[i])
+      ci_memory_test_fail("syscall read file content mismatch");
+  }
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = 0;
+  frame.rdx = 0;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall seek to beginning");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = 0;
+  frame.rdx = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != expected_file_len)
+    ci_memory_test_fail("syscall seek to end");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = (uint64_t)test_fd;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall close valid SimpleFS file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall read succeeded after close");
+
+  // Exercise SFS writes, metadata updates, and remount persistence.
+  static const char write_data[] = "VexOS CI persistent write test\n";
+  const uint32_t write_len = (uint32_t)sizeof(write_data) - 1u;
+  if (!simplefs_write_file("ci-out.txt", write_data, write_len))
+    ci_memory_test_fail("SimpleFS write file");
+  char verify_data[64];
+  uint32_t verify_len = 0;
+  if (!simplefs_read_file("ci-out.txt", verify_data, sizeof(verify_data),
+                          &verify_len) || verify_len != write_len)
+    ci_memory_test_fail("SimpleFS read-after-write");
+  for (uint32_t i = 0; i < write_len; i++) {
+    if (verify_data[i] != write_data[i])
+      ci_memory_test_fail("SimpleFS write content mismatch");
+  }
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS remount after write");
+  verify_len = 0;
+  if (!simplefs_read_file("ci-out.txt", verify_data, sizeof(verify_data),
+                          &verify_len) || verify_len != write_len)
+    ci_memory_test_fail("SimpleFS remount read");
+  for (uint32_t i = 0; i < write_len; i++) {
+    if (verify_data[i] != write_data[i])
+      ci_memory_test_fail("SimpleFS remount content mismatch");
+  }
+
   frame = (struct InterruptFrame){0};
   frame.rax = 4;
   frame.rdi = 2;
@@ -304,7 +402,7 @@ static void ci_syscall_self_test(void) {
   if (VMM_IsUserRange(user_buf, 1, 0))
     ci_memory_test_fail("syscall mmap left stale user mapping");
 
-  serial_print("[CI] Syscall validation/user mmap/write/read/close/seek checks passed\n");
+  serial_print("[CI] SimpleFS mount/read/write/remount and syscall file I/O passed\n");
 }
 
 #endif
