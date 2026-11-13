@@ -823,10 +823,11 @@ void kernel_main(BootInfo *bootInfo) {
   // Initialize desktop after setup (or the CI-only wizard bypass).
   serial_print("[KERNEL] Setup complete, initializing desktop...\n");
   desktop_init(bootInfo);
-  serial_print("[KERNEL] Desktop initialized\n");
 
-  // Stop drawing serial/boot text to the framebuffer
+  // Keep subsequent diagnostics on COM1 only; do not paint boot text over
+  // the newly initialized desktop and taskbar.
   g_ConsoleReady = 0;
+  serial_print("[KERNEL] Desktop initialized\n");
 
 #ifdef VEXOS_CI_INPUT_TEST
   // Run only after desktop_init has installed the framebuffer target.
