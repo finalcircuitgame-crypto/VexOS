@@ -200,6 +200,113 @@ static void ci_memory_self_test(void) {
     ci_memory_test_fail("VMM range crossing user limit accepted");
   serial_print("[CI] VMM user ranges/write permissions/alignment/unmapping passed\n");
 }
+extern uint64_t syscall_handler(uint64_t rsp);
+
+static void ci_syscall_self_test(void) {
+  struct InterruptFrame frame = {0};
+
+  // Unknown syscall numbers and invalid user pointers must fail safely.
+  frame.rax = 0xFFFFFFFFu;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall unknown-number rejection");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 1;
+  frame.rdi = 0x12345u;
+  frame.rsi = 4;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall write rejected invalid user pointer");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = 0;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted zero length");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = 16u * 1024u * 1024u + 1u;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted oversized length");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rdi = 0x1000u;
+  frame.rsi = PAGE_SIZE;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall mmap accepted out-of-range requested address");
+
+  // A two-page mapping must be user-accessible, writable, and zero-filled.
+  frame = (struct InterruptFrame){0};
+  frame.rax = 2;
+  frame.rsi = PAGE_SIZE + 1u;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  void *user_buf = (void *)(uintptr_t)frame.rax;
+  if (!user_buf || frame.rax == UINT64_MAX ||
+      !VMM_IsUserRange(user_buf, PAGE_SIZE + 1u, 1))
+    ci_memory_test_fail("syscall mmap failed valid two-page allocation");
+
+  volatile uint8_t *bytes = (volatile uint8_t *)user_buf;
+  volatile uint8_t *last_page = (volatile uint8_t *)((uintptr_t)user_buf + PAGE_SIZE);
+  if (bytes[0] != 0 || bytes[PAGE_SIZE - 1u] != 0 || last_page[0] != 0)
+    ci_memory_test_fail("syscall mmap did not zero mapped pages");
+
+  bytes[0] = 'C';
+  bytes[1] = 'I';
+  bytes[2] = '\n';
+  frame = (struct InterruptFrame){0};
+  frame.rax = 1;
+  frame.rdi = (uint64_t)(uintptr_t)user_buf;
+  frame.rsi = 3;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 3)
+    ci_memory_test_fail("syscall write failed valid user buffer");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = 2;
+  frame.rsi = (uint64_t)(uintptr_t)user_buf;
+  frame.rdx = 3;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall read accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall close accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if ((int64_t)frame.rax != -1)
+    ci_memory_test_fail("syscall seek accepted invalid file descriptor");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 9;
+  frame.rsi = 0;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != UINT64_MAX)
+    ci_memory_test_fail("syscall framebuffer rejected invalid-dimension test");
+
+  if (!VMM_UnmapPage(user_buf, 1) ||
+      !VMM_UnmapPage((void *)((uintptr_t)user_buf + PAGE_SIZE), 1))
+    ci_memory_test_fail("syscall mmap teardown");
+  if (VMM_IsUserRange(user_buf, 1, 0))
+    ci_memory_test_fail("syscall mmap left stale user mapping");
+
+  serial_print("[CI] Syscall validation/user mmap/write/read/close/seek checks passed\\n");
+}
+
 #endif
 
 void kernel_main(BootInfo *bootInfo) {
@@ -420,6 +527,7 @@ void kernel_main(BootInfo *bootInfo) {
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
 #ifdef VEXOS_CI_INPUT_TEST
   ci_memory_self_test();
+  ci_syscall_self_test();
 #endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
