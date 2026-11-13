@@ -51,11 +51,19 @@ jobs:
       - name: Boot UEFI image in QEMU and smoke-test kernel startup
         shell: bash
         run: |
+          set -e
+          OVMF_CODE="$(find /usr/share -type f \\( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.secboot.fd' \\) -print -quit)"
+          if [ -z "$OVMF_CODE" ]; then
+            echo "Could not locate an OVMF_CODE firmware image"
+            find /usr/share -iname '*ovmf*' -print || true
+            exit 1
+          fi
+          echo "Using UEFI firmware: $OVMF_CODE"
           set +e
           timeout 25s qemu-system-x86_64 \
             -machine q35 \
             -m 512M \
-            -bios /usr/share/OVMF/OVMF_CODE.fd \
+            -bios "$OVMF_CODE" \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
             -device qemu-xhci \
