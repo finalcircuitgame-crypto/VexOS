@@ -101,6 +101,10 @@ static void shell_append(const char *s);
 
 // External functions
 void xhci_poll_events(void);
+#ifdef VEXOS_CI_INPUT_TEST
+extern void serial_print(const char *str);
+static uint8_t g_ci_keyboard_input_seen;
+#endif
 
 static uint8_t g_ring3_task_started;
 
@@ -1993,6 +1997,12 @@ void desktop_tick(void) {
     if (!input_kbd_pop_char(&c)) {
       break;
     }
+#ifdef VEXOS_CI_INPUT_TEST
+    if (!g_ci_keyboard_input_seen) {
+      g_ci_keyboard_input_seen = 1;
+      serial_print("[CI] Keyboard character reached desktop input queue\\n");
+    }
+#endif
 
     // Route keyboard input to focused app.
     if (g_app_focus == APP_NOTEPAD && g_app_open[APP_NOTEPAD]) {
