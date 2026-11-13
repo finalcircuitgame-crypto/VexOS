@@ -86,6 +86,16 @@ uint64_t Task_Schedule(uint64_t current_rsp) {
   for (int i = 0; i < task_count; i++) {
     int next = (current_task + 1 + i) % task_count;
     if (tasks[next].active) {
+#ifdef VEXOS_CI_INPUT_TEST
+      if (task_count > 1 && tasks[next].rsp) {
+        const uint64_t *frame =
+            (const uint64_t *)(uintptr_t)tasks[next].rsp;
+        if (frame[16] != 0x08u) {
+          ci_runtime_bad_frame_cs = frame[16];
+          return current_rsp;
+        }
+      }
+#endif
       current_task = next;
       return tasks[current_task].rsp;
     }
@@ -117,6 +127,7 @@ uint64_t Task_Exit(uint64_t current_rsp) {
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
 static volatile int ci_runtime_setup_ok;
+static volatile uint64_t ci_runtime_bad_frame_cs;
 
 static void ci_runtime_task_a(void) {
   for (;;) {
@@ -136,6 +147,7 @@ void Task_CI_StartRuntimeTest(void) {
   ci_runtime_count_a = 0;
   ci_runtime_count_b = 0;
   ci_runtime_setup_ok = 0;
+  ci_runtime_bad_frame_cs = 0;
 
   // Allocate worker stacks from the initialized, identity-mapped kernel heap.
   // This avoids relying on the boot-time identity-map window covering .bss.
@@ -174,5 +186,11 @@ void Task_CI_StartRuntimeTest(void) {
 int Task_CI_RuntimeTestPassed(void) {
   return ci_runtime_setup_ok &&
          ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
+}
+#endif
+
+#ifdef VEXOS_CI_INPUT_TEST
+uint64_t Task_CI_RuntimeBadFrameCS(void) {
+  return ci_runtime_bad_frame_cs;
 }
 #endif
