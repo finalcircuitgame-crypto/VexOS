@@ -60,6 +60,10 @@ jobs:
           nm -n dist/kernel.elf | grep -E 'irq0_stub|irq0_handler|Task_Schedule|ci_runtime_task_[ab]|Task_CI_StartRuntimeTest' || true
           echo "IRQ0 stub disassembly:"
           objdump -d dist/kernel.elf | sed -n '/<irq0_stub>:/,/^$/p'
+          echo "IRQ0 handler disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<irq0_handler>:/,/^$/p'
+          echo "Task scheduler disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<Task_Schedule>:/,/^$/p'
 
       - name: Boot desktop in QEMU and inject USB keyboard input
         shell: bash
