@@ -143,9 +143,15 @@ void kernel_main(BootInfo *bootInfo) {
 
   PMM_Init(mem_size, bitmap_addr);
 
-  uint64_t bitmap_pages = ((mem_size / 4096 / 8) + 4095) / 4096;
+  uint64_t total_pages = mem_size / 4096ull;
+  uint64_t bitmap_bytes = (total_pages + 7ull) / 8ull;
+  uint64_t bitmap_pages = (bitmap_bytes + 4095ull) / 4096ull;
   if (bitmap_pages == 0)
     bitmap_pages = 1;
+  if (bitmap_pages >= total_pages) {
+    serial_print("[KERNEL] FATAL: PMM region is too small for its bitmap\\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
   serial_print("[KERNEL] Reserving ");
   {
     char s[32];
@@ -170,7 +176,7 @@ void kernel_main(BootInfo *bootInfo) {
 
   PMM_FreePages(
       (void *)(bootInfo->LargestFreeRegion.Base + (bitmap_pages * 4096)),
-      (mem_size / 4096) - bitmap_pages);
+      total_pages - bitmap_pages);
   PrintString("PMM Initialized.\n", 0x00FF00);
 
   // VMM
