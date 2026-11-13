@@ -108,8 +108,8 @@ jobs:
             "[KERNEL] Entered kernel_main" \
             "[KERNEL] Heap Initialized Successfully." \
             "[CI] Heap allocator alignment/free/coalesce passed" \
-            "[CI] PMM page alignment/free/range checks passed" \
-            "[CI] VMM supervisor/user mapping checks passed" \
+            "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
+            "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
             "[PCI] Enumeration Complete" \
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
