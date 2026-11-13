@@ -1418,7 +1418,7 @@ static void shell_run_line(void) {
 
   if (g_shell_line_len == 4 && streq_n(g_shell_line, "help", 4)) {
 #ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Shell help command executed\\n");
+    serial_print("[CI] Shell help command executed\n");
 #endif
     shell_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
   } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "clear", 5)) ||
@@ -1436,7 +1436,7 @@ static void shell_run_line(void) {
     shell_append("\n");
   } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "mem", 3)) {
 #ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Shell mem command executed\\n");
+    serial_print("[CI] Shell mem command executed\n");
 #endif
     shell_append("heap ok\n");
   } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "ver", 3)) {
@@ -1996,7 +1996,7 @@ void desktop_tick(void) {
 #ifdef VEXOS_CI_INPUT_TEST
   if (!g_ci_mouse_move_seen && (p0.dx != 0 || p0.dy != 0)) {
     g_ci_mouse_move_seen = 1;
-    serial_print("[CI] Mouse pointer movement reached desktop_tick\\n");
+    serial_print("[CI] Mouse pointer movement reached desktop_tick\n");
   }
 #endif
   uint32_t buttons = p0.buttons;
@@ -2058,7 +2058,7 @@ void desktop_tick(void) {
           static uint8_t ci_shell_char_seen;
           if (!ci_shell_char_seen) {
             ci_shell_char_seen = 1;
-            serial_print("[CI] Shell received printable keyboard input\\n");
+            serial_print("[CI] Shell received printable keyboard input\n");
           }
 #endif
           if (g_shell_line_len + 1u < (uint32_t)sizeof(g_shell_line)) {
@@ -2084,7 +2084,7 @@ void desktop_tick(void) {
 #ifdef VEXOS_CI_INPUT_TEST
       if (g_start_open && !g_ci_start_click_seen) {
         g_ci_start_click_seen = 1;
-        serial_print("[CI] Start menu opened by USB mouse click\\n");
+        serial_print("[CI] Start menu opened by USB mouse click\n");
       }
 #endif
       ui_changed = 1;
@@ -2099,7 +2099,7 @@ void desktop_tick(void) {
         if (ry >= 8 && ry < 24) {
           g_show_shell = 1;
 #ifdef VEXOS_CI_INPUT_TEST
-          serial_print("[CI] Shell opened from Start menu mouse click\\n");
+          serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
           g_app_open[APP_SHELL] = 1;
           g_app_focus = APP_SHELL;
