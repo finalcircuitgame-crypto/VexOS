@@ -304,7 +304,7 @@ static void ci_syscall_self_test(void) {
   if (VMM_IsUserRange(user_buf, 1, 0))
     ci_memory_test_fail("syscall mmap left stale user mapping");
 
-  serial_print("[CI] Syscall validation/user mmap/write/read/close/seek checks passed\\n");
+  serial_print("[CI] Syscall validation/user mmap/write/read/close/seek checks passed\n");
 }
 
 #endif
