@@ -90,7 +90,7 @@ uint64_t Task_Schedule(uint64_t current_rsp) {
     int next = (current_task + 1 + i) % task_count;
     if (tasks[next].active) {
 #ifdef VEXOS_CI_INPUT_TEST
-      if (task_count > 1 && tasks[next].rsp) {
+      if (ci_runtime_setup_ok && task_count > 1 && tasks[next].rsp) {
         const uint64_t *frame =
             (const uint64_t *)(uintptr_t)tasks[next].rsp;
         if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
