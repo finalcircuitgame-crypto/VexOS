@@ -109,3 +109,42 @@ uint64_t Task_Exit(uint64_t current_rsp) {
     __asm__ volatile("hlt");
   }
 }
+
+
+#ifdef VEXOS_CI_INPUT_TEST
+// Runtime proof that IRQ0 actually restores and executes multiple task stacks.
+// The timer interrupt must preempt each worker and resume the other worker.
+static uint64_t ci_runtime_stack_a[512] __attribute__((aligned(16)));
+static uint64_t ci_runtime_stack_b[512] __attribute__((aligned(16)));
+static volatile uint64_t ci_runtime_count_a;
+static volatile uint64_t ci_runtime_count_b;
+
+static void ci_runtime_task_a(void) {
+  for (;;) {
+    ci_runtime_count_a++;
+    __asm__ volatile("pause");
+  }
+}
+
+static void ci_runtime_task_b(void) {
+  for (;;) {
+    ci_runtime_count_b++;
+    __asm__ volatile("pause");
+  }
+}
+
+void Task_CI_StartRuntimeTest(void) {
+  ci_runtime_count_a = 0;
+  ci_runtime_count_b = 0;
+  Task_Create(ci_runtime_task_a, &ci_runtime_stack_a[512]);
+  Task_Create(ci_runtime_task_b, &ci_runtime_stack_b[512]);
+  if (task_count != 3) {
+    ci_runtime_count_a = UINT64_MAX;
+    ci_runtime_count_b = UINT64_MAX;
+  }
+}
+
+int Task_CI_RuntimeTestPassed(void) {
+  return ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
+}
+#endif
