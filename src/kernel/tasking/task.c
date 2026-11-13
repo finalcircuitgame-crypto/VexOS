@@ -8,6 +8,9 @@ extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 static Task tasks[10];
 static int task_count = 0;
 static int current_task = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+static volatile uint64_t ci_runtime_bad_frame_cs;
+#endif
 
 void Task_Init() {
   // Current execution becomes Task 0
@@ -127,7 +130,6 @@ uint64_t Task_Exit(uint64_t current_rsp) {
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
 static volatile int ci_runtime_setup_ok;
-static volatile uint64_t ci_runtime_bad_frame_cs;
 
 static void ci_runtime_task_a(void) {
   for (;;) {
