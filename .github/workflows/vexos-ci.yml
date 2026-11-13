@@ -56,6 +56,10 @@ jobs:
           test -s dist/storage.img
           file dist/BOOTX64.EFI dist/kernel.elf dist/tiny64.img dist/storage.img
           readelf -h dist/kernel.elf
+          echo "Kernel test symbol addresses:"
+          nm -n dist/kernel.elf | grep -E 'irq0_stub|irq0_handler|Task_Schedule|ci_runtime_task_[ab]|Task_CI_StartRuntimeTest' || true
+          echo "IRQ0 stub disassembly:"
+          objdump -d dist/kernel.elf | sed -n '/<irq0_stub>:/,/^$/p'
 
       - name: Boot desktop in QEMU and inject USB keyboard input
         shell: bash
