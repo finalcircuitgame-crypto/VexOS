@@ -202,6 +202,7 @@ static void ci_memory_self_test(void) {
 }
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
+extern int Task_CI_SelfTest(void);
 
 static void ci_syscall_self_test(void) {
   struct InterruptFrame frame = {0};
@@ -664,6 +665,9 @@ void kernel_main(BootInfo *bootInfo) {
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
   serial_print("[CI] ELF header/segment validation and rollback passed\\n");
+  if (!Task_CI_SelfTest())
+    ci_memory_test_fail("task frame/scheduler self-test");
+  serial_print("[CI] Task IRET frame and scheduler checks passed\\n");
   ci_syscall_self_test();
 #endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
