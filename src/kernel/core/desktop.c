@@ -1417,6 +1417,9 @@ static void shell_run_line(void) {
   }
 
   if (g_shell_line_len == 4 && streq_n(g_shell_line, "help", 4)) {
+#ifdef VEXOS_CI_INPUT_TEST
+    serial_print("[CI] Shell help command executed\\n");
+#endif
     shell_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
   } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "clear", 5)) ||
              (g_shell_line_len == 3 && streq_n(g_shell_line, "cls", 3))) {
@@ -1432,6 +1435,9 @@ static void shell_run_line(void) {
     }
     shell_append("\n");
   } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "mem", 3)) {
+#ifdef VEXOS_CI_INPUT_TEST
+    serial_print("[CI] Shell mem command executed\\n");
+#endif
     shell_append("heap ok\n");
   } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "ver", 3)) {
     shell_append("tiny64 ui\n");
