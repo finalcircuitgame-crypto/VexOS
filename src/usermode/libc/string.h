@@ -16,6 +16,9 @@ int strncmp(const char* s1, const char* s2, size_t n);
 char* strstr(const char* haystack, const char* needle);
 char* strchr(const char* s, int c);
 char* strrchr(const char* s, int c);
-char* strcat(char* dest, const char* src);\nchar* strdup(const char* src);\nint strcasecmp(const char* a, const char* b);\nint strncasecmp(const char* a, const char* b, size_t n);
+char* strcat(char* dest, const char* src);
+char* strdup(const char* src);
+int strcasecmp(const char* a, const char* b);
+int strncasecmp(const char* a, const char* b, size_t n);
 
 #endif

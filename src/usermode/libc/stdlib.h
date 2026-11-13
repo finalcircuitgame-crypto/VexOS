@@ -9,6 +9,12 @@ void* calloc(size_t num, size_t size);
 void* realloc(void* ptr, size_t size);
 
 void exit(int status);
-int atoi(const char* str);\ndouble atof(const char* str);\nint abs(int value);\nint remove(const char* path);\nint rename(const char* oldpath, const char* newpath);\nint system(const char* command);\nint mkdir(const char* path, unsigned int mode);
+int atoi(const char* str);
+double atof(const char* str);
+int abs(int value);
+int remove(const char* path);
+int rename(const char* oldpath, const char* newpath);
+int system(const char* command);
+int mkdir(const char* path, unsigned int mode);
 
 #endif
