@@ -71,13 +71,13 @@ jobs:
           import struct
 
           image = "dist/storage.img"
-          payload = b"VexOS SimpleFS syscall test\\n"
+          payload = b"VexOS SimpleFS syscall test\n"
           superblock = struct.pack(
               "<8I", 0x31465353, 1, 1, 8, 9, 10, 1, 0
           )
           table = bytearray(8 * 512)
           entry = struct.pack(
-              "<B32sIII", 1, b"ci.txt".ljust(32, b"\\0"), 9, len(payload), 0
+              "<B32sIII", 1, b"ci.txt".ljust(32, b"\0"), 9, len(payload), 0
           )
           table[:len(entry)] = entry
           with open(image, "r+b") as disk:
@@ -87,7 +87,7 @@ jobs:
               disk.seek(512)
               disk.write(table)
               disk.seek(9 * 512)
-              disk.write(payload.ljust(512, b"\\0"))
+              disk.write(payload.ljust(512, b"\0"))
           PY
 
           cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
