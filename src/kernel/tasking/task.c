@@ -10,6 +10,7 @@ static int task_count = 0;
 static int current_task = 0;
 #ifdef VEXOS_CI_INPUT_TEST
 static volatile uint64_t ci_runtime_bad_frame_cs;
+static volatile int ci_runtime_setup_ok;
 #endif
 
 void Task_Init() {
@@ -129,7 +130,6 @@ uint64_t Task_Exit(uint64_t current_rsp) {
 // The timer interrupt must preempt each worker and resume the other worker.
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
-static volatile int ci_runtime_setup_ok;
 
 static void ci_runtime_task_a(void) {
   for (;;) {
