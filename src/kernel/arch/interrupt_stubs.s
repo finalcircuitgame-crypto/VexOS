@@ -1,6 +1,7 @@
 .extern irq0_handler
 .extern syscall_handler
 .extern exception_handler
+.extern irq0_bad_frame_handler
 .global irq0_stub
 .global syscall_stub
 .global isr0_stub
@@ -106,8 +107,18 @@ irq0_stub:
     /* If irq0_handler returns a new RSP, switch to it */
     mov %rax, %rsp
 
+    /* Validate the actual frame that will be consumed by IRETQ. */
+    cmpq $0x08, 128(%rsp)
+    je 1f
+    cmpq $0x1B, 128(%rsp)
+    je 1f
+    mov %rsp, %rdi
+    andq $-16, %rsp
+    call irq0_bad_frame_handler
+    cli
+    hlt
+1:
     POP_GPRS
-    
     iretq
 
 ISR_NOERR 0
