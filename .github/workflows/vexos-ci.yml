@@ -242,6 +242,7 @@ jobs:
               ["h", "e", "l", "p", "ret"],
               ["m", "e", "m", "ret"],
               ["s", "p", "e", "c", "s", "ret"],
+              ["r", "i", "n", "g", "3", "ret"],
               ["n", "o", "t", "e", "p", "a", "d", "ret"],
               ["v", "e", "x"],
           ]
@@ -272,6 +273,8 @@ jobs:
             "[CI] Shell help command executed"
             "[CI] Shell mem command executed"
             "[CI] Shell specs command executed"
+            "[CI] Ring3 int80 syscall and exit passed"
+            "[USERMODE] exiting ring3"
             "[CI] Notepad opened by shell command"
             "[CI] Notepad accepted the full typed text vex"
           )
