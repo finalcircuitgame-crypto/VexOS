@@ -34,8 +34,17 @@ jobs:
           command -v mcopy
           command -v qemu-system-x86_64
 
-      - name: Clean build bootloader, kernel, and disk images
+      - name: Build normal and CI-instrumented bootloader, kernel, and disk images
         run: |
+          # First compile the exact default configuration used outside CI.
+          make clean
+          make -j2 all
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+
+          # Then rebuild with CI-only wizard/input instrumentation for QEMU tests.
           make clean
           make VEXOS_CI=1 -j2 all
 
