@@ -10,6 +10,7 @@
 #define SYS_TICKS 7u
 #define SYS_DRAW 9u
 #define SYS_KEY_EVENT 10u
+#define SYS_FULLSCREEN 11u
 
 static inline uint64_t vex_syscall0(uint64_t n) {
     uint64_t r;
@@ -23,7 +24,9 @@ static inline uint64_t vex_syscall3(uint64_t n, uint64_t a, uint64_t b, uint64_t
     return r;
 }
 
-void DG_Init(void) {}
+void DG_Init(void) {
+    (void)vex_syscall0(SYS_FULLSCREEN);
+}
 void DG_SetWindowTitle(const char *title) { (void)title; }
 
 void DG_DrawFrame(void) {

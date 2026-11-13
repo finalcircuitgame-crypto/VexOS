@@ -3,6 +3,7 @@
 #include "../../include/simplefs.h"
 #include "../../include/vmm.h"
 #include "../../include/pmm.h"
+#include "../../include/desktop.h"
 #include "../../include/input.h"
 #include <stdint.h>
 
@@ -191,6 +192,7 @@ uint64_t syscall_handler(uint64_t rsp) {
     // ABI: rax = syscall number; rdi/rsi/rdx = arguments.
     switch (frame->rax) {
     case 0:
+        desktop_set_fullscreen_app_active(0);
         serial_print("[USERMODE] exiting ring3\n");
         return Task_Exit(rsp);
     case 1:
@@ -227,6 +229,10 @@ uint64_t syscall_handler(uint64_t rsp) {
     }
     // Returns 0 when empty, otherwise bit 16 marks a valid event,
     // bit 8 is pressed/released, and bits 0..7 contain the HID usage.
+    case 11:
+        desktop_set_fullscreen_app_active(1);
+        frame->rax = 0;
+        break;
     case 10: {
         input_kbd_event_t event;
         if (input_kbd_pop_event(&event))
