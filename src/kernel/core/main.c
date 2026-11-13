@@ -473,7 +473,7 @@ static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
       VMM_IsUserRange(user_pixel, sizeof(uint32_t), 0))
     ci_memory_test_fail("framebuffer test mmap teardown");
 
-  serial_print("[CI] Successful framebuffer syscall draw passed\\n");
+  serial_print("[CI] Successful framebuffer syscall draw passed\n");
 }
 
 #endif
