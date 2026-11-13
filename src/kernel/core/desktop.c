@@ -2042,6 +2042,9 @@ void desktop_tick(void) {
         }
       } else {
         if (c == '\n') {
+#ifdef VEXOS_CI_INPUT_TEST
+          serial_print("[CI] Shell command submitted through keyboard\n");
+#endif
           shell_run_line();
           ui_changed = 1;
         } else if (c >= 32 && c <= 126) {
