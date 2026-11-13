@@ -58,13 +58,13 @@ static int sys_open(const char* filename) {
     if (fd == -1) return -1;
 
     uint32_t size = 0;
-    if (simplefs_file_size(name_buf, &size) != 0) return -1;
+    if (simplefs_file_size(name_buf, &size) == 0) return -1;
 
     void* data = kmalloc(size);
     if (!data) return -1;
 
     uint32_t out_len = 0;
-    if (simplefs_read_file(name_buf, data, size, &out_len) != 0) {
+    if (simplefs_read_file(name_buf, data, size, &out_len) == 0) {
         kfree(data);
         return -1;
     }
