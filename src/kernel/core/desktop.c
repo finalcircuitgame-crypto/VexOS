@@ -1463,7 +1463,7 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "specs", 5)) {
     shell_run_specs();
 #ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Shell specs command executed\\n");
+    serial_print("[CI] Shell specs command executed\n");
 #endif
   } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) ||
              (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4))) {
@@ -1526,7 +1526,7 @@ static void shell_run_line(void) {
     g_app_open[APP_NOTEPAD] = 1;
     g_app_focus = APP_NOTEPAD;
 #ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Notepad opened by shell command\\n");
+    serial_print("[CI] Notepad opened by shell command\n");
 #endif
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
@@ -2046,7 +2046,7 @@ void desktop_tick(void) {
           static uint8_t ci_notepad_text_seen;
           if (!ci_notepad_text_seen) {
             ci_notepad_text_seen = 1;
-            serial_print("[CI] Notepad received printable keyboard input\\n");
+            serial_print("[CI] Notepad received printable keyboard input\n");
           }
 #endif
           ui_changed = 1;
