@@ -150,6 +150,16 @@ void Task_CI_StartRuntimeTest(void) {
   Task_Create(ci_runtime_task_a, (uint8_t *)stack_a + 4096u);
   Task_Create(ci_runtime_task_b, (uint8_t *)stack_b + 4096u);
   ci_runtime_setup_ok = (task_count == 3);
+
+  if (ci_runtime_setup_ok) {
+    const uint64_t *frame_a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
+    const uint64_t *frame_b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
+    ci_runtime_setup_ok =
+        frame_a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
+        frame_a[16] == 0x08u && frame_a[17] == 0x202u && frame_a[18] == 0 &&
+        frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
+        frame_b[16] == 0x08u && frame_b[17] == 0x202u && frame_b[18] == 0;
+  }
 }
 
 int Task_CI_RuntimeTestPassed(void) {
