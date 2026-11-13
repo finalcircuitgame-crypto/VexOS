@@ -2082,6 +2082,9 @@ void desktop_tick(void) {
         int32_t ry = p0.y - my;
         if (ry >= 8 && ry < 24) {
           g_show_shell = 1;
+#ifdef VEXOS_CI_INPUT_TEST
+          serial_print("[CI] Shell opened from Start menu mouse click\\n");
+#endif
           g_app_open[APP_SHELL] = 1;
           g_app_focus = APP_SHELL;
           g_start_open = 0;
