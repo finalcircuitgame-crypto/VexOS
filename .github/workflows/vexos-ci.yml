@@ -1,0 +1,89 @@
+name: VexOS CI
+
+on:
+  push:
+    branches: [main, fix/filesystem-return-checks]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source and Doom submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and VM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf
+
+      - name: Verify UEFI toolchain paths
+        run: |
+          test -f /usr/include/efi/efi.h
+          test -f /usr/lib/crt0-efi-x86_64.o
+          test -f /usr/lib/elf_x86_64_efi.lds
+          command -v mformat
+          command -v mcopy
+          command -v qemu-system-x86_64
+
+      - name: Clean build bootloader, kernel, and disk images
+        run: |
+          make clean
+          make -j2 all
+
+      - name: Verify build artifacts
+        run: |
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+          file dist/BOOTX64.EFI dist/kernel.elf dist/tiny64.img dist/storage.img
+          readelf -h dist/kernel.elf
+
+      - name: Boot UEFI image in QEMU and smoke-test kernel startup
+        shell: bash
+        run: |
+          set +e
+          timeout 25s qemu-system-x86_64 \
+            -machine q35 \
+            -m 512M \
+            -bios /usr/share/OVMF/OVMF_CODE.fd \
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device qemu-xhci \
+            -display none \
+            -monitor none \
+            -serial file:serial.log \
+            -no-reboot -no-shutdown
+          qemu_status=$?
+          set -e
+          if [ "$qemu_status" -ne 0 ] && [ "$qemu_status" -ne 124 ]; then
+            echo "QEMU exited unexpectedly: $qemu_status"
+            cat serial.log || true
+            exit 1
+          fi
+          if ! grep -q "\[KERNEL\] Entered kernel_main" serial.log; then
+            echo "Kernel entry marker not found. Serial output:"
+            cat serial.log || true
+            exit 1
+          fi
+          if ! grep -q "\[KERNEL\] Starting main loop" serial.log; then
+            echo "Kernel did not reach its main loop. Serial output:"
+            cat serial.log || true
+            exit 1
+          fi
+          if grep -q "\[KERNEL\] FATAL:" serial.log; then
+            echo "Kernel reported a fatal error:"
+            cat serial.log
+            exit 1
+          fi
+          echo "UEFI boot smoke test passed; kernel reached its main loop."
+          tail -c 4000 serial.log
