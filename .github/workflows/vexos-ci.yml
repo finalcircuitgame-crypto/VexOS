@@ -198,6 +198,15 @@ jobs:
           })
           # Exercise keyboard input in the opened shell.
           for key in ["h", "e", "l", "p", "ret"]:
+          for key in ["m", "e", "m", "ret"]:
+              command({
+                  "execute": "send-key",
+                  "arguments": {
+                      "keys": [{"type": "qcode", "data": key}],
+                      "hold-time": 100
+                  }
+              })
+              time.sleep(0.25)
               command({
                   "execute": "send-key",
                   "arguments": {
@@ -219,6 +228,8 @@ jobs:
             "[CI] Shell opened from Start menu mouse click"
             "[CI] Shell received printable keyboard input"
             "[CI] Shell command submitted through keyboard"
+            "[CI] Shell help command executed"
+            "[CI] Shell mem command executed"
           )
           for i in $(seq 1 150); do
             all_seen=1
