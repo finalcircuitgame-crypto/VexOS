@@ -664,10 +664,10 @@ void kernel_main(BootInfo *bootInfo) {
   ci_memory_self_test();
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
-  serial_print("[CI] ELF header/segment validation and rollback passed\\n");
+  serial_print("[CI] ELF header/segment validation and rollback passed\n");
   if (!Task_CI_SelfTest())
     ci_memory_test_fail("task frame/scheduler self-test");
-  serial_print("[CI] Task IRET frame and scheduler checks passed\\n");
+  serial_print("[CI] Task IRET frame and scheduler checks passed\n");
   ci_syscall_self_test();
 #endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
