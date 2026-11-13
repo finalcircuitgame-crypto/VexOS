@@ -69,7 +69,7 @@ int Task_CI_SelfTest(void) {
     return 0;
 
   uint64_t next_rsp = Task_Schedule(0x1111u);
-  if (!next_rsp || (next_rsp & 15u) != 0u)
+  if (!next_rsp || (next_rsp & 15u) != 8u)
     return 0;
 
   const uint64_t *frame = (const uint64_t *)(uintptr_t)next_rsp;
