@@ -309,6 +309,7 @@ jobs:
               echo "Expected input/desktop marker missing: $marker"
               cat serial.log || true
               cat qemu.log || true
+              tail -c 12000 qemu-debug.log || true
               exit 1
             fi
           done
