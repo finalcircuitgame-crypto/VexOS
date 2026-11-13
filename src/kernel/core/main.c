@@ -272,8 +272,7 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("syscall write failed valid user buffer");
 
   // Open/read/seek/close a real file through the syscall ABI.
-  static const char expected_file[] = "VexOS SimpleFS syscall test\n";
-  const uint32_t expected_file_len = (uint32_t)sizeof(expected_file) - 1u;
+  const uint32_t expected_file_len = 700u;
   uint32_t mounted_file_size = 0;
   if (!simplefs_file_size("ci.txt", &mounted_file_size) ||
       mounted_file_size != expected_file_len)
@@ -302,8 +301,9 @@ static void ci_syscall_self_test(void) {
   if (frame.rax != expected_file_len)
     ci_memory_test_fail("syscall read valid SimpleFS file");
   for (uint32_t i = 0; i < expected_file_len; i++) {
-    if (user_read[i] != expected_file[i])
-      ci_memory_test_fail("syscall read file content mismatch");
+    uint8_t expected = (uint8_t)((i * 37u + 11u) & 0xFFu);
+    if ((uint8_t)user_read[i] != expected)
+      ci_memory_test_fail("syscall multi-sector file content mismatch");
   }
 
   frame = (struct InterruptFrame){0};
@@ -341,18 +341,20 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("syscall read succeeded after close");
 
   // Exercise SFS writes, metadata updates, and remount persistence.
-  static const char write_data[] = "VexOS CI persistent write test\n";
-  const uint32_t write_len = (uint32_t)sizeof(write_data) - 1u;
+  uint8_t write_data[700];
+  const uint32_t write_len = (uint32_t)sizeof(write_data);
+  for (uint32_t i = 0; i < write_len; i++)
+    write_data[i] = (uint8_t)((i * 19u + 7u) & 0xFFu);
   if (!simplefs_write_file("ci-out.txt", write_data, write_len))
-    ci_memory_test_fail("SimpleFS write file");
-  char verify_data[64];
+    ci_memory_test_fail("SimpleFS multi-sector write file");
+  char verify_data[768];
   uint32_t verify_len = 0;
   if (!simplefs_read_file("ci-out.txt", verify_data, sizeof(verify_data),
                           &verify_len) || verify_len != write_len)
     ci_memory_test_fail("SimpleFS read-after-write");
   for (uint32_t i = 0; i < write_len; i++) {
-    if (verify_data[i] != write_data[i])
-      ci_memory_test_fail("SimpleFS write content mismatch");
+    if ((uint8_t)verify_data[i] != write_data[i])
+      ci_memory_test_fail("SimpleFS multi-sector write content mismatch");
   }
   if (!simplefs_init())
     ci_memory_test_fail("SimpleFS remount after write");
@@ -361,9 +363,40 @@ static void ci_syscall_self_test(void) {
                           &verify_len) || verify_len != write_len)
     ci_memory_test_fail("SimpleFS remount read");
   for (uint32_t i = 0; i < write_len; i++) {
-    if (verify_data[i] != write_data[i])
+    if ((uint8_t)verify_data[i] != write_data[i])
       ci_memory_test_fail("SimpleFS remount content mismatch");
   }
+
+  // Zero-length files must still open and close cleanly through syscalls.
+  if (!simplefs_write_file("empty.txt", "", 0))
+    ci_memory_test_fail("SimpleFS empty-file write");
+  uint32_t empty_size = 1;
+  if (!simplefs_file_size("empty.txt", &empty_size) || empty_size != 0)
+    ci_memory_test_fail("SimpleFS empty-file metadata");
+  static const char empty_name[] = "empty.txt";
+  for (uint32_t i = 0; i < sizeof(empty_name); i++)
+    user_name[i] = empty_name[i];
+  frame = (struct InterruptFrame){0};
+  frame.rax = 3;
+  frame.rdi = (uint64_t)(uintptr_t)user_name;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  int empty_fd = (int)frame.rax;
+  if (empty_fd < 3)
+    ci_memory_test_fail("syscall open empty file");
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)empty_fd;
+  frame.rsi = (uint64_t)(uintptr_t)user_read;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall read empty file");
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = (uint64_t)empty_fd;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("syscall close empty file");
 
   frame = (struct InterruptFrame){0};
   frame.rax = 4;
@@ -402,7 +435,7 @@ static void ci_syscall_self_test(void) {
   if (VMM_IsUserRange(user_buf, 1, 0))
     ci_memory_test_fail("syscall mmap left stale user mapping");
 
-  serial_print("[CI] SimpleFS mount/read/write/remount and syscall file I/O passed\n");
+  serial_print("[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed\n");
 }
 
 #endif
