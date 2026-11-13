@@ -204,6 +204,102 @@ extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
 
+
+#ifdef VEXOS_CI_INPUT_TEST
+typedef struct {
+  uint8_t ident[16];
+  uint16_t type;
+  uint16_t machine;
+  uint32_t version;
+  uint64_t entry;
+  uint64_t phoff;
+  uint64_t shoff;
+  uint32_t flags;
+  uint16_t ehsize;
+  uint16_t phentsize;
+  uint16_t phnum;
+  uint16_t shentsize;
+  uint16_t shnum;
+  uint16_t shstrndx;
+} __attribute__((packed)) ci_elf64_ehdr_t;
+
+typedef struct {
+  uint32_t type;
+  uint32_t flags;
+  uint64_t offset;
+  uint64_t vaddr;
+  uint64_t paddr;
+  uint64_t filesz;
+  uint64_t memsz;
+  uint64_t align;
+} __attribute__((packed)) ci_elf64_phdr_t;
+
+static void ci_install_ring3_elf_fixture(void) {
+  static uint8_t image[0x1100];
+  static const char message[] =
+      "[CI] Ring3 int80 syscall and exit passed\\n";
+  const uint32_t message_len = (uint32_t)sizeof(message) - 1u;
+  const uint32_t data_offset = 0x20u;
+  const uint32_t code_len = 26u;
+  const uint32_t file_size = 0x1000u + data_offset + message_len;
+
+  for (uint32_t i = 0; i < sizeof(image); i++)
+    image[i] = 0;
+
+  ci_elf64_ehdr_t *eh = (ci_elf64_ehdr_t *)image;
+  eh->ident[0] = 0x7F;
+  eh->ident[1] = 'E';
+  eh->ident[2] = 'L';
+  eh->ident[3] = 'F';
+  eh->ident[4] = 2;
+  eh->ident[5] = 1;
+  eh->ident[6] = 1;
+  eh->type = 2;
+  eh->machine = 62;
+  eh->version = 1;
+  eh->entry = 0x400000u;
+  eh->phoff = sizeof(*eh);
+  eh->ehsize = sizeof(*eh);
+  eh->phentsize = sizeof(ci_elf64_phdr_t);
+  eh->phnum = 1;
+
+  ci_elf64_phdr_t *ph = (ci_elf64_phdr_t *)(image + eh->phoff);
+  ph->type = 1;       // PT_LOAD
+  ph->flags = 5;      // PF_R | PF_X
+  ph->offset = 0x1000u;
+  ph->vaddr = 0x400000u;
+  ph->paddr = 0x400000u;
+  ph->filesz = data_offset + message_len;
+  ph->memsz = PAGE_SIZE;
+  ph->align = PAGE_SIZE;
+
+  // mov eax, 1; mov edi, 0x400020; mov esi, message_len;
+  // int 0x80; mov eax, 0; int 0x80; jmp $.
+  uint8_t code[code_len] = {
+      0xB8, 0x01, 0x00, 0x00, 0x00,
+      0xBF, 0x20, 0x00, 0x40, 0x00,
+      0xBE, 0, 0, 0, 0,
+      0xCD, 0x80,
+      0xB8, 0x00, 0x00, 0x00, 0x00,
+      0xCD, 0x80,
+      0xEB, 0xFE
+  };
+  code[11] = (uint8_t)(message_len & 0xFFu);
+  code[12] = (uint8_t)((message_len >> 8) & 0xFFu);
+  code[13] = (uint8_t)((message_len >> 16) & 0xFFu);
+  code[14] = (uint8_t)((message_len >> 24) & 0xFFu);
+
+  for (uint32_t i = 0; i < code_len; i++)
+    image[0x1000u + i] = code[i];
+  for (uint32_t i = 0; i < message_len; i++)
+    image[0x1000u + data_offset + i] = (uint8_t)message[i];
+
+  if (!simplefs_write_file("doom.elf", image, file_size))
+    ci_memory_test_fail("write ring3 ELF fixture to SimpleFS");
+  serial_print("[CI] Valid ring3 ELF fixture installed in SimpleFS\\n");
+}
+#endif
+
 static void ci_syscall_self_test(void) {
   struct InterruptFrame frame = {0};
 
@@ -703,6 +799,7 @@ void kernel_main(BootInfo *bootInfo) {
     ci_memory_test_fail("task frame/scheduler self-test");
   serial_print("[CI] Task IRET frame and scheduler checks passed\n");
   ci_syscall_self_test();
+  ci_install_ring3_elf_fixture();
 #endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
