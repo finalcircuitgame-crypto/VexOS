@@ -30,20 +30,24 @@ static EFI_STATUS LoadKernelFile(EFI_HANDLE image_handle,
 
     status = system_table->BootServices->HandleProtocol(
         image_handle, &gEfiLoadedImageProtocolGuid, (void **)&loaded_image);
-    if (EFI_ERROR(status) || !loaded_image) return status;
+    if (EFI_ERROR(status)) return status;
+    if (!loaded_image) return EFI_NOT_FOUND;
 
     status = system_table->BootServices->HandleProtocol(
         loaded_image->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid,
         (void **)&filesystem);
-    if (EFI_ERROR(status) || !filesystem) return status;
+    if (EFI_ERROR(status)) return status;
+    if (!filesystem) return EFI_UNSUPPORTED;
 
     status = filesystem->OpenVolume(filesystem, &root);
-    if (EFI_ERROR(status) || !root) return status;
+    if (EFI_ERROR(status)) return status;
+    if (!root) return EFI_NOT_FOUND;
 
     status = root->Open(root, &file, L"kernel.elf",
                         EFI_FILE_MODE_READ, 0);
     root->Close(root);
-    if (EFI_ERROR(status) || !file) return status;
+    if (EFI_ERROR(status)) return status;
+    if (!file) return EFI_NOT_FOUND;
 
     status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, NULL);
     if (status != EFI_BUFFER_TOO_SMALL || info_size == 0) {
