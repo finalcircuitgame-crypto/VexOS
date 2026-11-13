@@ -54,6 +54,14 @@ void serial_print(const char *str) {
   }
 }
 
+static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
+                            uint64_t flags) {
+  if (!VMM_MapPage(virtual_addr, physical_addr, flags)) {
+    serial_print("[KERNEL] FATAL: page mapping failed\\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
+}
+
 #include "interrupts.h"
 
 void PIC_Remap();
@@ -167,11 +175,14 @@ void kernel_main(BootInfo *bootInfo) {
 
   // VMM
   serial_print("[KERNEL] Initializing VMM...\n");
-  VMM_Init();
+  if (!VMM_Init()) {
+    serial_print("[KERNEL] FATAL: VMM root allocation failed\\n");
+    while (1) { __asm__ volatile("cli; hlt"); }
+  }
   // Identity map first 128MB
   serial_print("[KERNEL] Mapping first 128MB...\n");
   for (uint64_t i = 0; i < 0x8000000; i += 4096)
-    VMM_MapPage((void *)i, (void *)i, PAGE_WRITE);
+    vmm_map_or_halt((void *)i, (void *)i, PAGE_WRITE);
 
   // Identity map the PMM region itself so we can access it
   serial_print("[KERNEL] Mapping PMM Region...\n");
@@ -181,14 +192,14 @@ void kernel_main(BootInfo *bootInfo) {
   }
   for (uint64_t i = 0; i < pmm_map_bytes; i += 4096) {
     uint64_t addr = bootInfo->LargestFreeRegion.Base + i;
-    VMM_MapPage((void *)addr, (void *)addr, PAGE_WRITE);
+    vmm_map_or_halt((void *)addr, (void *)addr, PAGE_WRITE);
   }
 
   uint64_t fb_base = (uint64_t)bootInfo->framebuffer;
   uint64_t fb_size = (uint64_t)bootInfo->height * bootInfo->pitch * 4;
   serial_print("[KERNEL] Mapping Framebuffer...\n");
   for (uint64_t i = 0; i < fb_size; i += 4096)
-    VMM_MapPage((void *)(fb_base + i), (void *)(fb_base + i), PAGE_WRITE);
+    vmm_map_or_halt((void *)(fb_base + i), (void *)(fb_base + i), PAGE_WRITE);
 
   uint64_t rip = 0;
   __asm__ volatile("lea (%%rip), %0" : "=r"(rip));
@@ -198,7 +209,7 @@ void kernel_main(BootInfo *bootInfo) {
   rip_start &= ~0xFFFULL;
   uint64_t rip_end = (rip + 0x800000) & ~0xFFFULL;
   for (uint64_t a = rip_start; a <= rip_end; a += 4096) {
-    VMM_MapPage((void *)a, (void *)a, PAGE_WRITE);
+    vmm_map_or_halt((void *)a, (void *)a, PAGE_WRITE);
   }
 
   uint64_t sp_start =
@@ -206,7 +217,7 @@ void kernel_main(BootInfo *bootInfo) {
   sp_start &= ~0xFFFULL;
   uint64_t sp_end = (stack_addr_pre + 0x200000) & ~0xFFFULL;
   for (uint64_t a = sp_start; a <= sp_end; a += 4096) {
-    VMM_MapPage((void *)a, (void *)a, PAGE_WRITE);
+    vmm_map_or_halt((void *)a, (void *)a, PAGE_WRITE);
   }
 
   serial_print("[KERNEL] Activating VMM...\n");
@@ -264,7 +275,7 @@ void kernel_main(BootInfo *bootInfo) {
 
   // Allocate and map remaining heap pages, requiring contiguity.
   uint64_t heap_base = (uint64_t)heap_start;
-  VMM_MapPage((void *)heap_base, (void *)heap_base, PAGE_WRITE);
+  vmm_map_or_halt((void *)heap_base, (void *)heap_base, PAGE_WRITE);
   for (uint64_t p = 1; p < heap_pages; p++) {
     void *next = PMM_AllocatePage();
     if (next == NULL) {
@@ -279,7 +290,7 @@ void kernel_main(BootInfo *bootInfo) {
       while (1)
         ;
     }
-    VMM_MapPage((void *)want, (void *)want, PAGE_WRITE);
+    vmm_map_or_halt((void *)want, (void *)want, PAGE_WRITE);
   }
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
