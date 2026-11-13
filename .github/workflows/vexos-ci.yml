@@ -109,7 +109,7 @@ jobs:
             "[KERNEL] Heap Initialized Successfully." \
             "[CI] Heap allocator alignment/free/coalesce passed" \
             "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
-            "[CI] VMM user ranges/write permissions/alignment/unmapping passed"
+            "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
             "[CI] Syscall validation/user mmap/write/read/close/seek checks passed" \
             "[PCI] Enumeration Complete" \
             "[xHCI] Controller Running" \
