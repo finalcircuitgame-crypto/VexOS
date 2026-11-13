@@ -359,7 +359,7 @@ static void ring3_task_entry(void) {
 
   // On success usermode_launch transfers to ring 3 and never returns. A
   // return means the loader rejected the image or failed before the switch.
-  shell_append("ring3: loader returned; see serial log\\n");
+  shell_append("ring3: loader returned; see serial log\n");
   for (;;) {
     __asm__ volatile("sti; hlt");
   }
@@ -371,21 +371,21 @@ static void launch_ring3_task(void) {
   g_ring3_task_started = 1;
 
   if (!simplefs_init()) {
-    shell_append("ring3: storage mount failed\\n");
+    shell_append("ring3: storage mount failed\n");
     g_ring3_task_started = 0;
     return;
   }
 
   uint32_t elf_size = 0;
   if (!simplefs_file_size("doom.elf", &elf_size) || elf_size == 0) {
-    shell_append("ring3: doom.elf not found\\n");
+    shell_append("ring3: doom.elf not found\n");
     g_ring3_task_started = 0;
     return;
   }
 
   void *stack = kmalloc(8192);
   if (!stack) {
-    shell_append("ring3: no mem\\n");
+    shell_append("ring3: no mem\n");
     g_ring3_task_started = 0;
     return;
   }
@@ -2000,7 +2000,7 @@ void desktop_tick(void) {
 #ifdef VEXOS_CI_INPUT_TEST
     if (!g_ci_keyboard_input_seen) {
       g_ci_keyboard_input_seen = 1;
-      serial_print("[CI] Keyboard character reached desktop input queue\\n");
+      serial_print("[CI] Keyboard character reached desktop input queue\n");
     }
 #endif
 
