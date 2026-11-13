@@ -24,15 +24,20 @@ void Task_Create(void (*entry)(), void *stack_top) {
   if (!entry || !stack_top || task_count >= 10)
     return;
 
-  // The interrupt stub restores 15 GPRs, then executes IRETQ in ring 0.
-  // A same-privilege IRETQ consumes only RIP, CS and RFLAGS (not RSP/SS).
-  // Leave a fake return slot below that frame so a normal C entry has the
-  // SysV x86-64 alignment expected after a CALL: RSP % 16 == 8.
+  // The interrupt stub restores 15 GPRs, then executes IRETQ.
+  // In 64-bit mode the IRET frame includes RIP, CS, RFLAGS, RSP and SS.
+  // Put a fake return address at the top of the task stack so the initial
+  // RSP has the SysV x86-64 function-entry alignment (RSP % 16 == 8).
   uint64_t *stack = (uint64_t *)stack_top;
-  *(--stack) = 0;                    // Fake return address if entry returns.
-  *(--stack) = 0x202;                // RFLAGS (interrupts enabled).
-  *(--stack) = 0x08;                 // CS (kernel code).
-  *(--stack) = (uint64_t)entry;      // RIP.
+  *(--stack) = 0; // Fake return address if entry returns.
+  uint64_t initial_rsp = (uint64_t)(uintptr_t)stack;
+
+  // Build the IRETQ frame in reverse push order.
+  *(--stack) = 0x10;          // SS (kernel data segment).
+  *(--stack) = initial_rsp;   // RSP after IRETQ.
+  *(--stack) = 0x202;         // RFLAGS (interrupts enabled).
+  *(--stack) = 0x08;          // CS (kernel code segment).
+  *(--stack) = (uint64_t)(uintptr_t)entry; // RIP.
 
   // PUSH_GPRS saves/restores these 15 registers in the interrupt stub.
   for (int i = 0; i < 15; i++) {
@@ -64,7 +69,7 @@ int Task_CI_SelfTest(void) {
     return 0;
 
   uint64_t next_rsp = Task_Schedule(0x1111u);
-  if (!next_rsp || (next_rsp & 15u) != 8u)
+  if (!next_rsp || (next_rsp & 15u) != 0u)
     return 0;
 
   const uint64_t *frame = (const uint64_t *)(uintptr_t)next_rsp;
@@ -73,7 +78,9 @@ int Task_CI_SelfTest(void) {
       return 0;
   }
   if (frame[15] != (uint64_t)(uintptr_t)ci_task_entry ||
-      frame[16] != 0x08u || frame[17] != 0x202u || frame[18] != 0)
+      frame[16] != 0x08u || frame[17] != 0x202u ||
+      frame[18] != (uint64_t)(uintptr_t)&test_stack[63] ||
+      frame[19] != 0x10u)
     return 0;
 
   if (Task_Schedule(0x2222u) != 0x1111u)
