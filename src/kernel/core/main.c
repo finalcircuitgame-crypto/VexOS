@@ -120,7 +120,7 @@ static void ci_memory_self_test(void) {
   kfree(merged);
   serial_print("[CI] Heap allocator alignment/free/coalesce passed\n");
 
-  // PMM: page alignment, misaligned-free rejection, and reuse.
+  // PMM: page alignment, misaligned-free rejection, double-free safety, and reuse.
   void *p1 = PMM_AllocatePage();
   if (!p1 || ((uintptr_t)p1 & 0xFFFu))
     ci_memory_test_fail("PMM page allocation/alignment");
@@ -129,14 +129,17 @@ static void ci_memory_self_test(void) {
   if (!p2 || p2 == p1)
     ci_memory_test_fail("PMM misaligned free was accepted");
   PMM_FreePage(p1);
+  PMM_FreePage(p1); // A duplicate free must not corrupt the bitmap.
   PMM_FreePage(p2);
   void *p3 = PMM_AllocatePage();
-  if (p3 != p1) ci_memory_test_fail("PMM freed-page reuse");
+  void *p4 = PMM_AllocatePage();
+  if (p3 != p1 || p4 != p2)
+    ci_memory_test_fail("PMM freed-page reuse/double-free handling");
   PMM_FreePage(p3);
-  serial_print("[CI] PMM page alignment/free/range checks passed\n");
+  PMM_FreePage(p4);
+  serial_print("[CI] PMM alignment/misaligned-free/double-free/reuse passed\n");
 
-  // VMM: supervisor mapping, conflicting-map rejection, user-range checks,
-  // guarded unmapping, and user mapping teardown.
+  // VMM: supervisor/user mappings, range permissions, alignment, and teardown.
   const uintptr_t test_va = 0x0000400000000000ull;
   void *phys1 = PMM_AllocatePage();
   void *phys2 = PMM_AllocatePage();
@@ -163,22 +166,41 @@ static void ci_memory_self_test(void) {
   PMM_FreePage(phys2);
 
   void *user_phys = PMM_AllocatePage();
-  if (!user_phys ||
+  void *readonly_phys = PMM_AllocatePage();
+  if (!user_phys || !readonly_phys ||
       !VMM_MapPage((void *)test_va, user_phys, PAGE_WRITE | PAGE_USER))
     ci_memory_test_fail("VMM user map");
   if (!VMM_IsUserRange((void *)test_va, PAGE_SIZE, 1))
     ci_memory_test_fail("VMM valid writable user range rejected");
+  if (VMM_IsUserRange((void *)test_va, PAGE_SIZE + 1u, 0))
+    ci_memory_test_fail("VMM range crossing into an unmapped page accepted");
+  if (!VMM_MapPage((void *)(test_va + PAGE_SIZE), readonly_phys, PAGE_USER))
+    ci_memory_test_fail("VMM read-only user map");
+  if (!VMM_IsUserRange((void *)test_va, PAGE_SIZE * 2u, 0))
+    ci_memory_test_fail("VMM valid two-page user range rejected");
+  if (VMM_IsUserRange((void *)test_va, PAGE_SIZE * 2u, 1))
+    ci_memory_test_fail("VMM writable range accepted a read-only page");
+  if (!VMM_UnmapPage((void *)(test_va + PAGE_SIZE), 1))
+    ci_memory_test_fail("VMM read-only user unmap/free");
   if (!VMM_UnmapPage((void *)test_va, 1))
     ci_memory_test_fail("VMM user unmap/free");
   if (VMM_IsUserRange((void *)test_va, 1, 0))
     ci_memory_test_fail("VMM unmapped user range accepted");
+  if (VMM_MapPage((void *)test_va, (void *)((uintptr_t)user_phys + 1u), PAGE_WRITE))
+    ci_memory_test_fail("VMM misaligned physical address accepted");
   if (VMM_MapPage((void *)(test_va + 1u), user_phys, PAGE_WRITE))
     ci_memory_test_fail("VMM misaligned virtual address accepted");
+  if (VMM_MapPage((void *)0xFFFF800000000000ull, user_phys, PAGE_WRITE | PAGE_USER))
+    ci_memory_test_fail("VMM supervisor address accepted as user memory");
   if (VMM_MapPage((void *)0x0000800000000000ull, user_phys, PAGE_WRITE))
     ci_memory_test_fail("VMM noncanonical virtual address accepted");
   if (VMM_UnmapPage((void *)0x0000800000000000ull, 0))
     ci_memory_test_fail("VMM noncanonical unmap accepted");
-  serial_print("[CI] VMM supervisor/user mapping checks passed\n");
+  if (VMM_IsUserRange((void *)0x00007FFFFFFFF000ull, PAGE_SIZE * 2u, 0))
+    ci_memory_test_fail("VMM range crossing user limit accepted");
+  PMM_FreePage(user_phys);
+  PMM_FreePage(readonly_phys);
+  serial_print("[CI] VMM user ranges/write permissions/alignment/unmapping passed\n");
 }
 #endif
 
