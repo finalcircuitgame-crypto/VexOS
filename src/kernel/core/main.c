@@ -198,8 +198,6 @@ static void ci_memory_self_test(void) {
     ci_memory_test_fail("VMM noncanonical unmap accepted");
   if (VMM_IsUserRange((void *)0x00007FFFFFFFF000ull, PAGE_SIZE * 2u, 0))
     ci_memory_test_fail("VMM range crossing user limit accepted");
-  PMM_FreePage(user_phys);
-  PMM_FreePage(readonly_phys);
   serial_print("[CI] VMM user ranges/write permissions/alignment/unmapping passed\n");
 }
 #endif
