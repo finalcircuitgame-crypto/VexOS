@@ -23,7 +23,7 @@ The normal build produces the UEFI boot image and kernel only.
 DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not**
 built by the kernel Makefile: VexOS still needs a platform backend for
 `DG_Init`, `DG_DrawFrame`, `DG_SleepMs`, `DG_GetTicksMs`, and `DG_GetKey`,
-plus a separate user-mode ELF build and a WAD file in SimpleFS storage. The
+plus a separate user-mode ELF build and a compatible IWAD in SimpleFS storage. The launcher is configured for Freedoom Phase 1 (`freefreedoom1.wad`), which is freely redistributable under its own license. The
 desktop's `doom` / `ring3` command looks for that `doom.elf` file and reports
 when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a
 no-op placeholder, not a working port.

@@ -20,10 +20,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="dist/storage.img")
     parser.add_argument("--elf", default="dist/doom.elf")
-    parser.add_argument("--wad", required=True, help="Path to your legally obtained doom1.wad")
+    parser.add_argument("--wad", required=True, help="Path to your legally obtained freedoom1.wad")
     args = parser.parse_args()
 
-    sources = [("doom.elf", args.elf), ("doom1.wad", args.wad)]
+    sources = [("doom.elf", args.elf), ("freedoom1.wad", args.wad)]
     for name, path in sources:
         if not os.path.isfile(path):
             parser.error(f"{name} source does not exist: {path}")
@@ -62,7 +62,7 @@ def main():
         for i in range(MAX_FILES):
             off = i * ENTRY_SIZE
             used = table[off]
-            name = bytes(table[off+1:off+1+NAME_MAX]).split(b"\\0", 1)[0].decode("ascii", "ignore")
+            name = bytes(table[off+1:off+1+NAME_MAX]).split(b"\0", 1)[0].decode("ascii", "ignore")
             start, size, _reserved = struct.unpack_from("<III", table, off+1+NAME_MAX)
             entries.append((used, name, start, size))
 
