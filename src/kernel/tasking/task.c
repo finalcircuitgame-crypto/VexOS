@@ -165,6 +165,10 @@ void Task_CI_StartRuntimeTest(void) {
   serial_print(ci_runtime_setup_ok
       ? "[CI] Runtime task IRET frames validated\\n"
       : "[CI] Runtime task IRET frame validation failed\\n");
+  if (!ci_runtime_setup_ok) {
+    // Keep the rest of the desktop CI alive if fixture validation fails.
+    Task_Init();
+  }
 }
 
 int Task_CI_RuntimeTestPassed(void) {
