@@ -18,9 +18,15 @@ Run:
 
     make
 
-By default the doomgeneric usermode components are skipped to avoid requiring Allegro. To enable them:
+The normal build produces the UEFI boot image and kernel only.
 
-    make BUILD_DOOMGENERIC=1
+DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not**
+built by the kernel Makefile: VexOS still needs a platform backend for
+`DG_Init`, `DG_DrawFrame`, `DG_SleepMs`, `DG_GetTicksMs`, and `DG_GetKey`,
+plus a separate user-mode ELF build and a WAD file in SimpleFS storage. The
+desktop's `doom` / `ring3` command looks for that `doom.elf` file and reports
+when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a
+no-op placeholder, not a working port.
 
 ## Run (development)
 run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into the SimpleFS storage image if that file exists.
