@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          OVMF_CODE="$(find /usr/share -type f \\( -name 'OVMF_CODE.fd' -o -name 'OVMF_CODE_4M.fd' -o -name 'OVMF_CODE.secboot.fd' \\) -print -quit)"
+          OVMF_CODE="$(find /usr/share -type f -name 'OVMF_CODE*.fd' -print -quit)"
           if [ -z "$OVMF_CODE" ]; then
             echo "Could not locate an OVMF_CODE firmware image"
             find /usr/share -iname '*ovmf*' -print || true
