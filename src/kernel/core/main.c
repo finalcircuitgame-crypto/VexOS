@@ -84,6 +84,104 @@ void taskB() {
   }
 }
 
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_memory_test_fail(const char *reason) {
+  serial_print("[KERNEL] FATAL: CI memory self-test: ");
+  serial_print(reason);
+  serial_print("\n");
+  for (;;) { __asm__ volatile("cli; hlt"); }
+}
+
+static void ci_memory_self_test(void) {
+  // Heap: alignment, overflow/zero rejection, invalid/double-free tolerance,
+  // and coalescing of adjacent blocks.
+  void *h1 = kmalloc(1);
+  void *h2 = kmalloc(513);
+  void *h3 = kmalloc(4097);
+  if (!h1 || !h2 || !h3) ci_memory_test_fail("heap allocation");
+  if (((uintptr_t)h1 & 15u) || ((uintptr_t)h2 & 15u) ||
+      ((uintptr_t)h3 & 15u)) ci_memory_test_fail("heap alignment");
+  if (kmalloc(0) != NULL || kmalloc((size_t)-1) != NULL)
+    ci_memory_test_fail("heap invalid-size rejection");
+  ((uint8_t *)h1)[0] = 0xA5u;
+  ((uint8_t *)h2)[512] = 0x5Au;
+  ((uint8_t *)h3)[4096] = 0xC3u;
+  if (((uint8_t *)h1)[0] != 0xA5u ||
+      ((uint8_t *)h2)[512] != 0x5Au ||
+      ((uint8_t *)h3)[4096] != 0xC3u)
+    ci_memory_test_fail("heap data integrity");
+  kfree(h2);
+  kfree(h2); // A double free must be ignored.
+  kfree((void *)(uintptr_t)0x12345u); // A foreign pointer must be ignored.
+  kfree(h1);
+  kfree(h3);
+  void *merged = kmalloc(8192);
+  if (!merged) ci_memory_test_fail("heap free-block coalescing");
+  kfree(merged);
+  serial_print("[CI] Heap allocator alignment/free/coalesce passed\n");
+
+  // PMM: page alignment, misaligned-free rejection, and reuse.
+  void *p1 = PMM_AllocatePage();
+  if (!p1 || ((uintptr_t)p1 & 0xFFFu))
+    ci_memory_test_fail("PMM page allocation/alignment");
+  PMM_FreePage((void *)((uintptr_t)p1 + 1u));
+  void *p2 = PMM_AllocatePage();
+  if (!p2 || p2 == p1)
+    ci_memory_test_fail("PMM misaligned free was accepted");
+  PMM_FreePage(p1);
+  PMM_FreePage(p2);
+  void *p3 = PMM_AllocatePage();
+  if (p3 != p1) ci_memory_test_fail("PMM freed-page reuse");
+  PMM_FreePage(p3);
+  serial_print("[CI] PMM page alignment/free/range checks passed\n");
+
+  // VMM: supervisor mapping, conflicting-map rejection, user-range checks,
+  // guarded unmapping, and user mapping teardown.
+  const uintptr_t test_va = 0x0000400000000000ull;
+  void *phys1 = PMM_AllocatePage();
+  void *phys2 = PMM_AllocatePage();
+  if (!phys1 || !phys2) ci_memory_test_fail("VMM backing-page allocation");
+  if (!VMM_MapPage((void *)test_va, phys1, PAGE_WRITE))
+    ci_memory_test_fail("VMM supervisor map");
+  volatile uint64_t *mapped = (volatile uint64_t *)test_va;
+  *mapped = 0x5645584F53434931ull;
+  if (*mapped != 0x5645584F53434931ull)
+    ci_memory_test_fail("VMM mapped-page data integrity");
+  if (VMM_MapPage((void *)test_va, phys2, PAGE_WRITE))
+    ci_memory_test_fail("VMM conflicting remap accepted");
+  if (VMM_IsUserRange((void *)test_va, sizeof(uint64_t), 0))
+    ci_memory_test_fail("VMM supervisor page accepted as user memory");
+  if (VMM_UnmapPage((void *)test_va, 1))
+    ci_memory_test_fail("VMM freed a supervisor page");
+  if (*mapped != 0x5645584F53434931ull)
+    ci_memory_test_fail("VMM rejected unmap changed mapping");
+  if (!VMM_UnmapPage((void *)test_va, 0))
+    ci_memory_test_fail("VMM supervisor unmap");
+  if (VMM_UnmapPage((void *)test_va, 0))
+    ci_memory_test_fail("VMM unmapped a missing page");
+  PMM_FreePage(phys1);
+  PMM_FreePage(phys2);
+
+  void *user_phys = PMM_AllocatePage();
+  if (!user_phys ||
+      !VMM_MapPage((void *)test_va, user_phys, PAGE_WRITE | PAGE_USER))
+    ci_memory_test_fail("VMM user map");
+  if (!VMM_IsUserRange((void *)test_va, PAGE_SIZE, 1))
+    ci_memory_test_fail("VMM valid writable user range rejected");
+  if (!VMM_UnmapPage((void *)test_va, 1))
+    ci_memory_test_fail("VMM user unmap/free");
+  if (VMM_IsUserRange((void *)test_va, 1, 0))
+    ci_memory_test_fail("VMM unmapped user range accepted");
+  if (VMM_MapPage((void *)(test_va + 1u), user_phys, PAGE_WRITE))
+    ci_memory_test_fail("VMM misaligned virtual address accepted");
+  if (VMM_MapPage((void *)0x0000800000000000ull, user_phys, PAGE_WRITE))
+    ci_memory_test_fail("VMM noncanonical virtual address accepted");
+  if (VMM_UnmapPage((void *)0x0000800000000000ull, 0))
+    ci_memory_test_fail("VMM noncanonical unmap accepted");
+  serial_print("[CI] VMM supervisor/user mapping checks passed\n");
+}
+#endif
+
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
   serial_print("[KERNEL] Entered kernel_main\n");
@@ -300,6 +398,9 @@ void kernel_main(BootInfo *bootInfo) {
   }
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
+#ifdef VEXOS_CI_INPUT_TEST
+  ci_memory_self_test();
+#endif
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
 
