@@ -107,6 +107,7 @@ jobs:
             -monitor none \
             -serial file:serial.log \
             -qmp unix:/tmp/vexos-qmp.sock,server=on,wait=off \
+            -d int,cpu_reset -D qemu-debug.log \
             -no-reboot -no-shutdown >qemu.log 2>&1 &
           qemu_pid=$!
           cleanup() {
@@ -182,6 +183,16 @@ jobs:
                   if "return" in response:
                       return response["return"]
                   if "error" in response:
+                      print("QMP command failed:", response["error"])
+                      try:
+                          print("=== serial.log ===")
+                          print(open("serial.log", encoding="utf-8", errors="replace").read())
+                          print("=== qemu.log ===")
+                          print(open("qemu.log", encoding="utf-8", errors="replace").read())
+                          print("=== qemu-debug.log tail ===")
+                          print(open("qemu-debug.log", encoding="utf-8", errors="replace").read()[-12000:])
+                      except OSError as exc:
+                          print("Could not read debug output:", exc)
                       raise RuntimeError(response["error"])
 
           command({"execute": "qmp_capabilities"})
