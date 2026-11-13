@@ -114,8 +114,6 @@ uint64_t Task_Exit(uint64_t current_rsp) {
 #ifdef VEXOS_CI_INPUT_TEST
 // Runtime proof that IRQ0 actually restores and executes multiple task stacks.
 // The timer interrupt must preempt each worker and resume the other worker.
-static uint64_t ci_runtime_stack_a[512] __attribute__((aligned(16)));
-static uint64_t ci_runtime_stack_b[512] __attribute__((aligned(16)));
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
 static volatile int ci_runtime_setup_ok;
@@ -138,8 +136,19 @@ void Task_CI_StartRuntimeTest(void) {
   ci_runtime_count_a = 0;
   ci_runtime_count_b = 0;
   ci_runtime_setup_ok = 0;
-  Task_Create(ci_runtime_task_a, &ci_runtime_stack_a[512]);
-  Task_Create(ci_runtime_task_b, &ci_runtime_stack_b[512]);
+
+  // Allocate worker stacks from the initialized, identity-mapped kernel heap.
+  // This avoids relying on the boot-time identity-map window covering .bss.
+  void *stack_a = kmalloc(4096u);
+  void *stack_b = kmalloc(4096u);
+  if (!stack_a || !stack_b) {
+    if (stack_a) kfree(stack_a);
+    if (stack_b) kfree(stack_b);
+    return;
+  }
+
+  Task_Create(ci_runtime_task_a, (uint8_t *)stack_a + 4096u);
+  Task_Create(ci_runtime_task_b, (uint8_t *)stack_b + 4096u);
   ci_runtime_setup_ok = (task_count == 3);
 }
 
