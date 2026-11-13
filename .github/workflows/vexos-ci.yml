@@ -243,7 +243,7 @@ jobs:
             "[CI] Shell mem command executed"
             "[CI] Shell specs command executed"
             "[CI] Notepad opened by shell command"
-            "[CI] Notepad received printable keyboard input"
+            "[CI] Notepad accepted the full typed text vex"
           )
           for i in $(seq 1 150); do
             all_seen=1
