@@ -1568,15 +1568,15 @@ void desktop_init(BootInfo *bootInfo) {
   if (g_shell_win.h < 140)
     g_shell_win.h = 140;
 
-  g_explorer_win.x = g_shell_win.x + 40;
-  g_explorer_win.y = g_shell_win.y + 40;
-  g_explorer_win.w = 320;
-  g_explorer_win.h = 220;
+  g_explorer_win.w = (int32_t)(g_bi->width > 760u ? 720u : (g_bi->width > 48u ? g_bi->width - 48u : g_bi->width));
+  g_explorer_win.h = (int32_t)(g_bi->height > 560u ? 500u : (g_bi->height > 80u ? g_bi->height - 80u : g_bi->height));
+  g_explorer_win.x = ((int32_t)g_bi->width - g_explorer_win.w) / 2;
+  g_explorer_win.y = ((int32_t)g_bi->height - g_explorer_win.h) / 2;
 
-  g_viewer_win.x = g_explorer_win.x + 40;
-  g_viewer_win.y = g_explorer_win.y + 40;
-  g_viewer_win.w = 420;
-  g_viewer_win.h = 280;
+  g_viewer_win.w = (int32_t)(g_bi->width > 680u ? 620u : (g_bi->width > 48u ? g_bi->width - 48u : g_bi->width));
+  g_viewer_win.h = (int32_t)(g_bi->height > 480u ? 420u : (g_bi->height > 80u ? g_bi->height - 80u : g_bi->height));
+  g_viewer_win.x = ((int32_t)g_bi->width - g_viewer_win.w) / 2 + 30;
+  g_viewer_win.y = ((int32_t)g_bi->height - g_viewer_win.h) / 2 + 26;
 
   // Make sure the notepad window is always on-screen.
   if (g_notepad_win.x + g_notepad_win.w > (int32_t)g_bi->width)
@@ -1584,10 +1584,10 @@ void desktop_init(BootInfo *bootInfo) {
   if (g_notepad_win.y + g_notepad_win.h > (int32_t)g_bi->height)
     g_notepad_win.y = 48;
 
-  g_notepad_win.x = g_viewer_win.x + 40;
-  g_notepad_win.y = g_viewer_win.y + 40;
-  g_notepad_win.w = 520;
-  g_notepad_win.h = 320;
+  g_notepad_win.w = (int32_t)(g_bi->width > 720u ? 660u : (g_bi->width > 48u ? g_bi->width - 48u : g_bi->width));
+  g_notepad_win.h = (int32_t)(g_bi->height > 560u ? 480u : (g_bi->height > 80u ? g_bi->height - 80u : g_bi->height));
+  g_notepad_win.x = ((int32_t)g_bi->width - g_notepad_win.w) / 2 + 54;
+  g_notepad_win.y = ((int32_t)g_bi->height - g_notepad_win.h) / 2 + 38;
 
   // Default notepad file name
   {
@@ -1765,7 +1765,7 @@ void desktop_tick(void) {
     int32_t tb_y = (int32_t)g_bi->height - (int32_t)bar_h;
 
     // Start button hit
-    if (hit_test(p0.x, p0.y, 8, tb_y + 4, 72, (int32_t)bar_h - 8)) {
+    if (hit_test(p0.x, p0.y, 8, tb_y + 4, 52, (int32_t)bar_h - 8)) {
       g_start_open = (uint8_t)(g_start_open ? 0u : 1u);
 #ifdef VEXOS_CI_INPUT_TEST
       if (g_start_open && !g_ci_start_click_seen) {
@@ -1776,61 +1776,54 @@ void desktop_tick(void) {
       ui_changed = 1;
       g_shell_dragging = 0;
     } else if (g_start_open) {
-      int32_t mx = 8;
-      int32_t mw = 160;
-      int32_t mh = 144;
-      int32_t my = tb_y - mh;
+      int32_t mx = 10, mw = 280, mh = 168, my = tb_y - 176;
       if (hit_test(p0.x, p0.y, mx, my, mw, mh)) {
         int32_t ry = p0.y - my;
-        if (ry >= 8 && ry < 24) {
-          g_show_shell = 1;
+        if (ry >= 28 && ry < 50) {
+          g_show_shell = 1; g_app_open[APP_SHELL] = 1; g_app_focus = APP_SHELL;
 #ifdef VEXOS_CI_INPUT_TEST
           serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
-          g_app_open[APP_SHELL] = 1;
-          g_app_focus = APP_SHELL;
-          g_start_open = 0;
-          ui_changed = 1;
-        } else if (ry >= 32 && ry < 48) {
-          // Explorer
-          if (simplefs_init()) {
-            g_explorer_open = 1;
-            g_app_open[APP_EXPLORER] = 1;
-            g_app_focus = APP_EXPLORER;
-          } else {
-            shell_append("fs init failed\n> ");
-          }
-          g_start_open = 0;
-          ui_changed = 1;
-        } else if (ry >= 56 && ry < 72) {
-          // Notepad
-          g_app_open[APP_NOTEPAD] = 1;
-          g_app_focus = APP_NOTEPAD;
-          g_start_open = 0;
-          ui_changed = 1;
-        } else if (ry >= 80 && ry < 96) {
-          // Setup
-          g_setup_open = 1;
-          g_setup_step = 0;
-          g_start_open = 0;
-          ui_changed = 1;
-        } else if (ry >= 104 && ry < 120) {
-          shell_append("\nhelp clear echo mem\n> ");
-          g_start_open = 0;
-          ui_changed = 1;
-        } else if (ry >= 128 && ry < 144) {
-          g_shell_out_len = 0;
-          g_shell_line_len = 0;
-          g_shell_line[0] = 0;
-          shell_append("> ");
-          g_start_open = 0;
-          ui_changed = 1;
+          g_start_open = 0; ui_changed = 1;
+        } else if (ry >= 50 && ry < 72) {
+          if (simplefs_init()) { g_explorer_open = 1; g_app_open[APP_EXPLORER] = 1; g_app_focus = APP_EXPLORER; }
+          else shell_append("fs init failed\n> ");
+          g_start_open = 0; ui_changed = 1;
+        } else if (ry >= 72 && ry < 94) {
+          g_app_open[APP_NOTEPAD] = 1; g_app_focus = APP_NOTEPAD; g_start_open = 0; ui_changed = 1;
+        } else if (ry >= 94 && ry < 116) {
+          g_viewer_open = 1; g_app_open[APP_VIEWER] = 1; g_app_focus = APP_VIEWER; g_start_open = 0; ui_changed = 1;
+        } else if (ry >= 116 && ry < 138) {
+          g_setup_open = 1; g_app_open[APP_SETUP] = 1; g_setup_step = 0; g_app_focus = APP_SETUP; g_start_open = 0; ui_changed = 1;
+        } else if (ry >= 138 && ry < 162) {
+          g_show_shell = 1; g_app_open[APP_SHELL] = 1; g_app_focus = APP_SHELL;
+          shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");
+          g_start_open = 0; ui_changed = 1;
         }
-      } else {
-        g_start_open = 0;
-        ui_changed = 1;
+      } else { g_start_open = 0; ui_changed = 1; }
+    }
+
+    // Desktop shortcuts launch the matching application.
+    if (!g_start_open) {
+      for (uint32_t i = 0; i < 4u; i++) {
+        int32_t iy = 132 + (int32_t)i * 84;
+        if (hit_test(p0.x, p0.y, 15, iy - 7, 58, 70)) {
+          if (i == 0u) {
+            if (simplefs_init()) { g_explorer_open = 1; g_app_open[APP_EXPLORER] = 1; g_app_focus = APP_EXPLORER; }
+            else shell_append("fs init failed\n> ");
+          } else if (i == 1u) {
+            g_show_shell = 1; g_app_open[APP_SHELL] = 1; g_app_focus = APP_SHELL;
+          } else if (i == 2u) {
+            g_app_open[APP_NOTEPAD] = 1; g_app_focus = APP_NOTEPAD;
+          } else {
+            g_viewer_open = 1; g_app_open[APP_VIEWER] = 1; g_app_focus = APP_VIEWER;
+          }
+          ui_changed = 1; break;
+        }
       }
     }
+
+    // Taskbar dock icons: click to focus/open
 
     // Taskbar dock icons: click to focus/open
     {
@@ -1887,20 +1880,20 @@ void desktop_tick(void) {
       int32_t wh = g_explorer_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_explorer_open = 0;
         g_explorer_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         // scroll up
         if (g_explorer_scroll)
           g_explorer_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 66, wy + 5, 20, 20)) {
         // scroll down
         g_explorer_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_explorer_dragging = 1;
         g_explorer_drag_off_x = p0.x - wx;
         g_explorer_drag_off_y = p0.y - wy;
@@ -1909,12 +1902,12 @@ void desktop_tick(void) {
         ui_changed = 1;
       } else {
         // Click in list area -> open viewer
-        int32_t list_x = wx + 8;
-        int32_t list_y = wy + 24;
-        int32_t list_w = ww - 16;
-        int32_t list_h = wh - 32;
+        int32_t list_x = wx + 160;
+        int32_t list_y = wy + 144;
+        int32_t list_w = ww - 172;
+        int32_t list_h = wh - 174;
         if (hit_test(p0.x, p0.y, list_x, list_y, list_w, list_h)) {
-          uint32_t row_h = 10u;
+          uint32_t row_h = 28u;
           uint32_t idx = g_explorer_scroll +
                          (uint32_t)((p0.y - list_y) / (int32_t)row_h);
           char name[64];
@@ -1964,18 +1957,18 @@ void desktop_tick(void) {
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
       // Close
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_viewer_open = 0;
         g_viewer_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         if (g_viewer_scroll)
           g_viewer_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 66, wy + 5, 20, 20)) {
         g_viewer_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_viewer_dragging = 1;
         g_viewer_drag_off_x = p0.x - wx;
         g_viewer_drag_off_y = p0.y - wy;
@@ -1992,11 +1985,11 @@ void desktop_tick(void) {
       int32_t ww = g_notepad_win.w;
       int32_t wh = g_notepad_win.h;
 
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_app_open[APP_NOTEPAD] = 0;
         g_notepad_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 62, wy + 2, 18, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 86, wy + 5, 20, 20)) {
         // Save
         if (simplefs_init()) {
           if (simplefs_write_file(g_notepad_name, g_notepad_text, g_notepad_text_len)) {
@@ -2008,14 +2001,14 @@ void desktop_tick(void) {
           shell_append("notepad: fs init failed\n> ");
         }
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         if (g_notepad_scroll)
           g_notepad_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 66, wy + 5, 20, 20)) {
         g_notepad_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_notepad_dragging = 1;
         g_notepad_drag_off_x = p0.x - wx;
         g_notepad_drag_off_y = p0.y - wy;
@@ -2036,13 +2029,13 @@ void desktop_tick(void) {
       int32_t wh = g_setup_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_setup_open = 0;
         g_setup_dragging = 0;
         ui_changed = 1;
       }
       // Title bar drag
-      else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_setup_dragging = 1;
         g_setup_drag_off_x = p0.x - wx;
         g_setup_drag_off_y = p0.y - wy;
@@ -2096,11 +2089,11 @@ void desktop_tick(void) {
       int32_t wh = g_shell_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_show_shell = 0;
         g_shell_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_shell_dragging = 1;
         g_shell_drag_off_x = p0.x - wx;
         g_shell_drag_off_y = p0.y - wy;
