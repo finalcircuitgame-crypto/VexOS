@@ -2044,9 +2044,12 @@ void desktop_tick(void) {
           g_notepad_text[g_notepad_text_len] = 0;
 #ifdef VEXOS_CI_INPUT_TEST
           static uint8_t ci_notepad_text_seen;
-          if (!ci_notepad_text_seen) {
+          if (!ci_notepad_text_seen && g_notepad_text_len >= 3u &&
+              g_notepad_text[g_notepad_text_len - 3u] == 'v' &&
+              g_notepad_text[g_notepad_text_len - 2u] == 'e' &&
+              g_notepad_text[g_notepad_text_len - 1u] == 'x') {
             ci_notepad_text_seen = 1;
-            serial_print("[CI] Notepad received printable keyboard input\n");
+            serial_print("[CI] Notepad accepted the full typed text vex\\n");
           }
 #endif
           ui_changed = 1;
