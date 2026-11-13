@@ -57,7 +57,7 @@ void serial_print(const char *str) {
 static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
                             uint64_t flags) {
   if (!VMM_MapPage(virtual_addr, physical_addr, flags)) {
-    serial_print("[KERNEL] FATAL: page mapping failed\\n");
+    serial_print("[KERNEL] FATAL: page mapping failed\n");
     while (1) { __asm__ volatile("cli; hlt"); }
   }
 }
@@ -176,7 +176,7 @@ void kernel_main(BootInfo *bootInfo) {
   // VMM
   serial_print("[KERNEL] Initializing VMM...\n");
   if (!VMM_Init()) {
-    serial_print("[KERNEL] FATAL: VMM root allocation failed\\n");
+    serial_print("[KERNEL] FATAL: VMM root allocation failed\n");
     while (1) { __asm__ volatile("cli; hlt"); }
   }
   // Identity map first 128MB
