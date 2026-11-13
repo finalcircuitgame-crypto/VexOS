@@ -160,6 +160,11 @@ void Task_CI_StartRuntimeTest(void) {
         frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
         frame_b[16] == 0x08u && frame_b[17] == 0x202u && frame_b[18] == 0;
   }
+
+  extern void serial_print(const char *str);
+  serial_print(ci_runtime_setup_ok
+      ? "[CI] Runtime task IRET frames validated\\n"
+      : "[CI] Runtime task IRET frame validation failed\\n");
 }
 
 int Task_CI_RuntimeTestPassed(void) {
