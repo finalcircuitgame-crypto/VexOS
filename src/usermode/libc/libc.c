@@ -194,32 +194,6 @@ static size_t format_unsigned(char *out, size_t capacity, size_t count,
     return count;
 }
 
-static uint64_t format_unsigned_arg(va_list *args, int length) {
-    switch (length) {
-    case 1: return (unsigned char)va_arg(*args, unsigned int); /* hh */
-    case 2: return (unsigned short)va_arg(*args, unsigned int); /* h */
-    case 3: return va_arg(*args, unsigned long); /* l */
-    case 4: return va_arg(*args, unsigned long long); /* ll */
-    case 5: return va_arg(*args, size_t); /* z */
-    case 6: return (uint64_t)va_arg(*args, ptrdiff_t); /* t */
-    case 7: return va_arg(*args, uint64_t); /* j */
-    default: return va_arg(*args, unsigned int);
-    }
-}
-
-static int64_t format_signed_arg(va_list *args, int length) {
-    switch (length) {
-    case 1: return (signed char)va_arg(*args, int);
-    case 2: return (short)va_arg(*args, int);
-    case 3: return va_arg(*args, long);
-    case 4: return va_arg(*args, long long);
-    case 5: return (int64_t)va_arg(*args, ptrdiff_t);
-    case 6: return va_arg(*args, ptrdiff_t);
-    case 7: return va_arg(*args, int64_t);
-    default: return va_arg(*args, int);
-    }
-}
-
 int vsnprintf(char* str, size_t size, const char* format, va_list args) {
     if (!format || (!str && size != 0)) return -1;
 
@@ -306,7 +280,17 @@ int vsnprintf(char* str, size_t size, const char* format, va_list args) {
         }
         case 'd':
         case 'i': {
-            int64_t signed_value = format_signed_arg(&args, length);
+            int64_t signed_value;
+            switch (length) {
+            case 1: signed_value = (signed char)va_arg(args, int); break;
+            case 2: signed_value = (short)va_arg(args, int); break;
+            case 3: signed_value = va_arg(args, long); break;
+            case 4: signed_value = va_arg(args, long long); break;
+            case 5:
+            case 6: signed_value = va_arg(args, ptrdiff_t); break;
+            case 7: signed_value = va_arg(args, int64_t); break;
+            default: signed_value = va_arg(args, int); break;
+            }
             char sign = signed_value < 0 ? '-' : (plus ? '+' : (space ? ' ' : 0));
             uint64_t magnitude = signed_value < 0 ? (uint64_t)(0ULL - (uint64_t)signed_value)
                                                   : (uint64_t)signed_value;
@@ -319,9 +303,21 @@ int vsnprintf(char* str, size_t size, const char* format, va_list args) {
         case 'X':
         case 'o':
         case 'p': {
-            uint64_t value = *p == 'p'
-                                 ? (uint64_t)(uintptr_t)va_arg(args, void *)
-                                 : format_unsigned_arg(&args, length);
+            uint64_t value;
+            if (*p == 'p') {
+                value = (uint64_t)(uintptr_t)va_arg(args, void *);
+            } else {
+                switch (length) {
+                case 1: value = (unsigned char)va_arg(args, unsigned int); break;
+                case 2: value = (unsigned short)va_arg(args, unsigned int); break;
+                case 3: value = va_arg(args, unsigned long); break;
+                case 4: value = va_arg(args, unsigned long long); break;
+                case 5: value = va_arg(args, size_t); break;
+                case 6: value = (uint64_t)va_arg(args, ptrdiff_t); break;
+                case 7: value = va_arg(args, uint64_t); break;
+                default: value = va_arg(args, unsigned int); break;
+                }
+            }
             unsigned base = (*p == 'x' || *p == 'X' || *p == 'p') ? 16u :
                             (*p == 'o' ? 8u : 10u);
             count = format_unsigned(str, size, count, value, base,
