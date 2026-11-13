@@ -737,6 +737,11 @@ void kernel_main(BootInfo *bootInfo) {
 #endif
 
   Task_Init();
+#ifdef VEXOS_CI_INPUT_TEST
+  extern void Task_CI_StartRuntimeTest(void);
+  extern int Task_CI_RuntimeTestPassed(void);
+  Task_CI_StartRuntimeTest();
+#endif
   serial_print("[KERNEL] Task_Init done\n");
 
   // Setup Timer
@@ -777,7 +782,14 @@ void kernel_main(BootInfo *bootInfo) {
   uint32_t frame_delay = 1000 / target_fps;
   uint64_t last_frame_ticks = Timer_Ticks();
 
+  int ci_task_runtime_reported = 0;
   while (1) {
+#ifdef VEXOS_CI_INPUT_TEST
+    if (!ci_task_runtime_reported && Task_CI_RuntimeTestPassed()) {
+      serial_print("[CI] IRQ0 preempted and executed both runtime tasks\n");
+      ci_task_runtime_reported = 1;
+    }
+#endif
     // Keep xHCI polling frequent so mouse/keyboard remain responsive
     xhci_poll_events();
 
