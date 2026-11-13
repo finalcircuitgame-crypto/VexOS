@@ -211,20 +211,36 @@ jobs:
           print("QMP injected keyboard input, USB tablet movement, and two mouse clicks.")
           PY
 
-          echo "Waiting for the character to reach desktop input..."
-          for i in $(seq 1 100); do
-            if grep -Fq "[CI] Keyboard character reached desktop input queue" serial.log; then
+          echo "Waiting for keyboard, mouse movement, Start menu, and shell input..."
+          markers=(
+            "[CI] Keyboard character reached desktop input queue"
+            "[CI] Mouse pointer movement reached desktop_tick"
+            "[CI] Start menu opened by USB mouse click"
+            "[CI] Shell opened from Start menu mouse click"
+            "[CI] Shell command submitted through keyboard"
+          )
+          for i in $(seq 1 150); do
+            all_seen=1
+            for marker in "${markers[@]}"; do
+              if ! grep -Fq "$marker" serial.log; then
+                all_seen=0
+                break
+              fi
+            done
+            if [ "$all_seen" -eq 1 ]; then
               break
             fi
             sleep 0.1
           done
 
-          if ! grep -Fq "[CI] Keyboard character reached desktop input queue" serial.log; then
-            echo "USB keyboard input did not reach desktop_tick."
-            cat serial.log || true
-            cat qemu.log || true
-            exit 1
-          fi
+          for marker in "${markers[@]}"; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Expected input/desktop marker missing: $marker"
+              cat serial.log || true
+              cat qemu.log || true
+              exit 1
+            fi
+          done
 
           if grep -Fq "[KERNEL] FATAL:" serial.log; then
             echo "Kernel reported a fatal error:"
@@ -232,5 +248,5 @@ jobs:
             exit 1
           fi
 
-          echo "PASS: UEFI boot, desktop initialization, main loop, and injected USB keyboard input."
+          echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, and typed command."
           tail -c 5000 serial.log
