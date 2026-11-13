@@ -104,6 +104,8 @@ void xhci_poll_events(void);
 #ifdef VEXOS_CI_INPUT_TEST
 extern void serial_print(const char *str);
 static uint8_t g_ci_keyboard_input_seen;
+static uint8_t g_ci_mouse_move_seen;
+static uint8_t g_ci_start_click_seen;
 #endif
 
 static uint8_t g_ring3_task_started;
@@ -1985,6 +1987,12 @@ void desktop_tick(void) {
   static uint32_t prev_buttons = 0;
   input_pointer_state_t p0 = input_pointer_get();
   g_last_ptr = p0;
+#ifdef VEXOS_CI_INPUT_TEST
+  if (!g_ci_mouse_move_seen && (p0.dx != 0 || p0.dy != 0)) {
+    g_ci_mouse_move_seen = 1;
+    serial_print("[CI] Mouse pointer movement reached desktop_tick\\n");
+  }
+#endif
   uint32_t buttons = p0.buttons;
   uint32_t pressed = (buttons) & ~prev_buttons;
   prev_buttons = buttons;
@@ -2057,6 +2065,12 @@ void desktop_tick(void) {
     // Start button hit
     if (hit_test(p0.x, p0.y, 8, tb_y + 4, 72, (int32_t)bar_h - 8)) {
       g_start_open = (uint8_t)(g_start_open ? 0u : 1u);
+#ifdef VEXOS_CI_INPUT_TEST
+      if (g_start_open && !g_ci_start_click_seen) {
+        g_ci_start_click_seen = 1;
+        serial_print("[CI] Start menu opened by USB mouse click\\n");
+      }
+#endif
       ui_changed = 1;
       g_shell_dragging = 0;
     } else if (g_start_open) {
