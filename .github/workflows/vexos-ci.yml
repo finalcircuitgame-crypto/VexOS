@@ -98,6 +98,9 @@ jobs:
           for marker in \
             "[KERNEL] Entered kernel_main" \
             "[KERNEL] Heap Initialized Successfully." \
+            "[CI] Heap allocator alignment/free/coalesce passed" \
+            "[CI] PMM page alignment/free/range checks passed" \
+            "[CI] VMM supervisor/user mapping checks passed" \
             "[PCI] Enumeration Complete" \
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
