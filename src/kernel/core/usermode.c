@@ -47,7 +47,7 @@ typedef struct {
 
 void usermode_launch(void) {
   uint32_t elf_size = 0;
-  if (simplefs_file_size("doom.elf", &elf_size) != 0) {
+  if (simplefs_file_size("doom.elf", &elf_size) == 0) {
       serial_print("[USERMODE] doom.elf not found\n");
       return;
   }
@@ -59,7 +59,7 @@ void usermode_launch(void) {
   }
   
   uint32_t out_len = 0;
-  if (simplefs_read_file("doom.elf", elf_data, elf_size, &out_len) != 0) {
+  if (simplefs_read_file("doom.elf", elf_data, elf_size, &out_len) == 0) {
       serial_print("[USERMODE] failed to read doom.elf\n");
       kfree(elf_data);
       return;
