@@ -2030,13 +2030,6 @@ void desktop_tick(void) {
         if (g_notepad_text_len) {
           g_notepad_text_len--;
           g_notepad_text[g_notepad_text_len] = 0;
-#ifdef VEXOS_CI_INPUT_TEST
-          static uint8_t ci_notepad_text_seen;
-          if (!ci_notepad_text_seen) {
-            ci_notepad_text_seen = 1;
-            serial_print("[CI] Notepad received printable keyboard input\\n");
-          }
-#endif
           ui_changed = 1;
         }
       } else if (c == '\n') {
@@ -2049,6 +2042,13 @@ void desktop_tick(void) {
         if (g_notepad_text_len + 1u < (uint32_t)sizeof(g_notepad_text)) {
           g_notepad_text[g_notepad_text_len++] = c;
           g_notepad_text[g_notepad_text_len] = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+          static uint8_t ci_notepad_text_seen;
+          if (!ci_notepad_text_seen) {
+            ci_notepad_text_seen = 1;
+            serial_print("[CI] Notepad received printable keyboard input\\n");
+          }
+#endif
           ui_changed = 1;
         }
       }
