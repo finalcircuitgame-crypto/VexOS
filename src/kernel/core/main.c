@@ -370,6 +370,8 @@ static void ci_syscall_self_test(void) {
   // Zero-length files must still open and close cleanly through syscalls.
   if (!simplefs_write_file("empty.txt", "", 0))
     ci_memory_test_fail("SimpleFS empty-file write");
+  if (!simplefs_init())
+    ci_memory_test_fail("SimpleFS empty-file remount");
   uint32_t empty_size = 1;
   if (!simplefs_file_size("empty.txt", &empty_size) || empty_size != 0)
     ci_memory_test_fail("SimpleFS empty-file metadata");
