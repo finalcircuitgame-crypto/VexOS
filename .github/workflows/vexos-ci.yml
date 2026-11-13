@@ -48,7 +48,7 @@ jobs:
           file dist/BOOTX64.EFI dist/kernel.elf dist/tiny64.img dist/storage.img
           readelf -h dist/kernel.elf
 
-      - name: Boot UEFI image in QEMU and smoke-test kernel startup
+      - name: Boot UEFI image in QEMU through the interactive setup wizard
         shell: bash
         run: |
           set -e
@@ -83,15 +83,21 @@ jobs:
             cat serial.log || true
             exit 1
           fi
-          if ! grep -q "\[KERNEL\] Starting main loop" serial.log; then
-            echo "Kernel did not reach its main loop. Serial output:"
-            cat serial.log || true
-            exit 1
-          fi
+          for marker in \
+            "[KERNEL] Heap Initialized Successfully." \
+            "[PCI] Enumeration Complete" \
+            "[xHCI] Controller Running" \
+            "[KERNEL] Starting Fullscreen Setup Wizard..."; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Expected boot marker missing: $marker"
+              cat serial.log || true
+              exit 1
+            fi
+          done
           if grep -q "\[KERNEL\] FATAL:" serial.log; then
             echo "Kernel reported a fatal error:"
             cat serial.log
             exit 1
           fi
-          echo "UEFI boot smoke test passed; kernel reached its main loop."
+          echo "UEFI boot smoke test passed; kernel initialized memory, PCI, xHCI, and entered the interactive setup wizard."
           tail -c 4000 serial.log
