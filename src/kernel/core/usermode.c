@@ -110,6 +110,119 @@ static void rollback_user_pages(uint64_t *mapped, uint32_t count) {
     }
 }
 
+
+#ifdef VEXOS_CI_INPUT_TEST
+int usermode_ci_self_test(void) {
+    Elf64_Ehdr ehdr = {0};
+    ehdr.e_ident[0] = 0x7F;
+    ehdr.e_ident[1] = 'E';
+    ehdr.e_ident[2] = 'L';
+    ehdr.e_ident[3] = 'F';
+    ehdr.e_ident[4] = ELFCLASS64;
+    ehdr.e_ident[5] = ELFDATA2LSB;
+    ehdr.e_ident[6] = 1;
+    ehdr.e_type = ET_EXEC;
+    ehdr.e_machine = EM_X86_64;
+    ehdr.e_version = 1;
+    ehdr.e_entry = 0x400010;
+    ehdr.e_phoff = sizeof(Elf64_Ehdr);
+    ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+    ehdr.e_phentsize = sizeof(Elf64_Phdr);
+    ehdr.e_phnum = 1;
+
+    Elf64_Phdr ph = {0};
+    ph.p_type = PT_LOAD;
+    ph.p_flags = PF_X;
+    ph.p_offset = 0x1000;
+    ph.p_vaddr = 0x400000;
+    ph.p_filesz = 4;
+    ph.p_memsz = PAGE_SIZE;
+    ph.p_align = PAGE_SIZE;
+    const uint32_t image_size = 0x1004;
+
+    if (!elf_header_valid(&ehdr, image_size) ||
+        !load_segment_valid(&ph, image_size))
+        return 0;
+    if (!(ph.p_flags & PF_X) || ehdr.e_entry < ph.p_vaddr ||
+        ehdr.e_entry >= ph.p_vaddr + ph.p_memsz)
+        return 0;
+
+    ehdr.e_ident[0] = 0;
+    if (elf_header_valid(&ehdr, image_size)) return 0;
+    ehdr.e_ident[0] = 0x7F;
+
+    ehdr.e_phnum = 129;
+    if (elf_header_valid(&ehdr, image_size)) return 0;
+    ehdr.e_phnum = 1;
+
+    ehdr.e_phoff = image_size;
+    if (elf_header_valid(&ehdr, image_size)) return 0;
+    ehdr.e_phoff = sizeof(Elf64_Ehdr);
+
+    ph.p_filesz = ph.p_memsz + 1u;
+    if (load_segment_valid(&ph, image_size)) return 0;
+    ph.p_filesz = 4;
+
+    ph.p_offset = (uint64_t)image_size + 1u;
+    if (load_segment_valid(&ph, image_size)) return 0;
+    ph.p_offset = 0x1000;
+
+    ph.p_vaddr = USER_ADDRESS_LIMIT - PAGE_SIZE;
+    ph.p_memsz = PAGE_SIZE * 2u;
+    if (load_segment_valid(&ph, image_size)) return 0;
+    ph.p_vaddr = 0x400000;
+    ph.p_memsz = PAGE_SIZE;
+
+    ph.p_align = 3;
+    if (load_segment_valid(&ph, image_size)) return 0;
+    ph.p_align = PAGE_SIZE;
+
+    ph.p_memsz = 0;
+    ph.p_filesz = 1;
+    if (load_segment_valid(&ph, image_size)) return 0;
+    ph.p_memsz = PAGE_SIZE;
+    ph.p_filesz = 4;
+
+    ph.p_vaddr = 0x400123;
+    ph.p_memsz = PAGE_SIZE * 2u;
+    if (segment_page_start(&ph) != 0x400000 ||
+        segment_page_end(&ph) != 0x403000)
+        return 0;
+
+    // Exercise the same rollback helper used when a partial ELF map fails.
+    const uint64_t test_pages[2] = {
+        0x0000600000000000ull,
+        0x0000600000001000ull
+    };
+    void *pa0 = PMM_AllocatePage();
+    if (!pa0) return 0;
+    if (!VMM_MapPage((void *)(uintptr_t)test_pages[0], pa0,
+                     PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+        PMM_FreePage(pa0);
+        return 0;
+    }
+
+    void *pa1 = PMM_AllocatePage();
+    if (!pa1) {
+        rollback_user_pages((uint64_t *)test_pages, 1);
+        return 0;
+    }
+    if (!VMM_MapPage((void *)(uintptr_t)test_pages[1], pa1,
+                     PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+        PMM_FreePage(pa1);
+        rollback_user_pages((uint64_t *)test_pages, 1);
+        return 0;
+    }
+
+    rollback_user_pages((uint64_t *)test_pages, 2);
+    if (VMM_IsUserRange((void *)(uintptr_t)test_pages[0], 1, 0) ||
+        VMM_IsUserRange((void *)(uintptr_t)test_pages[1], 1, 0))
+        return 0;
+
+    return 1;
+}
+#endif
+
 void usermode_launch(void) {
     uint32_t elf_size = 0;
     if (!simplefs_file_size("doom.elf", &elf_size) || elf_size < sizeof(Elf64_Ehdr)) {
