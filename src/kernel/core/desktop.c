@@ -1124,6 +1124,8 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
     g_setup_open = 1;
+    g_app_open[APP_SETUP] = 1;
+    app_raise(APP_SETUP);
     g_setup_step = 0;
   } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "wall", 4)) {
     shell_append("wall: loading new.png...\n");
@@ -1912,6 +1914,11 @@ void desktop_tick(void) {
       int32_t wy = g_setup_win.y;
       int32_t ww = g_setup_win.w;
       int32_t wh = g_setup_win.h;
+
+      if (hit_test(p0.x, p0.y, wx, wy, ww, wh)) {
+        app_raise(APP_SETUP);
+        ui_changed = 1;
+      }
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
