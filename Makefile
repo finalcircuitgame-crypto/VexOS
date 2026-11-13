@@ -10,15 +10,8 @@ KERNELDIR = $(SRCDIR)/kernel
 DISTDIR = dist
 OBJDIR = $(DISTDIR)/obj
 
-# Option to skip building doomgeneric (default: skip)
-BUILD_DOOMGENERIC ?= 0
-
-# When BUILD_DOOMGENERIC != 1, provide empty placeholder object rules to avoid requiring Allegro.
-ifneq ($(BUILD_DOOMGENERIC),1)
-$(OBJDIR)/doom/doomgeneric/%.o:
-	@mkdir -p $(dir $@)
-	@printf "" > $@
-endif
+# DoomGeneric is maintained as a submodule but is not part of the kernel build.
+# A VexOS display/input backend and a separate user-mode ELF target are still required.
 
 # Bootloader Flags
 EFI_INC = /usr/include/efi
