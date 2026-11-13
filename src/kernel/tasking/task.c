@@ -177,9 +177,13 @@ void Task_CI_StartRuntimeTest(void) {
     const uint64_t *frame_b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
     ci_runtime_setup_ok =
         frame_a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
-        frame_a[16] == 0x08u && frame_a[17] == 0x202u && frame_a[18] == 0 &&
+        frame_a[16] == 0x08u && frame_a[17] == 0x202u &&
+        frame_a[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_a + 4096u - sizeof(uint64_t)) &&
+        frame_a[19] == 0x10u &&
         frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
-        frame_b[16] == 0x08u && frame_b[17] == 0x202u && frame_b[18] == 0;
+        frame_b[16] == 0x08u && frame_b[17] == 0x202u &&
+        frame_b[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_b + 4096u - sizeof(uint64_t)) &&
+        frame_b[19] == 0x10u;
   }
 
   extern void serial_print(const char *str);
