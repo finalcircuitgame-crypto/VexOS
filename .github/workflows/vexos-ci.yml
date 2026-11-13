@@ -137,6 +137,7 @@ jobs:
             "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
             "[CI] ELF header/segment validation and rollback passed" \
             "[CI] Task IRET frame and scheduler checks passed" \
+            "[CI] IRQ0 preempted and executed both runtime tasks" \
             "[CI] Successful framebuffer syscall draw passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
