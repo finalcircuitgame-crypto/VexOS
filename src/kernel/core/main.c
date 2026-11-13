@@ -442,6 +442,40 @@ static void ci_syscall_self_test(void) {
   serial_print("[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed\n");
 }
 
+static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
+  struct InterruptFrame frame = {0};
+  frame.rax = 2;
+  frame.rsi = sizeof(uint32_t);
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+
+  void *user_pixel = (void *)(uintptr_t)frame.rax;
+  if (!user_pixel || frame.rax == UINT64_MAX ||
+      !VMM_IsUserRange(user_pixel, sizeof(uint32_t), 1))
+    ci_memory_test_fail("framebuffer test mmap");
+
+  const uint32_t expected = 0x0055AA33u;
+  *(volatile uint32_t *)user_pixel = expected;
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 9;
+  frame.rdi = (uint64_t)(uintptr_t)user_pixel;
+  frame.rsi = 1;
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+
+  if (frame.rax != 0)
+    ci_memory_test_fail("framebuffer syscall rejected valid 1x1 frame");
+  if (!bootInfo || !bootInfo->framebuffer ||
+      bootInfo->framebuffer[0] != expected)
+    ci_memory_test_fail("framebuffer syscall did not draw pixel");
+
+  if (!VMM_UnmapPage(user_pixel, 1) ||
+      VMM_IsUserRange(user_pixel, sizeof(uint32_t), 0))
+    ci_memory_test_fail("framebuffer test mmap teardown");
+
+  serial_print("[CI] Successful framebuffer syscall draw passed\\n");
+}
+
 #endif
 
 void kernel_main(BootInfo *bootInfo) {
@@ -696,6 +730,11 @@ void kernel_main(BootInfo *bootInfo) {
 
   // Stop drawing serial/boot text to the framebuffer
   g_ConsoleReady = 0;
+
+#ifdef VEXOS_CI_INPUT_TEST
+  // Run only after desktop_init has installed the framebuffer target.
+  ci_framebuffer_syscall_self_test(bootInfo);
+#endif
 
   Task_Init();
   serial_print("[KERNEL] Task_Init done\n");
