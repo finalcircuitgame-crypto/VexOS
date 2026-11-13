@@ -288,10 +288,37 @@ jobs:
                       }
                   })
                   time.sleep(0.25)
+          # Let the desktop process the final key and redraw Notepad before capture.
+          time.sleep(0.5)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
+
+          # Open Files from the centered taskbar dock and capture the redesigned file manager.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 13200}},
+                  {"type": "abs", "data": {"axis": "y", "value": 31600}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.5)
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/05-files.png"}})
           stream.close()
           sock.close()
-          print("QMP injected keyboard input, USB tablet movement, two mouse clicks, and captured four PNG screenshots.")
+          print("QMP injected keyboard input, USB tablet movement, three mouse clicks, and captured five PNG screenshots.")
           PY
 
           echo "Waiting for keyboard, mouse movement, Start menu, and shell input..."
