@@ -12,10 +12,12 @@ typedef struct {
     page_table_entry entries[512];
 } page_table;
 
-void VMM_Init();
-void VMM_MapPage(void* virtual_addr, void* physical_addr, uint64_t flags);
-void VMM_Activate();
-page_table* VMM_GetKernelPML4();
+int VMM_Init(void);
+int VMM_MapPage(void *virtual_addr, void *physical_addr, uint64_t flags);
+int VMM_UnmapPage(void *virtual_addr, int free_physical);
+int VMM_IsUserRange(const void *address, uint64_t length, int write_access);
+void VMM_Activate(void);
+page_table *VMM_GetKernelPML4(void);
 
 #define PAGE_PRESENT (1ULL << 0)
 #define PAGE_WRITE   (1ULL << 1)
