@@ -205,7 +205,7 @@ jobs:
                       "hold-time": 100
                   }
               })
-              time.sleep(0.05)
+              time.sleep(0.25)
           stream.close()
           sock.close()
           print("QMP injected keyboard input, USB tablet movement, and two mouse clicks.")
