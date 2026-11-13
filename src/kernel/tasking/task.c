@@ -41,6 +41,8 @@ void Task_Create(void (*entry)(), void *stack_top) {
 }
 
 
+uint64_t Task_Schedule(uint64_t current_rsp);
+
 #ifdef VEXOS_CI_INPUT_TEST
 static void ci_task_entry(void) {}
 
