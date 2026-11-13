@@ -23,7 +23,7 @@ jobs:
       - name: Install toolchain and VM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb
 
       - name: Verify UEFI toolchain paths
         run: |
@@ -104,9 +104,10 @@ jobs:
           PY
 
           cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
-          rm -f /tmp/vexos-qmp.sock serial.log qemu.log
+          mkdir -p artifacts
+          rm -f artifacts/*.png /tmp/vexos-qmp.sock serial.log qemu.log
 
-          qemu-system-x86_64 \
+          xvfb-run -a qemu-system-x86_64 \
             -machine pc \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
@@ -116,7 +117,7 @@ jobs:
             -device qemu-xhci,id=xhci \
             -device usb-kbd,bus=xhci.0 \
             -device usb-tablet,bus=xhci.0 \
-            -display none \
+            -display sdl \
             -monitor none \
             -serial file:serial.log \
             -qmp unix:/tmp/vexos-qmp.sock,server=on,wait=off \
@@ -211,6 +212,7 @@ jobs:
                       raise RuntimeError(response["error"])
 
           command({"execute": "qmp_capabilities"})
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/01-desktop.png"}})
           command({
               "execute": "send-key",
               "arguments": {
@@ -240,6 +242,8 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
+          # Capture the opened Start menu before selecting Shell.
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/02-start-menu.png"}})
           # Select the first Start-menu item (Shell).
           time.sleep(0.2)
           command({
@@ -263,6 +267,8 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
+          # Capture Shell before exercising its commands.
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/03-shell.png"}})
           # Exercise shell commands, then open Notepad and type into it.
           sequences = [
               ["h", "e", "l", "p", "ret"],
@@ -282,9 +288,10 @@ jobs:
                       }
                   })
                   time.sleep(0.25)
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
           stream.close()
           sock.close()
-          print("QMP injected keyboard input, USB tablet movement, and two mouse clicks.")
+          print("QMP injected keyboard input, USB tablet movement, two mouse clicks, and captured four PNG screenshots.")
           PY
 
           echo "Waiting for keyboard, mouse movement, Start menu, and shell input..."
@@ -336,3 +343,12 @@ jobs:
 
           echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, and typed command."
           tail -c 5000 serial.log
+
+      - name: Upload QEMU desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vexos-qemu-screenshots
+          path: artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 7
