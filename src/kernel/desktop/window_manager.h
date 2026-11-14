@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+typedef struct {
+  int32_t x;
+  int32_t y;
+  int32_t w;
+  int32_t h;
+} desktop_window_t;
+
 typedef enum {
   APP_SHELL = 0,
   APP_EXPLORER = 1,
