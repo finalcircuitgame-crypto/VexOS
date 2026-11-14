@@ -76,6 +76,7 @@ static uint32_t g_explorer_last_click_tick;
 static uint32_t g_explorer_last_click_index;
 
 #include "../desktop/window_manager.h"
+#include "../desktop/app_registry.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -965,13 +966,13 @@ static void draw_taskbar(void){
 static void draw_start_menu(void){
   if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
   draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);draw_string_8x8(x+16u,y+9u,"VEXOS",0xF0F6FCu);draw_string_8x8(x+208u,y+9u,"APPS",0x7FA0BEu);draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
-  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};const char *labels[6]={"Terminal","Files","Notepad","Viewer","Setup","Help"};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);draw_string_8x8(x+23u,ry+6u,"?",0xEAF3FCu);}draw_string_8x8(x+46u,ry+7u,labels[i],0xDCE8F4u);if(i==0u)draw_string_8x8(x+232u,ry+7u,">",0x75A8D4u);}
+  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};
+  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);draw_string_8x8(x+23u,ry+6u,"?",0xEAF3FCu);}draw_string_8x8(x+46u,ry+7u,i<5u?app_registry_name(apps[i]):"Help",0xDCE8F4u);if(i==0u)draw_string_8x8(x+232u,ry+7u,">",0x75A8D4u);}
 }
 
 static void draw_desktop_icons(void){
-  if(!g_bi)return;uint32_t x=22u,y=132u,sz=42u,step=84u;const app_id_t apps[4]={APP_EXPLORER,APP_SHELL,APP_NOTEPAD,APP_VIEWER};const char *labels[4]={"Files","Terminal","Notepad","Viewer"};
-  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;blend_round_rect(x-7u,iy-7u,56u,70u,8u,0x14263Au,90u);draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;while(labels[i][len])len++;draw_string_8x8(x+(sz-len*8u)/2u,iy+sz+8u,labels[i],0xF1F6FCu);}
+  if(!g_bi)return;uint32_t x=22u,y=132u,sz=42u,step=84u;const app_id_t apps[4]={APP_EXPLORER,APP_SHELL,APP_NOTEPAD,APP_VIEWER};
+  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;blend_round_rect(x-7u,iy-7u,56u,70u,8u,0x14263Au,90u);draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;draw_string_8x8(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
 }
 
 static void draw_widgets(void){
@@ -1704,6 +1705,7 @@ void desktop_init(BootInfo *bootInfo) {
   for (uint32_t i = 0; i < APP_COUNT; i++)
     g_app_open[i] = 0;
   wm_init();
+  app_registry_init();
   wm_raise(APP_SHELL);
 
   g_notepad_dragging = 0;
