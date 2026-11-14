@@ -874,12 +874,6 @@ void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   }
 }
 
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  dst[y * g_bi->pitch + x] = c;
-}
-
 static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
 
 static void draw_taskbar(void){
