@@ -308,6 +308,8 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
   if (!input_ctx) {
     serial_print("[xHCI] Could not allocate HID input context\n");
+    PMM_FreePage(dev->intr_ring);
+    dev->intr_ring = NULL;
     return 0;
   }
   for (uint32_t i = 0; i < 4096; i++) {
@@ -396,7 +398,14 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   xhci_print_u32_dec(evt_slot);
   serial_print("\n");
 
-  return (cc == 1);
+  /* The command completed, so the controller no longer needs input_ctx. */
+  PMM_FreePage(input_ctx);
+  if (cc != 1) {
+    PMM_FreePage(dev->intr_ring);
+    dev->intr_ring = NULL;
+    return 0;
+  }
+  return 1;
 }
 
 int xhci_hid_set_protocol_boot(xhci_device_state_t *dev) {
