@@ -1,5 +1,5 @@
 #include "notepad.h"
-#include "../graphics/graphics.h"
+#include "../../graphics/graphics.h"
 
 static void draw_line_number(uint32_t x, uint32_t y, uint32_t number) {
   char digits[11];
