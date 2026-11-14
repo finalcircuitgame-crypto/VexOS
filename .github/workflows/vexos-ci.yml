@@ -249,6 +249,7 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
+          time.sleep(0.4)
           # Capture the opened Start menu before selecting Shell.
           command({"execute": "screendump", "arguments": {"filename": "artifacts/02-start-menu.png"}})
           # Select the first Start-menu item (Shell).
@@ -274,6 +275,7 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
+          time.sleep(0.4)
           # Resize Terminal by dragging the lower-right grip with the USB tablet.
           # CI runs the guest framebuffer at 1280x800.
           command({
@@ -308,6 +310,7 @@ jobs:
           time.sleep(0.25)
           # Capture the resized Terminal.
           command({"execute": "screendump", "arguments": {"filename": "artifacts/03-shell.png"}})
+          time.sleep(0.5)
           # Exercise shell commands, then open Notepad and type into it.
           sequences = [
               ["h", "e", "l", "p", "ret"],
