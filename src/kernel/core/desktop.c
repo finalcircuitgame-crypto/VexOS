@@ -2214,6 +2214,9 @@ void desktop_tick(void) {
         wm_hide(APP_EXPLORER);
         g_explorer_dragging = 0;
         ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_EXPLORER, p0.x, p0.y);
+        ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         // scroll up
         if (g_explorer_scroll)
@@ -2276,6 +2279,9 @@ void desktop_tick(void) {
         g_viewer_dragging = 0;
         viewer_clear_content();
         ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_VIEWER, p0.x, p0.y);
+        ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         if (g_viewer_scroll)
           g_viewer_scroll--;
@@ -2307,6 +2313,9 @@ void desktop_tick(void) {
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         wm_close(APP_NOTEPAD);
         g_notepad_dragging = 0;
+        ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_NOTEPAD, p0.x, p0.y);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 86, wy + 5, 20, 20)) {
         // Save
@@ -2356,6 +2365,11 @@ void desktop_tick(void) {
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         wm_hide(APP_SETUP);
         g_setup_dragging = 0;
+        ui_changed = 1;
+      }
+      // Resize grip
+      else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_SETUP, p0.x, p0.y);
         ui_changed = 1;
       }
       // Title bar drag
@@ -2417,6 +2431,9 @@ void desktop_tick(void) {
         wm_hide(APP_SHELL);
         g_shell_dragging = 0;
         ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_SHELL, p0.x, p0.y);
+        ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_shell_dragging = 1;
         g_shell_drag_off_x = p0.x - wx;
@@ -2436,6 +2453,8 @@ void desktop_tick(void) {
     g_viewer_dragging = 0;
     g_notepad_dragging = 0;
     g_setup_dragging = 0;
+    g_window_resize_active = 0u;
+    g_window_resize_app = APP_COUNT;
   }
 
   if (g_shell_dragging && (p0.dx || p0.dy)) {
@@ -2471,6 +2490,20 @@ void desktop_tick(void) {
     g_setup_win.y = p0.y - g_setup_drag_off_y;
     constrain_desktop_window(&g_setup_win, 420u, 280u);
     ui_changed = 1;
+  }
+
+  if (g_window_resize_active &&
+      (p0.x != g_window_resize_pointer_x ||
+       p0.y != g_window_resize_pointer_y)) {
+    window_resize_update(p0.x, p0.y);
+    ui_changed = 1;
+#ifdef VEXOS_CI_INPUT_TEST
+    static uint8_t resize_ci_seen;
+    if (!resize_ci_seen) {
+      resize_ci_seen = 1u;
+      serial_print("[CI] Window resize drag updated geometry\n");
+    }
+#endif
   }
 
   if (!g_back || !g_bg) {
