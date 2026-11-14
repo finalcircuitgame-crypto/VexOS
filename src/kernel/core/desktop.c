@@ -67,6 +67,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/compositor/window_compositor.h"
 #include "../desktop/apps/notepad/notepad.h"
 #include "../desktop/apps/terminal/terminal.h"
+#include "../desktop/apps/terminal/shell_commands.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -1050,50 +1051,9 @@ static void shell_run_line(void) {
     return;
   }
 
-  if (g_shell_line_len == 4 && streq_n(g_shell_line, "help", 4)) {
-#ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Shell help command executed\n");
-#endif
-    shell_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
-  } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "clear", 5)) ||
-             (g_shell_line_len == 3 && streq_n(g_shell_line, "cls", 3))) {
-    terminal_clear_output();
-  } else if (g_shell_line_len >= 4 && streq_n(g_shell_line, "echo", 4)) {
-    uint32_t i = 4;
-    while (i < g_shell_line_len && (g_shell_line[i] == ' '))
-      i++;
-    for (; i < g_shell_line_len; i++) {
-      char c = g_shell_line[i];
-      char t[2] = {c, 0};
-      shell_append(t);
-    }
-    shell_append("\n");
-  } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "mem", 3)) {
-#ifdef VEXOS_CI_INPUT_TEST
-    serial_print("[CI] Shell mem command executed\n");
-#endif
-    shell_append("heap ok\n");
-  } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "ver", 3)) {
-    shell_append("tiny64 ui\n");
-  } else if (g_shell_line_len == 6 && streq_n(g_shell_line, "uptime", 6)) {
-    char buf[12];
-    shell_u32_to_dec(buf, g_tick);
-    shell_append(buf);
-    shell_append(" ticks\n");
-  } else if (g_shell_line_len == 3 && streq_n(g_shell_line, "pos", 3)) {
-    char buf[12];
-    shell_append("x=");
-    shell_u32_to_dec(buf, (uint32_t)g_last_ptr.x);
-    shell_append(buf);
-    shell_append(" y=");
-    shell_u32_to_dec(buf, (uint32_t)g_last_ptr.y);
-    shell_append(buf);
-    shell_append("\n");
-  } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "rand", 4)) {
-    char buf[12];
-    shell_u32_to_dec(buf, shell_next_rand());
-    shell_append(buf);
-    shell_append("\n");
+  if (shell_commands_execute(g_shell_line, g_shell_line_len, g_tick,
+                             g_last_ptr.x, g_last_ptr.y, &g_rand_state)) {
+    /* Built-in command handled by the shell command module. */
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "specs", 5)) {
     shell_run_specs();
 #ifdef VEXOS_CI_INPUT_TEST
