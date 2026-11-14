@@ -2531,7 +2531,7 @@ void desktop_tick(void) {
     g_window_resize_app = APP_COUNT;
   }
 
-  if (g_shell_dragging && (p0.dx || p0.dy)) {
+  if (g_shell_dragging) {
     wm_window_t old_win = g_shell_win;
     g_shell_win.x = p0.x - g_shell_drag_off_x;
     g_shell_win.y = p0.y - g_shell_drag_off_y;
@@ -2544,7 +2544,7 @@ void desktop_tick(void) {
     }
   }
 
-  if (g_explorer_dragging && (p0.dx || p0.dy)) {
+  if (g_explorer_dragging) {
     wm_window_t old_win = g_explorer_win;
     g_explorer_win.x = p0.x - g_explorer_drag_off_x;
     g_explorer_win.y = p0.y - g_explorer_drag_off_y;
@@ -2557,7 +2557,7 @@ void desktop_tick(void) {
     }
   }
 
-  if (g_viewer_dragging && (p0.dx || p0.dy)) {
+  if (g_viewer_dragging) {
     wm_window_t old_win = g_viewer_win;
     g_viewer_win.x = p0.x - g_viewer_drag_off_x;
     g_viewer_win.y = p0.y - g_viewer_drag_off_y;
@@ -2570,7 +2570,7 @@ void desktop_tick(void) {
     }
   }
 
-  if (g_notepad_dragging && (p0.dx || p0.dy)) {
+  if (g_notepad_dragging) {
     wm_window_t old_win = g_notepad_win;
     g_notepad_win.x = p0.x - g_notepad_drag_off_x;
     g_notepad_win.y = p0.y - g_notepad_drag_off_y;
@@ -2583,7 +2583,7 @@ void desktop_tick(void) {
     }
   }
 
-  if (g_setup_dragging && (p0.dx || p0.dy)) {
+  if (g_setup_dragging) {
     wm_window_t old_win = g_setup_win;
     g_setup_win.x = p0.x - g_setup_drag_off_x;
     g_setup_win.y = p0.y - g_setup_drag_off_y;
