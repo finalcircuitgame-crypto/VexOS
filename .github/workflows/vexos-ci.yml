@@ -274,7 +274,39 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
-          # Capture Shell before exercising its commands.
+          # Resize Terminal by dragging the lower-right grip with the USB tablet.
+          # CI runs the guest framebuffer at 1280x800.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 22050}},
+                  {"type": "abs", "data": {"axis": "y", "value": 18050}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 22600}},
+                  {"type": "abs", "data": {"axis": "y", "value": 18870}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.25)
+          # Capture the resized Terminal.
           command({"execute": "screendump", "arguments": {"filename": "artifacts/03-shell.png"}})
           # Exercise shell commands, then open Notepad and type into it.
           sequences = [
@@ -340,7 +372,8 @@ jobs:
             "[CI] IRQ0 preempted and executed both runtime tasks"
             "[CI] Mouse pointer movement reached desktop_tick"
             "[CI] Start menu opened by USB mouse click"
-            "[CI] Shell opened from Start menu mouse click"
+            "[CI] Shell opened from Start menu mouse click",
+            "[CI] Window resize drag updated geometry"
             "[CI] Shell received printable keyboard input"
             "[CI] Shell command submitted through keyboard"
             "[CI] Shell help command executed"
