@@ -77,6 +77,7 @@ static uint32_t g_explorer_last_click_index;
 
 #include "../desktop/window_manager.h"
 #include "../desktop/app_registry.h"
+#include "../desktop/graphics/graphics.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -305,31 +306,8 @@ void desktop_set_fullscreen_app_active(int active) {
   g_fullscreen_app_active = active ? 1u : 0u;
 }
 
-static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                      uint32_t c);
-static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
-                            uint32_t fg);
-static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a);
-static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint32_t radius, uint32_t c, uint8_t a);
 static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
-static int streq_n(const char *a, const char *b, uint32_t n);
-
-static inline void put_px(uint32_t x, uint32_t y, uint32_t c);
-
-static void draw_icon_20(uint32_t x, uint32_t y, const uint32_t *pix) {
-  for (uint32_t yy = 0; yy < 20u; yy++) {
-    for (uint32_t xx = 0; xx < 20u; xx++) {
-      uint32_t c = pix[yy * 20u + xx];
-      if (c & 0xFF000000u) {
-        put_px(x + xx, y + yy, c & 0x00FFFFFFu);
-      }
-    }
-  }
-}
-
-static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
+static int streq_n(const char *a, const char *b, uint32_t n);static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
                                 uint32_t scale) {
   if (scale == 0)
     return;
@@ -341,7 +319,7 @@ static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
       uint32_t rgb = c & 0x00FFFFFFu;
       for (uint32_t sy = 0; sy < scale; sy++) {
         for (uint32_t sx = 0; sx < scale; sx++) {
-          put_px(x + xx * scale + sx, y + yy * scale + sy, rgb);
+          gfx_put_pixel(x + xx * scale + sx, y + yy * scale + sy, rgb);
         }
       }
     }
@@ -554,18 +532,18 @@ static const uint32_t k_icon_notepad_20[20u * 20u] = {
 
 static void draw_app_icon(uint32_t x,uint32_t y,uint32_t size,app_id_t app){
   uint32_t tile=app==APP_EXPLORER?0x35402Du:app==APP_VIEWER?0x263D60u:app==APP_NOTEPAD?0x493B65u:app==APP_SETUP?0x3B345Bu:0x243B59u;
-  if(size<18u)return;blend_round_rect(x,y,size,size,size/5u,tile,255);draw_rect(x+1u,y+1u,size-2u,1u,0x7187A4u);
-  if(size<28u){const char *m=app==APP_EXPLORER?"F":app==APP_VIEWER?"V":app==APP_NOTEPAD?"N":app==APP_SETUP?"S":">";draw_string_8x8(x+(size-8u)/2u,y+(size-8u)/2u,m,0xFFFFFFu);return;}
-  if(app==APP_SHELL){blend_round_rect(x+6u,y+7u,size-12u,size-14u,4u,0x0A1423u,255);draw_rect(x+7u,y+8u,size-14u,5u,0x385777u);draw_rect(x+10u,y+10u,3u,2u,0xF28B82u);draw_rect(x+15u,y+10u,3u,2u,0xF6C76Bu);draw_rect(x+20u,y+10u,3u,2u,0x74C69Du);draw_string_8x8(x+10u,y+20u,">_",0x7DE0B1u);}
-  else if(app==APP_EXPLORER){blend_round_rect(x+6u,y+14u,size-12u,size-21u,4u,0xC98222u,255);blend_round_rect(x+8u,y+10u,size/2u,9u,3u,0xF4C45Eu,255);draw_rect(x+7u,y+18u,size-14u,2u,0xFFE08Au);}
-  else if(app==APP_VIEWER){blend_round_rect(x+6u,y+6u,size-12u,size-12u,4u,0xEAF2F8u,255);draw_rect(x+9u,y+9u,size-18u,size-18u,0x83C5E8u);blend_round_rect(x+size-15u,y+11u,5u,5u,3u,0xFFD166u,255);draw_rect(x+10u,y+size-17u,size/3u,6u,0x2E8B72u);draw_rect(x+size/3u,y+size-20u,size/3u,9u,0x26765Fu);}
-  else if(app==APP_NOTEPAD){blend_round_rect(x+8u,y+5u,size-16u,size-10u,3u,0xF4F7FCu,255);draw_rect(x+12u,y+11u,size-24u,2u,0x4C8BD8u);draw_rect(x+12u,y+17u,size-24u,2u,0xA9BBD0u);draw_rect(x+12u,y+23u,size-24u,2u,0xA9BBD0u);if(size>38u)draw_rect(x+12u,y+29u,size-24u,2u,0xA9BBD0u);}
-  else{blend_round_rect(x+9u,y+9u,size-18u,size-18u,size/4u,0x8A79CBu,255);blend_round_rect(x+size/2u-4u,y+size/2u-4u,8u,8u,4u,0xE8E3FFu,255);draw_rect(x+size/2u-2u,y+6u,4u,7u,0xDCD4FFu);draw_rect(x+size/2u-2u,y+size-13u,4u,7u,0xDCD4FFu);draw_rect(x+6u,y+size/2u-2u,7u,4u,0xDCD4FFu);draw_rect(x+size-13u,y+size/2u-2u,7u,4u,0xDCD4FFu);}
+  if(size<18u)return;gfx_blend_round_rect(x,y,size,size,size/5u,tile,255);gfx_draw_rect(x+1u,y+1u,size-2u,1u,0x7187A4u);
+  if(size<28u){const char *m=app==APP_EXPLORER?"F":app==APP_VIEWER?"V":app==APP_NOTEPAD?"N":app==APP_SETUP?"S":">";gfx_draw_string(x+(size-8u)/2u,y+(size-8u)/2u,m,0xFFFFFFu);return;}
+  if(app==APP_SHELL){gfx_blend_round_rect(x+6u,y+7u,size-12u,size-14u,4u,0x0A1423u,255);gfx_draw_rect(x+7u,y+8u,size-14u,5u,0x385777u);gfx_draw_rect(x+10u,y+10u,3u,2u,0xF28B82u);gfx_draw_rect(x+15u,y+10u,3u,2u,0xF6C76Bu);gfx_draw_rect(x+20u,y+10u,3u,2u,0x74C69Du);gfx_draw_string(x+10u,y+20u,">_",0x7DE0B1u);}
+  else if(app==APP_EXPLORER){gfx_blend_round_rect(x+6u,y+14u,size-12u,size-21u,4u,0xC98222u,255);gfx_blend_round_rect(x+8u,y+10u,size/2u,9u,3u,0xF4C45Eu,255);gfx_draw_rect(x+7u,y+18u,size-14u,2u,0xFFE08Au);}
+  else if(app==APP_VIEWER){gfx_blend_round_rect(x+6u,y+6u,size-12u,size-12u,4u,0xEAF2F8u,255);gfx_draw_rect(x+9u,y+9u,size-18u,size-18u,0x83C5E8u);gfx_blend_round_rect(x+size-15u,y+11u,5u,5u,3u,0xFFD166u,255);gfx_draw_rect(x+10u,y+size-17u,size/3u,6u,0x2E8B72u);gfx_draw_rect(x+size/3u,y+size-20u,size/3u,9u,0x26765Fu);}
+  else if(app==APP_NOTEPAD){gfx_blend_round_rect(x+8u,y+5u,size-16u,size-10u,3u,0xF4F7FCu,255);gfx_draw_rect(x+12u,y+11u,size-24u,2u,0x4C8BD8u);gfx_draw_rect(x+12u,y+17u,size-24u,2u,0xA9BBD0u);gfx_draw_rect(x+12u,y+23u,size-24u,2u,0xA9BBD0u);if(size>38u)gfx_draw_rect(x+12u,y+29u,size-24u,2u,0xA9BBD0u);}
+  else{gfx_blend_round_rect(x+9u,y+9u,size-18u,size-18u,size/4u,0x8A79CBu,255);gfx_blend_round_rect(x+size/2u-4u,y+size/2u-4u,8u,8u,4u,0xE8E3FFu,255);gfx_draw_rect(x+size/2u-2u,y+6u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+size/2u-2u,y+size-13u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+6u,y+size/2u-2u,7u,4u,0xDCD4FFu);gfx_draw_rect(x+size-13u,y+size/2u-2u,7u,4u,0xDCD4FFu);}
 }
 static void draw_file_icon(uint32_t x,uint32_t y,const char *name){
   uint32_t c=0x8EA4BEu,n=0;while(name&&name[n])n++;
   if(n>4u&&streq_n(&name[n-4u],".txt",4u))c=0x63B98Au;else if(n>4u&&streq_n(&name[n-4u],".png",4u))c=0x5FA9E8u;else if(n>4u&&streq_n(&name[n-4u],".wad",4u))c=0xD69B54u;else if(n>4u&&streq_n(&name[n-4u],".elf",4u))c=0xA88BDEu;
-  blend_round_rect(x,y,18u,20u,3u,0xEAF0F7u,255);draw_rect(x+2u,y+2u,14u,2u,c);draw_rect(x+4u,y+8u,10u,1u,0x8A9AAF);draw_rect(x+4u,y+12u,10u,1u,0x8A9AAF);draw_rect(x+4u,y+16u,7u,1u,0x8A9AAF);
+  gfx_blend_round_rect(x,y,18u,20u,3u,0xEAF0F7u,255);gfx_draw_rect(x+2u,y+2u,14u,2u,c);gfx_draw_rect(x+4u,y+8u,10u,1u,0x8A9AAF);gfx_draw_rect(x+4u,y+12u,10u,1u,0x8A9AAF);gfx_draw_rect(x+4u,y+16u,7u,1u,0x8A9AAF);
 }
 
 static void ring3_task_entry(void) {
@@ -611,23 +589,23 @@ static void launch_ring3_task(void) {
 static void draw_window_chrome(const wm_window_t *win,const char *title,const char *sub_title,uint8_t focused,uint8_t has_scroll,uint8_t has_save){
   if(!g_bi||!win||win->w<40||win->h<40)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;app_id_t app=APP_SHELL;
   if(title&&(title[0]=='F'||title[0]=='E'))app=APP_EXPLORER;else if(title&&title[0]=='V')app=APP_VIEWER;else if(title&&title[0]=='N')app=APP_NOTEPAD;else if(title&&title[0]=='S')app=APP_SETUP;
-  blend_round_rect((uint32_t)(x+4),(uint32_t)(y+6),(uint32_t)w,(uint32_t)h,9u,0x02060Cu,155);blend_round_rect((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h,8u,0x101A28u,255);
-  draw_rect((uint32_t)x,(uint32_t)y,(uint32_t)w,1u,focused?0x5EA9F7u:0x3B4C62u);draw_rect((uint32_t)x,(uint32_t)(y+h-1),(uint32_t)w,1u,0x26364Au);draw_rect((uint32_t)x,(uint32_t)y,1u,(uint32_t)h,0x35485Fu);draw_rect((uint32_t)(x+w-1),(uint32_t)y,1u,(uint32_t)h,0x26364Au);
-  draw_rect((uint32_t)(x+1),(uint32_t)(y+1),(uint32_t)(w-2),29u,focused?0x1D3550u:0x1A293Bu);draw_rect((uint32_t)(x+1),(uint32_t)(y+29),(uint32_t)(w-2),1u,focused?0x42688Cu:0x34475Du);
-  draw_app_icon((uint32_t)(x+8),(uint32_t)(y+6),20u,app);draw_string_8x8((uint32_t)(x+36),(uint32_t)(y+11),title,focused?0xF5F8FCu:0xC0CAD8u);
-  if(sub_title&&sub_title[0]){uint32_t tl=0,sl=0;while(title&&title[tl])tl++;while(sub_title[sl])sl++;uint32_t sx=(uint32_t)(x+36)+tl*8u+10u;if(sx+sl*8u<(uint32_t)(x+w-100)){draw_rect(sx-5u,(uint32_t)(y+10),1u,10u,0x59708Au);draw_string_8x8(sx,(uint32_t)(y+11),sub_title,0x9EB5CCu);}}
-  blend_round_rect((uint32_t)(x+w-23),(uint32_t)(y+6),17u,17u,5u,0xB94755u,255);draw_string_8x8((uint32_t)(x+w-18),(uint32_t)(y+10),"x",0xFFFFFFu);
-  if(has_scroll){blend_round_rect((uint32_t)(x+w-45),(uint32_t)(y+6),17u,17u,5u,0x334B65u,255);blend_round_rect((uint32_t)(x+w-65),(uint32_t)(y+6),17u,17u,5u,0x334B65u,255);draw_string_8x8((uint32_t)(x+w-41),(uint32_t)(y+10),"^",0xE8F1FAu);draw_string_8x8((uint32_t)(x+w-61),(uint32_t)(y+10),"v",0xE8F1FAu);}
-  if(has_save){blend_round_rect((uint32_t)(x+w-85),(uint32_t)(y+6),17u,17u,5u,0x236B59u,255);draw_string_8x8((uint32_t)(x+w-80),(uint32_t)(y+10),"S",0xF0FFF8u);}
+  gfx_blend_round_rect((uint32_t)(x+4),(uint32_t)(y+6),(uint32_t)w,(uint32_t)h,9u,0x02060Cu,155);gfx_blend_round_rect((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h,8u,0x101A28u,255);
+  gfx_draw_rect((uint32_t)x,(uint32_t)y,(uint32_t)w,1u,focused?0x5EA9F7u:0x3B4C62u);gfx_draw_rect((uint32_t)x,(uint32_t)(y+h-1),(uint32_t)w,1u,0x26364Au);gfx_draw_rect((uint32_t)x,(uint32_t)y,1u,(uint32_t)h,0x35485Fu);gfx_draw_rect((uint32_t)(x+w-1),(uint32_t)y,1u,(uint32_t)h,0x26364Au);
+  gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+1),(uint32_t)(w-2),29u,focused?0x1D3550u:0x1A293Bu);gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+29),(uint32_t)(w-2),1u,focused?0x42688Cu:0x34475Du);
+  draw_app_icon((uint32_t)(x+8),(uint32_t)(y+6),20u,app);gfx_draw_string((uint32_t)(x+36),(uint32_t)(y+11),title,focused?0xF5F8FCu:0xC0CAD8u);
+  if(sub_title&&sub_title[0]){uint32_t tl=0,sl=0;while(title&&title[tl])tl++;while(sub_title[sl])sl++;uint32_t sx=(uint32_t)(x+36)+tl*8u+10u;if(sx+sl*8u<(uint32_t)(x+w-100)){gfx_draw_rect(sx-5u,(uint32_t)(y+10),1u,10u,0x59708Au);gfx_draw_string(sx,(uint32_t)(y+11),sub_title,0x9EB5CCu);}}
+  gfx_blend_round_rect((uint32_t)(x+w-23),(uint32_t)(y+6),17u,17u,5u,0xB94755u,255);gfx_draw_string((uint32_t)(x+w-18),(uint32_t)(y+10),"x",0xFFFFFFu);
+  if(has_scroll){gfx_blend_round_rect((uint32_t)(x+w-45),(uint32_t)(y+6),17u,17u,5u,0x334B65u,255);gfx_blend_round_rect((uint32_t)(x+w-65),(uint32_t)(y+6),17u,17u,5u,0x334B65u,255);gfx_draw_string((uint32_t)(x+w-41),(uint32_t)(y+10),"^",0xE8F1FAu);gfx_draw_string((uint32_t)(x+w-61),(uint32_t)(y+10),"v",0xE8F1FAu);}
+  if(has_save){gfx_blend_round_rect((uint32_t)(x+w-85),(uint32_t)(y+6),17u,17u,5u,0x236B59u,255);gfx_draw_string((uint32_t)(x+w-80),(uint32_t)(y+10),"S",0xF0FFF8u);}
 }
 
 static void draw_notepad_window(const wm_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Notepad",g_notepad_name[0]?g_notepad_name:"note.txt",(uint8_t)(wm_get_focus()==APP_NOTEPAD),1,1);
-  draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+42),"FILE   EDIT   VIEW",0xB9C9DAu);draw_string_8x8((uint32_t)(x+w-142),(uint32_t)(y+42),"PLAIN TEXT",0x7FA5C8u);
-  uint32_t cx=(uint32_t)x+12u,cy=(uint32_t)y+66u,cw=w>24?(uint32_t)w-24u:1u,ch=h>78?(uint32_t)h-78u:1u;blend_round_rect(cx,cy,cw,ch,5u,0xF4F7FBu,255);draw_rect(cx+1u,cy+1u,cw-2u,1u,0xFFFFFFu);draw_rect(cx+34u,cy+1u,1u,ch-2u,0xDCE5EFu);
+  gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+42),"FILE   EDIT   VIEW",0xB9C9DAu);gfx_draw_string((uint32_t)(x+w-142),(uint32_t)(y+42),"PLAIN TEXT",0x7FA5C8u);
+  uint32_t cx=(uint32_t)x+12u,cy=(uint32_t)y+66u,cw=w>24?(uint32_t)w-24u:1u,ch=h>78?(uint32_t)h-78u:1u;gfx_blend_round_rect(cx,cy,cw,ch,5u,0xF4F7FBu,255);gfx_draw_rect(cx+1u,cy+1u,cw-2u,1u,0xFFFFFFu);gfx_draw_rect(cx+34u,cy+1u,1u,ch-2u,0xDCE5EFu);
   uint32_t tx=cx+46u,ty=cy+12u,cols=w>72?(uint32_t)(w-72)/8u:0u,rows=h>100?(uint32_t)(h-100)/16u:0u,start=0,skip=g_notepad_scroll;for(uint32_t i=0;i<g_notepad_text_len&&skip;i++)if(g_notepad_text[i]=='\n'){skip--;start=i+1u;}
-  uint32_t col=0,row=0,line=g_notepad_scroll+1u;char num[12];if(rows){shell_u32_to_dec(num,line);draw_string_8x8(cx+10u,ty,num,0x8EA0B4u);}
-  for(uint32_t i=start;i<g_notepad_text_len&&row<rows;i++){char c=g_notepad_text[i];if(c=='\n'){col=0;row++;line++;if(row<rows){shell_u32_to_dec(num,line);draw_string_8x8(cx+10u,ty+row*16u,num,0x8EA0B4u);}continue;}if(c=='\t'){col=(col+4u)&~3u;continue;}if(c<32||c>126)c='.';if(col<cols){char t[2]={c,0};draw_string_8x8(tx+col*8u,ty+row*16u,t,0x24364Bu);}col++;}
+  uint32_t col=0,row=0,line=g_notepad_scroll+1u;char num[12];if(rows){shell_u32_to_dec(num,line);gfx_draw_string(cx+10u,ty,num,0x8EA0B4u);}
+  for(uint32_t i=start;i<g_notepad_text_len&&row<rows;i++){char c=g_notepad_text[i];if(c=='\n'){col=0;row++;line++;if(row<rows){shell_u32_to_dec(num,line);gfx_draw_string(cx+10u,ty+row*16u,num,0x8EA0B4u);}continue;}if(c=='\t'){col=(col+4u)&~3u;continue;}if(c<32||c>126)c='.';if(col<cols){char t[2]={c,0};gfx_draw_string(tx+col*8u,ty+row*16u,t,0x24364Bu);}col++;}
 }
 
 static void draw_setup_window(const wm_window_t *win) {
@@ -658,75 +636,75 @@ static void draw_setup_window(const wm_window_t *win) {
   uint32_t bar_y = (uint32_t)y + 36u;
   uint32_t bar_w = (uint32_t)w - 32u;
   uint32_t step_w = bar_w / 6u;
-  draw_rect((uint32_t)x + 16u, bar_y, bar_w, 4, 0x2A3140);
+  gfx_draw_rect((uint32_t)x + 16u, bar_y, bar_w, 4, 0x2A3140);
   for (uint32_t i = 0; i < 6; i++) {
     uint32_t cx = (uint32_t)x + 16u + i * step_w;
     uint32_t color = (i <= g_setup_step) ? 0x22C55E : 0x404040;
-    draw_rect(cx, bar_y, step_w - 2, 4, color);
+    gfx_draw_rect(cx, bar_y, step_w - 2, 4, color);
     // Step number
     char num[2] = {(char)('1' + i), 0};
-    draw_string_8x8(cx + (step_w/2) - 4, bar_y + 8, num, color);
+    gfx_draw_string(cx + (step_w/2) - 4, bar_y + 8, num, color);
   }
 
   // Content area
   uint32_t content_y = (uint32_t)y + 72u;
   uint32_t content_h = (uint32_t)h - 108u;
-  draw_rect((uint32_t)x + 16u, content_y, (uint32_t)w - 32u, content_h, 0x14141A);
+  gfx_draw_rect((uint32_t)x + 16u, content_y, (uint32_t)w - 32u, content_h, 0x14141A);
 
   // Step title
-  draw_string_8x8((uint32_t)x + 24u, content_y + 12u, step_titles[g_setup_step], 0xE0E0E0);
-  draw_rect((uint32_t)x + 24u, content_y + 28u, (uint32_t)w - 48u, 1, 0x2A3140);
+  gfx_draw_string((uint32_t)x + 24u, content_y + 12u, step_titles[g_setup_step], 0xE0E0E0);
+  gfx_draw_rect((uint32_t)x + 24u, content_y + 28u, (uint32_t)w - 48u, 1, 0x2A3140);
 
   // Step content
   uint32_t text_y = content_y + 44u;
   switch (g_setup_step) {
     case 0: // Welcome
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Welcome to VexOS Setup!", 0xFFFFFF);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "This wizard will help you:", 0xD0D6E0);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 36u, "- Detect your disk", 0xD0D6E0);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 52u, "- Create partitions", 0xD0D6E0);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 68u, "- Format with FAT16", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Welcome to VexOS Setup!", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "This wizard will help you:", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 36u, "- Detect your disk", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 52u, "- Create partitions", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 68u, "- Format with FAT16", 0xD0D6E0);
       break;
     case 1: // Detect
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Detecting disk...", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Detecting disk...", 0xFFFFFF);
       if (g_setup_disk_ready) {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Disk ready", 0x22C55E);
-        draw_string_8x8((uint32_t)x + 24u, text_y + 40u, "Type: RAM Disk (1 MiB)", 0xD0D6E0);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Disk ready", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 40u, "Type: RAM Disk (1 MiB)", 0xD0D6E0);
       } else {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Not initialized", 0xFFB000);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Not initialized", 0xFFB000);
       }
       break;
     case 2: // Partition
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Creating MBR partition...", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Creating MBR partition...", 0xFFFFFF);
       if (g_setup_partition_done) {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Partition created", 0x22C55E);
-        draw_string_8x8((uint32_t)x + 24u, text_y + 40u, "Type: FAT16 LBA", 0xD0D6E0);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Partition created", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 40u, "Type: FAT16 LBA", 0xD0D6E0);
       } else {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Pending", 0xD0D6E0);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Pending", 0xD0D6E0);
       }
       break;
     case 3: // Format
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Formatting partition...", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Formatting partition...", 0xFFFFFF);
       if (g_setup_format_done) {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Formatted", 0x22C55E);
-        draw_string_8x8((uint32_t)x + 24u, text_y + 40u, "FS: FAT16", 0xD0D6E0);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Formatted", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 40u, "FS: FAT16", 0xD0D6E0);
       } else {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "Status: Pending", 0xD0D6E0);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "Status: Pending", 0xD0D6E0);
       }
       break;
     case 4: // Verify
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Verifying installation...", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Verifying installation...", 0xFFFFFF);
       if (g_setup_format_done) {
-        draw_string_8x8((uint32_t)x + 24u, text_y + 20u, "MBR: Valid", 0x22C55E);
-        draw_string_8x8((uint32_t)x + 24u, text_y + 36u, "BPB: Valid", 0x22C55E);
-        draw_string_8x8((uint32_t)x + 24u, text_y + 52u, "FAT: Initialized", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 20u, "MBR: Valid", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 36u, "BPB: Valid", 0x22C55E);
+        gfx_draw_string((uint32_t)x + 24u, text_y + 52u, "FAT: Initialized", 0x22C55E);
       }
       break;
     case 5: // Complete
-      draw_string_8x8((uint32_t)x + 24u, text_y, "Setup Complete!", 0x22C55E);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 24u, "Your disk is ready to use.", 0xFFFFFF);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 48u, "You can now use the", 0xD0D6E0);
-      draw_string_8x8((uint32_t)x + 24u, text_y + 64u, "Explorer and Notepad apps.", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y, "Setup Complete!", 0x22C55E);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 24u, "Your disk is ready to use.", 0xFFFFFF);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 48u, "You can now use the", 0xD0D6E0);
+      gfx_draw_string((uint32_t)x + 24u, text_y + 64u, "Explorer and Notepad apps.", 0xD0D6E0);
       break;
   }
 
@@ -735,32 +713,32 @@ static void draw_setup_window(const wm_window_t *win) {
 
   // Back button (disabled on step 0)
   if (g_setup_step > 0) {
-    draw_rect((uint32_t)x + 16u, btn_y, 50, 18, 0x2A3140);
-    draw_string_8x8((uint32_t)x + 26u, btn_y + 5u, "Back", 0xFFFFFF);
+    gfx_draw_rect((uint32_t)x + 16u, btn_y, 50, 18, 0x2A3140);
+    gfx_draw_string((uint32_t)x + 26u, btn_y + 5u, "Back", 0xFFFFFF);
   } else {
-    draw_rect((uint32_t)x + 16u, btn_y, 50, 18, 0x1A1A20);
-    draw_string_8x8((uint32_t)x + 26u, btn_y + 5u, "Back", 0x606060);
+    gfx_draw_rect((uint32_t)x + 16u, btn_y, 50, 18, 0x1A1A20);
+    gfx_draw_string((uint32_t)x + 26u, btn_y + 5u, "Back", 0x606060);
   }
 
   // Next/Finish button
   uint32_t btn_x = (uint32_t)x + (uint32_t)w - 76u;
   const char *btn_label = (g_setup_step == 5) ? "Finish" : "Next";
-  draw_rect(btn_x, btn_y, 60, 18, 0x2244AA);
-  draw_string_8x8(btn_x + 14u, btn_y + 5u, btn_label, 0xFFFFFF);
+  gfx_draw_rect(btn_x, btn_y, 60, 18, 0x2244AA);
+  gfx_draw_string(btn_x + 14u, btn_y + 5u, btn_label, 0xFFFFFF);
 }
 
 static void draw_explorer_window(const wm_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint32_t total=simplefs_file_count();char cb[32];uint32_t n=shell_u32_to_dec(cb,total);cb[n]=' ';cb[n+1]='i';cb[n+2]='t';cb[n+3]='e';cb[n+4]='m';cb[n+5]='s';cb[n+6]=0;
-  draw_window_chrome(win,"Files",cb,(uint8_t)(wm_get_focus()==APP_EXPLORER),1,0);draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),38u,0x17263A);
-  blend_round_rect((uint32_t)(x+12),(uint32_t)(y+38),(uint32_t)(w-24),24u,6u,0x0D1928u,255);draw_string_8x8((uint32_t)(x+22),(uint32_t)(y+46),"<",0xAFC4D8u);draw_string_8x8((uint32_t)(x+42),(uint32_t)(y+46),">",0x71879Du);draw_rect((uint32_t)(x+62),(uint32_t)(y+43),1u,14u,0x344A60);draw_string_8x8((uint32_t)(x+76),(uint32_t)(y+46),"This PC   >   VexOS Storage",0xDCE8F4u);
-  if(w>620){draw_rect((uint32_t)(x+w-144),(uint32_t)(y+43),1u,14u,0x344A60);draw_string_8x8((uint32_t)(x+w-128),(uint32_t)(y+46),"Search files",0x71879Du);}
-  uint32_t by=(uint32_t)y+70u,bh=h>84?(uint32_t)h-84u:1u;blend_round_rect((uint32_t)(x+10),by,140u,bh,5u,0x131F2E,255);draw_string_8x8((uint32_t)(x+22),by+14u,"LOCATIONS",0x7891AAu);blend_round_rect((uint32_t)(x+16),by+32u,128u,26u,5u,0x23415F,255);draw_rect((uint32_t)(x+20),by+40u,8u,10u,0x70B7F2u);draw_string_8x8((uint32_t)(x+36),by+41u,"Storage",0xF1F6FCu);draw_string_8x8((uint32_t)(x+22),by+76u,"VOLUME",0x7891AAu);draw_string_8x8((uint32_t)(x+22),by+94u,"SimpleFS",0xC8D7E6u);draw_string_8x8((uint32_t)(x+22),by+112u,"Local disk",0x849BB2u);
-  uint32_t mx=(uint32_t)x+160u,mw=w>176?(uint32_t)w-172u:1u;draw_string_8x8(mx+8u,by+10u,"All files",0xF1F6FCu);draw_string_8x8(mx+8u,by+28u,"Files on your VexOS storage volume",0x8FA5BBu);uint32_t hy=by+50u;draw_rect(mx+2u,hy,mw-4u,23u,0x1A2A3Du);draw_string_8x8(mx+14u,hy+8u,"NAME",0x9EB4CAu);uint32_t kx=mx+(mw>490u?380u:260u);draw_string_8x8(kx,hy+8u,"KIND",0x9EB4CAu);draw_rect(mx+2u,hy+22u,mw-4u,1u,0x30445Au);
+  draw_window_chrome(win,"Files",cb,(uint8_t)(wm_get_focus()==APP_EXPLORER),1,0);gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),38u,0x17263A);
+  gfx_blend_round_rect((uint32_t)(x+12),(uint32_t)(y+38),(uint32_t)(w-24),24u,6u,0x0D1928u,255);gfx_draw_string((uint32_t)(x+22),(uint32_t)(y+46),"<",0xAFC4D8u);gfx_draw_string((uint32_t)(x+42),(uint32_t)(y+46),">",0x71879Du);gfx_draw_rect((uint32_t)(x+62),(uint32_t)(y+43),1u,14u,0x344A60);gfx_draw_string((uint32_t)(x+76),(uint32_t)(y+46),"This PC   >   VexOS Storage",0xDCE8F4u);
+  if(w>620){gfx_draw_rect((uint32_t)(x+w-144),(uint32_t)(y+43),1u,14u,0x344A60);gfx_draw_string((uint32_t)(x+w-128),(uint32_t)(y+46),"Search files",0x71879Du);}
+  uint32_t by=(uint32_t)y+70u,bh=h>84?(uint32_t)h-84u:1u;gfx_blend_round_rect((uint32_t)(x+10),by,140u,bh,5u,0x131F2E,255);gfx_draw_string((uint32_t)(x+22),by+14u,"LOCATIONS",0x7891AAu);gfx_blend_round_rect((uint32_t)(x+16),by+32u,128u,26u,5u,0x23415F,255);gfx_draw_rect((uint32_t)(x+20),by+40u,8u,10u,0x70B7F2u);gfx_draw_string((uint32_t)(x+36),by+41u,"Storage",0xF1F6FCu);gfx_draw_string((uint32_t)(x+22),by+76u,"VOLUME",0x7891AAu);gfx_draw_string((uint32_t)(x+22),by+94u,"SimpleFS",0xC8D7E6u);gfx_draw_string((uint32_t)(x+22),by+112u,"Local disk",0x849BB2u);
+  uint32_t mx=(uint32_t)x+160u,mw=w>176?(uint32_t)w-172u:1u;gfx_draw_string(mx+8u,by+10u,"All files",0xF1F6FCu);gfx_draw_string(mx+8u,by+28u,"Files on your VexOS storage volume",0x8FA5BBu);uint32_t hy=by+50u;gfx_draw_rect(mx+2u,hy,mw-4u,23u,0x1A2A3Du);gfx_draw_string(mx+14u,hy+8u,"NAME",0x9EB4CAu);uint32_t kx=mx+(mw>490u?380u:260u);gfx_draw_string(kx,hy+8u,"KIND",0x9EB4CAu);gfx_draw_rect(mx+2u,hy+22u,mw-4u,1u,0x30445Au);
   uint32_t ly=hy+24u,rh=28u,rows=h>178?((uint32_t)h-178u)/rh:0u,first=g_explorer_scroll>total?total:g_explorer_scroll,count=total-first;if(count>rows)count=rows;
-  if(!total){draw_string_8x8(mx+18u,ly+28u,"No files yet",0xD5E1EDu);draw_string_8x8(mx+18u,ly+48u,"Files added to this volume will appear here.",0x8299B1u);}
-  for(uint32_t i=0;i<count;i++){char name[64];name[0]=0;uint32_t idx=first+i;if(!simplefs_file_name_at(idx,name,sizeof(name)))continue;uint32_t ry=ly+i*rh;if(idx==g_explorer_selected)blend_round_rect(mx+4u,ry+1u,mw-8u,25u,4u,0x25496Bu,255);else if(i&1u)draw_rect(mx+4u,ry+1u,mw-8u,25u,0x162536u);draw_file_icon(mx+13u,ry+3u,name);
-    uint32_t nl=0;while(name[nl])nl++;const char *kind="File";if(nl>4u&&streq_n(&name[nl-4u],".txt",4u))kind="Text document";else if(nl>4u&&streq_n(&name[nl-4u],".png",4u))kind="Image";else if(nl>4u&&streq_n(&name[nl-4u],".wad",4u))kind="Doom data";else if(nl>4u&&streq_n(&name[nl-4u],".elf",4u))kind="Executable";if(nl>35u)name[35]=0;draw_string_8x8(mx+42u,ry+9u,name,idx==g_explorer_selected?0xFFFFFFu:0xD7E3EFu);draw_string_8x8(kx,ry+9u,kind,0x8FA8C0u);}
-  draw_rect((uint32_t)(x+160),(uint32_t)(y+h-28),mw,1u,0x2A3D52u);draw_string_8x8((uint32_t)(x+174),(uint32_t)(y+h-18),"VexOS Storage",0x7891AAu);draw_string_8x8((uint32_t)(x+w-130),(uint32_t)(y+h-18),"Double-click to open",0x7891AAu);
+  if(!total){gfx_draw_string(mx+18u,ly+28u,"No files yet",0xD5E1EDu);gfx_draw_string(mx+18u,ly+48u,"Files added to this volume will appear here.",0x8299B1u);}
+  for(uint32_t i=0;i<count;i++){char name[64];name[0]=0;uint32_t idx=first+i;if(!simplefs_file_name_at(idx,name,sizeof(name)))continue;uint32_t ry=ly+i*rh;if(idx==g_explorer_selected)gfx_blend_round_rect(mx+4u,ry+1u,mw-8u,25u,4u,0x25496Bu,255);else if(i&1u)gfx_draw_rect(mx+4u,ry+1u,mw-8u,25u,0x162536u);draw_file_icon(mx+13u,ry+3u,name);
+    uint32_t nl=0;while(name[nl])nl++;const char *kind="File";if(nl>4u&&streq_n(&name[nl-4u],".txt",4u))kind="Text document";else if(nl>4u&&streq_n(&name[nl-4u],".png",4u))kind="Image";else if(nl>4u&&streq_n(&name[nl-4u],".wad",4u))kind="Doom data";else if(nl>4u&&streq_n(&name[nl-4u],".elf",4u))kind="Executable";if(nl>35u)name[35]=0;gfx_draw_string(mx+42u,ry+9u,name,idx==g_explorer_selected?0xFFFFFFu:0xD7E3EFu);gfx_draw_string(kx,ry+9u,kind,0x8FA8C0u);}
+  gfx_draw_rect((uint32_t)(x+160),(uint32_t)(y+h-28),mw,1u,0x2A3D52u);gfx_draw_string((uint32_t)(x+174),(uint32_t)(y+h-18),"VexOS Storage",0x7891AAu);gfx_draw_string((uint32_t)(x+w-130),(uint32_t)(y+h-18),"Double-click to open",0x7891AAu);
 }
 
 static void draw_viewer_window(const wm_window_t *win) {
@@ -774,14 +752,14 @@ static void draw_viewer_window(const wm_window_t *win) {
   draw_window_chrome(win, "Viewer", g_viewer_name[0] ? g_viewer_name : "Preview",
                      (uint8_t)(wm_get_focus() == APP_VIEWER), 1, 0);
 
-  draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
+  gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
             (uint32_t)(w - 2), 30u, 0x17263A);
   const char *toolbar_label =
       g_viewer_kind == VIEWER_CONTENT_PNG ? "IMAGE PREVIEW / PNG" :
       g_viewer_kind == VIEWER_CONTENT_JPEG ? "IMAGE PREVIEW / JPEG" :
       g_viewer_kind == VIEWER_CONTENT_BINARY ? "PREVIEW UNAVAILABLE" :
       "PREVIEW / TEXT CONTENT";
-  draw_string_8x8((uint32_t)(x + 14), (uint32_t)(y + 42),
+  gfx_draw_string((uint32_t)(x + 14), (uint32_t)(y + 42),
                   toolbar_label, 0xAFC2D6u);
 
   uint32_t px = (uint32_t)x + 12u;
@@ -792,7 +770,7 @@ static void draw_viewer_window(const wm_window_t *win) {
   if ((g_viewer_kind == VIEWER_CONTENT_PNG ||
        g_viewer_kind == VIEWER_CONTENT_JPEG) &&
       g_viewer_pixels && g_viewer_image_width && g_viewer_image_height) {
-    draw_rect(px, py, pw, ph, 0x182230);
+    gfx_draw_rect(px, py, pw, ph, 0x182230);
 
     uint32_t max_w = pw > 16u ? pw - 16u : 1u;
     uint32_t max_h = ph > 16u ? ph - 16u : 1u;
@@ -834,14 +812,14 @@ static void draw_viewer_window(const wm_window_t *win) {
         uint32_t out_r = ((uint32_t)r * a + br * inv) / 255u;
         uint32_t out_g = ((uint32_t)g * a + bg * inv) / 255u;
         uint32_t out_b = ((uint32_t)b * a + bb * inv) / 255u;
-        put_px(image_x + ix, image_y + iy,
+        gfx_put_pixel(image_x + ix, image_y + iy,
                (out_r << 16) | (out_g << 8) | out_b);
       }
     }
     return;
   }
 
-  blend_round_rect(px, py, pw, ph, 5u, 0xF4F7FBu, 255);
+  gfx_blend_round_rect(px, py, pw, ph, 5u, 0xF4F7FBu, 255);
   uint32_t tx = px + 16u;
   uint32_t ty = py + 14u;
   uint32_t cols = w > 56 ? (uint32_t)(w - 56) / 8u : 0u;
@@ -872,7 +850,7 @@ static void draw_viewer_window(const wm_window_t *win) {
       c = '.';
     if (cx < cols) {
       char t[2] = {c, 0};
-      draw_string_8x8(tx + cx * 8u, ty + cy * 16u, t, 0x26384Du);
+      gfx_draw_string(tx + cx * 8u, ty + cy * 16u, t, 0x26384Du);
     }
     cx++;
   }
@@ -881,15 +859,6 @@ static int32_t g_last_cursor_x;
 static int32_t g_last_cursor_y;
 static uint32_t g_last_cursor_buttons;
 
-static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                      uint32_t c);
-static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a);
-static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint32_t radius, uint32_t c, uint8_t a);
-static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg);
-static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
-                            uint32_t fg);
 static void draw_background(void);
 static void draw_text_panel(void);
 static void draw_taskbar(void);
@@ -939,9 +908,6 @@ void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   }
 }
 
-static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
-  if (!g_bi)
-    return;
   if (x >= g_bi->width || y >= g_bi->height)
     return;
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
@@ -949,40 +915,40 @@ static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
 }
 
 static void draw_shell_window(const wm_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(wm_get_focus()==APP_SHELL);draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
-  uint32_t px=(uint32_t)x+10u,py=(uint32_t)y+56u,pw=w>20?(uint32_t)w-20u:1u,ph=h>94?(uint32_t)h-94u:1u;blend_round_rect(px,py,pw,ph,5u,0x091321u,255);draw_rect(px+1u,py+1u,pw-2u,1u,0x1C344Du);uint32_t tx=px+12u,ty=py+12u,cols=pw>24u?(pw-24u)/8u:0u,rows=ph>20u?(ph-20u)/10u:0u;
-  if(cols&&rows){uint32_t cap=cols*rows,start=g_shell_out_len>cap?g_shell_out_len-cap:0u,cx=0,cy=0;for(uint32_t i=start;i<g_shell_out_len&&cy<rows;i++){char c=g_shell_out[i];if(c=='\n'){cx=0;cy++;continue;}if(cx<cols&&c>=32&&c<=126)draw_glyph_8x8(tx+cx*8u,ty+cy*10u,(uint8_t)c,0xD7E7F7u);cx++;if(cx>=cols){cx=0;cy++;}}}
-  uint32_t iy=(uint32_t)(y+h-30);blend_round_rect((uint32_t)(x+10),iy,(uint32_t)(w-20),24u,5u,0x1A2C40u,255);draw_rect((uint32_t)(x+18),iy+1u,(uint32_t)(w-36),1u,0x35516Du);draw_string_8x8((uint32_t)(x+22),iy+8u,">",0x79E0B0u);draw_string_8x8((uint32_t)(x+38),iy+8u,g_shell_line,0xF1F6FCu);uint32_t len=0;while(g_shell_line[len])len++;if(focused&&((g_tick/30u)%2u==0u))draw_rect((uint32_t)(x+38)+len*8u,iy+8u,7u,8u,0x79E0B0u);
+  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(wm_get_focus()==APP_SHELL);draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
+  uint32_t px=(uint32_t)x+10u,py=(uint32_t)y+56u,pw=w>20?(uint32_t)w-20u:1u,ph=h>94?(uint32_t)h-94u:1u;gfx_blend_round_rect(px,py,pw,ph,5u,0x091321u,255);gfx_draw_rect(px+1u,py+1u,pw-2u,1u,0x1C344Du);uint32_t tx=px+12u,ty=py+12u,cols=pw>24u?(pw-24u)/8u:0u,rows=ph>20u?(ph-20u)/10u:0u;
+  if(cols&&rows){uint32_t cap=cols*rows,start=g_shell_out_len>cap?g_shell_out_len-cap:0u,cx=0,cy=0;for(uint32_t i=start;i<g_shell_out_len&&cy<rows;i++){char c=g_shell_out[i];if(c=='\n'){cx=0;cy++;continue;}if(cx<cols&&c>=32&&c<=126)gfx_draw_glyph(tx+cx*8u,ty+cy*10u,(uint8_t)c,0xD7E7F7u);cx++;if(cx>=cols){cx=0;cy++;}}}
+  uint32_t iy=(uint32_t)(y+h-30);gfx_blend_round_rect((uint32_t)(x+10),iy,(uint32_t)(w-20),24u,5u,0x1A2C40u,255);gfx_draw_rect((uint32_t)(x+18),iy+1u,(uint32_t)(w-36),1u,0x35516Du);gfx_draw_string((uint32_t)(x+22),iy+8u,">",0x79E0B0u);gfx_draw_string((uint32_t)(x+38),iy+8u,g_shell_line,0xF1F6FCu);uint32_t len=0;while(g_shell_line[len])len++;if(focused&&((g_tick/30u)%2u==0u))gfx_draw_rect((uint32_t)(x+38)+len*8u,iy+8u,7u,8u,0x79E0B0u);
 }
 
 static void draw_taskbar(void){
-  if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh;blend_rect(0u,y,g_bi->width,bh,0x080E18u,224u);draw_rect(0u,y,g_bi->width,1u,0x53799Cu);uint32_t sy=y+6u,sh=bh-12u;
-  blend_round_rect(8u,sy,48u,sh,10u,g_start_open?0x28588Bu:0x1A3451u,255u);draw_rect(18u,sy+10u,10u,10u,0xE8F3FFu);draw_rect(31u,sy+10u,10u,10u,0x8FC7F4u);draw_rect(18u,sy+23u,10u,10u,0x8FC7F4u);draw_rect(31u,sy+23u,10u,10u,0xE8F3FFu);
-  uint32_t sw=196u;if(sw+72u>g_bi->width)sw=g_bi->width>72u?g_bi->width-72u:1u;blend_round_rect(62u,sy,sw,sh,10u,0x111E2Du,235u);draw_rect(62u,sy,sw,1u,0x344B64u);blend_round_rect(74u,sy+13u,10u,10u,5u,0x7894AFu,255u);draw_rect(83u,sy+22u,5u,2u,0x7894AFu);draw_string_8x8(96u,sy+18u,"Search apps and files",0x91A7BEu);
-  uint32_t dw=420u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;blend_round_rect(dx,sy,dw,sh,12u,0x101C2Au,242u);draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);draw_rect(dx+1u,sy+sh-1u,dw-2u,1u,0x0B1420u);uint32_t ix=dx+16u,iy=sy+((sh>40u)?((sh-40u)/2u):0u);for(uint32_t i=0;i<4u;i++){draw_app_icon(ix,iy,40u,(app_id_t)i);ix+=50u;if(ix+56u>dx+dw)break;}
-  uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);draw_string_8x8(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);draw_string_8x8(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
+  if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh;gfx_blend_rect(0u,y,g_bi->width,bh,0x080E18u,224u);gfx_draw_rect(0u,y,g_bi->width,1u,0x53799Cu);uint32_t sy=y+6u,sh=bh-12u;
+  gfx_blend_round_rect(8u,sy,48u,sh,10u,g_start_open?0x28588Bu:0x1A3451u,255u);gfx_draw_rect(18u,sy+10u,10u,10u,0xE8F3FFu);gfx_draw_rect(31u,sy+10u,10u,10u,0x8FC7F4u);gfx_draw_rect(18u,sy+23u,10u,10u,0x8FC7F4u);gfx_draw_rect(31u,sy+23u,10u,10u,0xE8F3FFu);
+  uint32_t sw=196u;if(sw+72u>g_bi->width)sw=g_bi->width>72u?g_bi->width-72u:1u;gfx_blend_round_rect(62u,sy,sw,sh,10u,0x111E2Du,235u);gfx_draw_rect(62u,sy,sw,1u,0x344B64u);gfx_blend_round_rect(74u,sy+13u,10u,10u,5u,0x7894AFu,255u);gfx_draw_rect(83u,sy+22u,5u,2u,0x7894AFu);gfx_draw_string(96u,sy+18u,"Search apps and files",0x91A7BEu);
+  uint32_t dw=420u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;gfx_blend_round_rect(dx,sy,dw,sh,12u,0x101C2Au,242u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);gfx_draw_rect(dx+1u,sy+sh-1u,dw-2u,1u,0x0B1420u);uint32_t ix=dx+16u,iy=sy+((sh>40u)?((sh-40u)/2u):0u);for(uint32_t i=0;i<4u;i++){draw_app_icon(ix,iy,40u,(app_id_t)i);ix+=50u;if(ix+56u>dx+dw)break;}
+  uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){gfx_blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);gfx_draw_string(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);gfx_draw_string(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
 }
 
 static void draw_start_menu(void){
-  if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
-  draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);draw_string_8x8(x+16u,y+9u,"VEXOS",0xF0F6FCu);draw_string_8x8(x+208u,y+9u,"APPS",0x7FA0BEu);draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
+  if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;gfx_blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
+  gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);gfx_draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);gfx_draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);gfx_draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);gfx_draw_string(x+16u,y+9u,"VEXOS",0xF0F6FCu);gfx_draw_string(x+208u,y+9u,"APPS",0x7FA0BEu);gfx_draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
   const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);draw_string_8x8(x+23u,ry+6u,"?",0xEAF3FCu);}draw_string_8x8(x+46u,ry+7u,i<5u?app_registry_name(apps[i]):"Help",0xDCE8F4u);if(i==0u)draw_string_8x8(x+232u,ry+7u,">",0x75A8D4u);}
+  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{gfx_blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);gfx_draw_string(x+23u,ry+6u,"?",0xEAF3FCu);}gfx_draw_string(x+46u,ry+7u,i<5u?app_registry_name(apps[i]):"Help",0xDCE8F4u);if(i==0u)gfx_draw_string(x+232u,ry+7u,">",0x75A8D4u);}
 }
 
 static void draw_desktop_icons(void){
   if(!g_bi)return;uint32_t x=22u,y=132u,sz=42u,step=84u;const app_id_t apps[4]={APP_EXPLORER,APP_SHELL,APP_NOTEPAD,APP_VIEWER};
-  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;blend_round_rect(x-7u,iy-7u,56u,70u,8u,0x14263Au,90u);draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;draw_string_8x8(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
+  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;gfx_blend_round_rect(x-7u,iy-7u,56u,70u,8u,0x14263Au,90u);draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;gfx_draw_string(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
 }
 
 static void draw_widgets(void){
   if(!g_bi)return;uint32_t w=326u,x=g_bi->width>w+24u?g_bi->width-w-24u:8u,y=100u;
-  blend_round_rect(x,y,w,88u,12u,0x101D2Cu,226u);draw_rect(x+1u,y+1u,w-2u,1u,0x4C7194u);draw_string_8x8(x+18u,y+16u,"WORKSPACE",0x7F9AB6u);draw_string_8x8(x+18u,y+38u,"Welcome to VexOS",0xF0F6FCu);draw_string_8x8(x+18u,y+61u,"Your desktop is ready.",0xA5B9CDu);
-  blend_round_rect(x+w-66u,y+22u,42u,42u,10u,0x244B70u,255u);draw_rect(x+w-55u,y+33u,8u,8u,0xE8F3FFu);draw_rect(x+w-43u,y+33u,8u,8u,0x86BCE8u);draw_rect(x+w-55u,y+45u,8u,8u,0x86BCE8u);draw_rect(x+w-43u,y+45u,8u,8u,0xE8F3FFu);
-  y+=102u;blend_round_rect(x,y,w,142u,12u,0x101D2Cu,226u);draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);draw_string_8x8(x+18u,y+16u,"SYSTEM",0x7F9AB6u);const hw_profile_t *p=hw_profile_get();uint32_t ram=p?(uint32_t)(p->ram_usable_bytes/(1024ull*1024ull)):0u;
-  draw_string_8x8(x+18u,y+42u,"CPU",0x829AB2u);char cpu[25];uint32_t ci=0;if(p){while(ci+1u<sizeof(cpu)&&p->cpu_brand[ci]){cpu[ci]=p->cpu_brand[ci];ci++;}}cpu[ci]=0;draw_string_8x8(x+66u,y+42u,cpu[0]?cpu:"Unknown processor",0xE0EAF4u);
-  char buf[16];shell_u32_to_dec(buf,ram);draw_string_8x8(x+18u,y+68u,"RAM",0x829AB2u);draw_string_8x8(x+66u,y+68u,buf,0xE0EAF4u);draw_string_8x8(x+106u,y+68u,"MB",0x829AB2u);draw_string_8x8(x+18u,y+94u,"DISPLAY",0x829AB2u);draw_string_8x8(x+90u,y+94u,(p&&p->has_pci_display)?"Graphics device detected":"Framebuffer",0xE0EAF4u);draw_rect(x+18u,y+120u,w-36u,1u,0x283D53u);
-  y+=156u;blend_round_rect(x,y,w,92u,12u,0x101D2Cu,226u);draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);draw_string_8x8(x+18u,y+16u,"STORAGE",0x7F9AB6u);uint32_t files=simplefs_file_count();char fb[16];shell_u32_to_dec(fb,files);draw_string_8x8(x+18u,y+40u,"Indexed files",0xA5B9CDu);draw_string_8x8(x+w-60u,y+40u,fb,0xF0F6FCu);draw_string_8x8(x+18u,y+64u,"SimpleFS volume",0x8299B2u);
+  gfx_blend_round_rect(x,y,w,88u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x4C7194u);gfx_draw_string(x+18u,y+16u,"WORKSPACE",0x7F9AB6u);gfx_draw_string(x+18u,y+38u,"Welcome to VexOS",0xF0F6FCu);gfx_draw_string(x+18u,y+61u,"Your desktop is ready.",0xA5B9CDu);
+  gfx_blend_round_rect(x+w-66u,y+22u,42u,42u,10u,0x244B70u,255u);gfx_draw_rect(x+w-55u,y+33u,8u,8u,0xE8F3FFu);gfx_draw_rect(x+w-43u,y+33u,8u,8u,0x86BCE8u);gfx_draw_rect(x+w-55u,y+45u,8u,8u,0x86BCE8u);gfx_draw_rect(x+w-43u,y+45u,8u,8u,0xE8F3FFu);
+  y+=102u;gfx_blend_round_rect(x,y,w,142u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);gfx_draw_string(x+18u,y+16u,"SYSTEM",0x7F9AB6u);const hw_profile_t *p=hw_profile_get();uint32_t ram=p?(uint32_t)(p->ram_usable_bytes/(1024ull*1024ull)):0u;
+  gfx_draw_string(x+18u,y+42u,"CPU",0x829AB2u);char cpu[25];uint32_t ci=0;if(p){while(ci+1u<sizeof(cpu)&&p->cpu_brand[ci]){cpu[ci]=p->cpu_brand[ci];ci++;}}cpu[ci]=0;gfx_draw_string(x+66u,y+42u,cpu[0]?cpu:"Unknown processor",0xE0EAF4u);
+  char buf[16];shell_u32_to_dec(buf,ram);gfx_draw_string(x+18u,y+68u,"RAM",0x829AB2u);gfx_draw_string(x+66u,y+68u,buf,0xE0EAF4u);gfx_draw_string(x+106u,y+68u,"MB",0x829AB2u);gfx_draw_string(x+18u,y+94u,"DISPLAY",0x829AB2u);gfx_draw_string(x+90u,y+94u,(p&&p->has_pci_display)?"Graphics device detected":"Framebuffer",0xE0EAF4u);gfx_draw_rect(x+18u,y+120u,w-36u,1u,0x283D53u);
+  y+=156u;gfx_blend_round_rect(x,y,w,92u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);gfx_draw_string(x+18u,y+16u,"STORAGE",0x7F9AB6u);uint32_t files=simplefs_file_count();char fb[16];shell_u32_to_dec(fb,files);gfx_draw_string(x+18u,y+40u,"Indexed files",0xA5B9CDu);gfx_draw_string(x+w-60u,y+40u,fb,0xF0F6FCu);gfx_draw_string(x+18u,y+64u,"SimpleFS volume",0x8299B2u);
 }
 
 
@@ -1014,142 +980,7 @@ static void draw_open_windows(void) {
         break;
     }
   }
-}
-
-static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                      uint32_t c) {
-  if (!g_bi)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = c;
-    }
-  }
-}
-
-static inline uint32_t blend_rgb(uint32_t dst, uint32_t src, uint8_t a) {
-  uint32_t inv = (uint32_t)(255u - (uint32_t)a);
-  uint32_t dr = (dst >> 16) & 0xFFu;
-  uint32_t dg = (dst >> 8) & 0xFFu;
-  uint32_t db = dst & 0xFFu;
-  uint32_t sr = (src >> 16) & 0xFFu;
-  uint32_t sg = (src >> 8) & 0xFFu;
-  uint32_t sb = src & 0xFFu;
-
-  uint32_t r = (dr * inv + sr * (uint32_t)a) / 255u;
-  uint32_t g = (dg * inv + sg * (uint32_t)a) / 255u;
-  uint32_t b = (db * inv + sb * (uint32_t)a) / 255u;
-  return (r << 16) | (g << 8) | b;
-}
-
-static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = blend_rgb(row[xx], c, a);
-    }
-  }
-}
-
-static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint32_t radius, uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (radius == 0) {
-    blend_rect(x, y, w, h, c, a);
-    return;
-  }
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t rr = radius * radius;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      uint32_t inside = 1;
-
-      if (xx < x + radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx < x + radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      }
-
-      if (inside) {
-        row[xx] = blend_rgb(row[xx], c, a);
-      }
-    }
-  }
-}
-
-static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
-                            uint32_t fg) {
-  uint32_t cx = x;
-  while (s && *s) {
-    char c = *s++;
-    if (c == '\n') {
-      y += 8;
-      cx = x;
-      continue;
-    }
-    if (c == '\t') {
-      cx += 32;
-      continue;
-    }
-    draw_glyph_8x8(cx, y, (uint8_t)c, fg);
-    cx += 8;
-  }
-}
-
-static int hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
+}nt hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
                     int32_t h) {
   if (px < x || py < y)
     return 0;
@@ -1521,7 +1352,7 @@ static void draw_background(void) {
     uint32_t c = 0xE8F0FF;
     if ((r0 & 7u) == 0)
       c = 0xFFFFFF;
-    put_px(sx, sy, c);
+    gfx_put_pixel(sx, sy, c);
   }
 
   for (uint32_t i = 0; i < 3; i++) {
@@ -1538,28 +1369,13 @@ static void draw_background(void) {
             uint32_t shade = 0xB0C8FF;
             if (dd > (uint32_t)((rr * rr) * 7u / 10u))
               shade = 0x6A88C8;
-            put_px(px, py, shade);
+            gfx_put_pixel(px, py, shade);
           }
         }
       }
     }
   }
-}
-
-static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg) {
-  uint8_t *font = _binary_CGA_F08_start;
-  uint8_t *glyph = &font[((uint32_t)ch) * 8u];
-  for (uint32_t gy = 0; gy < 8; gy++) {
-    uint8_t row = glyph[gy];
-    for (uint32_t gx = 0; gx < 8; gx++) {
-      if (row & (uint8_t)(1u << (7u - gx))) {
-        put_px(x + gx, y + gy, fg);
-      }
-    }
-  }
-}
-
-static void draw_text_panel(void) {
+}static void draw_text_panel(void) {
   if (!g_bi)
     return;
 
@@ -1567,9 +1383,9 @@ static void draw_text_panel(void) {
   if (panel_h > g_bi->height)
     panel_h = g_bi->height;
 
-  draw_rect(8, 8, g_bi->width - 16, panel_h, 0x101010);
-  draw_rect(8, 8, g_bi->width - 16, 1, 0x303030);
-  draw_rect(8, 8 + panel_h - 1, g_bi->width - 16, 1, 0x303030);
+  gfx_draw_rect(8, 8, g_bi->width - 16, panel_h, 0x101010);
+  gfx_draw_rect(8, 8, g_bi->width - 16, 1, 0x303030);
+  gfx_draw_rect(8, 8 + panel_h - 1, g_bi->width - 16, 1, 0x303030);
 
   uint32_t cols = (g_bi->width - 32) / 8u;
   uint32_t rows = (panel_h - 16) / 8u;
@@ -1605,7 +1421,7 @@ static void draw_text_panel(void) {
     }
 
     if (cx < cols && cy < rows) {
-      draw_glyph_8x8(16 + cx * 8u, 16 + cy * 8u, (uint8_t)c, 0xE0E0E0);
+      gfx_draw_glyph(16 + cx * 8u, 16 + cy * 8u, (uint8_t)c, 0xE0E0E0);
     }
     cx++;
     if (cx >= cols) {
@@ -1647,7 +1463,7 @@ static void draw_cursor(int32_t x, int32_t y, uint32_t fg, uint32_t outline) {
         uint16_t row = k_cursor_bits[cy];
         for (uint32_t cx = 0; cx < 16; cx++) {
           if (row & (1u << (15 - cx))) {
-            put_px((uint32_t)(x + (int32_t)cx + xx),
+            gfx_put_pixel((uint32_t)(x + (int32_t)cx + xx),
                    (uint32_t)(y + (int32_t)cy + yy), outline);
           }
         }
@@ -1659,7 +1475,7 @@ static void draw_cursor(int32_t x, int32_t y, uint32_t fg, uint32_t outline) {
     uint16_t row = k_cursor_bits[cy];
     for (uint32_t cx = 0; cx < 16; cx++) {
       if (row & (1u << (15 - cx))) {
-        put_px((uint32_t)(x + (int32_t)cx), (uint32_t)(y + (int32_t)cy), fg);
+        gfx_put_pixel((uint32_t)(x + (int32_t)cx), (uint32_t)(y + (int32_t)cy), fg);
       }
     }
   }
@@ -1667,6 +1483,7 @@ static void draw_cursor(int32_t x, int32_t y, uint32_t fg, uint32_t outline) {
 
 void desktop_init(BootInfo *bootInfo) {
   g_bi = bootInfo;
+  gfx_init(bootInfo, NULL, _binary_CGA_F08_start);
   g_tick = 0;
   g_back = 0;
   g_bg = 0;
@@ -1740,6 +1557,8 @@ void desktop_init(BootInfo *bootInfo) {
       }
     }
   }
+
+  gfx_set_backbuffer(g_back);
 
   g_last_cursor_x = -1000;
   g_last_cursor_y = -1000;
@@ -2306,9 +2125,9 @@ void desktop_tick(void) {
       int32_t iy = p.y + 18;
       if (ix < 0) ix = 0;
       if (iy < 0) iy = 0;
-      draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
-      draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
-      draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
+      gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
+      gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
+      gfx_draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
     }
 
     g_last_cursor_x = p.x;
@@ -2362,9 +2181,9 @@ void desktop_tick(void) {
         int32_t iy = p.y + 18;
         if (ix < 0) ix = 0;
         if (iy < 0) iy = 0;
-        draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
-        draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
-        draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
+        gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
+        gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
+        gfx_draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
       }
 
       g_back = saved_back;
@@ -2397,87 +2216,87 @@ static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
   };
 
   // Dark background
-  draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
+  gfx_draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
 
   // Title at top
-  draw_string_8x8(32, 32, step_titles[g_fullscreen_setup_step], 0xFFFFFF);
-  draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
+  gfx_draw_string(32, 32, step_titles[g_fullscreen_setup_step], 0xFFFFFF);
+  gfx_draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
 
   // Progress bar
   uint32_t bar_y = 80;
   uint32_t bar_w = screen_w - 64;
   uint32_t step_w = bar_w / 6u;
-  draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
+  gfx_draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
   for (uint32_t i = 0; i < 6; i++) {
     uint32_t cx = 32 + i * step_w;
     uint32_t color = (i <= g_fullscreen_setup_step) ? 0x22C55E : 0x303040;
-    draw_rect(cx + 2, bar_y + 2, step_w - 4, 4, color);
+    gfx_draw_rect(cx + 2, bar_y + 2, step_w - 4, 4, color);
   }
 
   // Content area background
   uint32_t content_y = 120;
   uint32_t content_h = screen_h - 240;
-  blend_rect(32, content_y, screen_w - 64, content_h, 0x0F141C, 220);
-  draw_rect(32, content_y, screen_w - 64, 1, 0x2A3140);
-  draw_rect(32, content_y + content_h - 1, screen_w - 64, 1, 0x0B0E14);
+  gfx_blend_rect(32, content_y, screen_w - 64, content_h, 0x0F141C, 220);
+  gfx_draw_rect(32, content_y, screen_w - 64, 1, 0x2A3140);
+  gfx_draw_rect(32, content_y + content_h - 1, screen_w - 64, 1, 0x0B0E14);
 
   // Step content
   uint32_t text_x = 56;
   uint32_t text_y = content_y + 32;
   switch (g_fullscreen_setup_step) {
     case 0: // Welcome
-      draw_string_8x8(text_x, text_y, "Welcome to VexOS Setup!", 0xFFFFFF);
-      draw_string_8x8(text_x, text_y + 32, "This wizard will guide you through:", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 56, "  - Disk detection", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 76, "  - Partition creation", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 96, "  - Filesystem formatting", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 136, "Click 'Next' to begin...", 0x22C55E);
+      gfx_draw_string(text_x, text_y, "Welcome to VexOS Setup!", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 32, "This wizard will guide you through:", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 56, "  - Disk detection", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 76, "  - Partition creation", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 96, "  - Filesystem formatting", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 136, "Click 'Next' to begin...", 0x22C55E);
       break;
     case 1: // Detect
-      draw_string_8x8(text_x, text_y, "Detecting storage devices...", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y, "Detecting storage devices...", 0xFFFFFF);
       if (g_fullscreen_setup_disk_ready) {
-        draw_string_8x8(text_x, text_y + 40, "Status: Disk detected and ready", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 64, "Device: RAM Disk (1 MiB)", 0xD0D6E0);
-        draw_string_8x8(text_x, text_y + 84, "Sector size: 512 bytes", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 40, "Status: Disk detected and ready", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 64, "Device: RAM Disk (1 MiB)", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 84, "Sector size: 512 bytes", 0xD0D6E0);
       } else {
-        draw_string_8x8(text_x, text_y + 40, "Status: Scanning for devices...", 0xFFB000);
+        gfx_draw_string(text_x, text_y + 40, "Status: Scanning for devices...", 0xFFB000);
       }
       break;
     case 2: // Partition
-      draw_string_8x8(text_x, text_y, "Creating MBR partition...", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y, "Creating MBR partition...", 0xFFFFFF);
       if (g_fullscreen_setup_partition_done) {
-        draw_string_8x8(text_x, text_y + 40, "Status: Partition created successfully", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 64, "Partition: Primary (FAT16 LBA)", 0xD0D6E0);
-        draw_string_8x8(text_x, text_y + 84, "Start LBA: 1", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 40, "Status: Partition created successfully", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 64, "Partition: Primary (FAT16 LBA)", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 84, "Start LBA: 1", 0xD0D6E0);
       } else {
-        draw_string_8x8(text_x, text_y + 40, "Status: Waiting to create partition...", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 40, "Status: Waiting to create partition...", 0xD0D6E0);
       }
       break;
     case 3: // Format
-      draw_string_8x8(text_x, text_y, "Formatting partition...", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y, "Formatting partition...", 0xFFFFFF);
       if (g_fullscreen_setup_format_done) {
-        draw_string_8x8(text_x, text_y + 40, "Status: Format complete", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 64, "Filesystem: FAT16", 0xD0D6E0);
-        draw_string_8x8(text_x, text_y + 84, "Volume label: VEXOS", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 40, "Status: Format complete", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 64, "Filesystem: FAT16", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 84, "Volume label: VEXOS", 0xD0D6E0);
       } else {
-        draw_string_8x8(text_x, text_y + 40, "Status: Waiting to format...", 0xD0D6E0);
+        gfx_draw_string(text_x, text_y + 40, "Status: Waiting to format...", 0xD0D6E0);
       }
       break;
     case 4: // Verify
-      draw_string_8x8(text_x, text_y, "Verifying installation...", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y, "Verifying installation...", 0xFFFFFF);
       if (g_fullscreen_setup_format_done) {
-        draw_string_8x8(text_x, text_y + 40, "MBR Signature: 0x55AA (Valid)", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 60, "BPB Structure: Valid", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 80, "FAT Tables: Initialized", 0x22C55E);
-        draw_string_8x8(text_x, text_y + 100, "Root Directory: Ready", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 40, "MBR Signature: 0x55AA (Valid)", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 60, "BPB Structure: Valid", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 80, "FAT Tables: Initialized", 0x22C55E);
+        gfx_draw_string(text_x, text_y + 100, "Root Directory: Ready", 0x22C55E);
       }
       break;
     case 5: // Complete
-      draw_string_8x8(text_x, text_y, "Setup Complete!", 0x22C55E);
-      draw_string_8x8(text_x, text_y + 40, "Your VexOS installation is ready.", 0xFFFFFF);
-      draw_string_8x8(text_x, text_y + 80, "The system will now boot to the desktop.", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 100, "You can run Setup again anytime from the", 0xD0D6E0);
-      draw_string_8x8(text_x, text_y + 120, "Start menu or by typing 'setup' in Shell.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y, "Setup Complete!", 0x22C55E);
+      gfx_draw_string(text_x, text_y + 40, "Your VexOS installation is ready.", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 80, "The system will now boot to the desktop.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 100, "You can run Setup again anytime from the", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 120, "Start menu or by typing 'setup' in Shell.", 0xD0D6E0);
       break;
   }
 
@@ -2486,19 +2305,19 @@ static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
 
   // Back button (disabled on step 0)
   if (g_fullscreen_setup_step > 0) {
-    draw_rect(32, btn_y, 100, 32, 0x2A3140);
-    draw_string_8x8(64, btn_y + 12, "Back", 0xFFFFFF);
+    gfx_draw_rect(32, btn_y, 100, 32, 0x2A3140);
+    gfx_draw_string(64, btn_y + 12, "Back", 0xFFFFFF);
   } else {
-    draw_rect(32, btn_y, 100, 32, 0x1A1F2A);
-    draw_string_8x8(64, btn_y + 12, "Back", 0x505050);
+    gfx_draw_rect(32, btn_y, 100, 32, 0x1A1F2A);
+    gfx_draw_string(64, btn_y + 12, "Back", 0x505050);
   }
 
   // Next/Finish button
   const char *btn_text = (g_fullscreen_setup_step == 5) ? "Finish" : "Next";
   uint32_t btn_color = (g_fullscreen_setup_step == 5) ? 0x22C55E : 0x2244AA;
   uint32_t btn_x = screen_w - 132;
-  draw_rect(btn_x, btn_y, 100, 32, btn_color);
-  draw_string_8x8(btn_x + 28, btn_y + 12, btn_text, 0xFFFFFF);
+  gfx_draw_rect(btn_x, btn_y, 100, 32, btn_color);
+  gfx_draw_string(btn_x + 28, btn_y + 12, btn_text, 0xFFFFFF);
 }
 
 
@@ -2553,8 +2372,8 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
       if (p.buttons & 1u) cursor_fg = 0xFFCC00;
       else if (p.buttons & 2u) cursor_fg = 0x00CCFF;
       for (int i = -8; i <= 8; i++) {
-        if (p.y + i < (int)screen_h) put_px(p.x, p.y + i, cursor_fg);
-        if (p.x + i < (int)screen_w) put_px(p.x + i, p.y, cursor_fg);
+        if (p.y + i < (int)screen_h) gfx_put_pixel(p.x, p.y + i, cursor_fg);
+        if (p.x + i < (int)screen_w) gfx_put_pixel(p.x + i, p.y, cursor_fg);
       }
 
       if (wizard_back) {
