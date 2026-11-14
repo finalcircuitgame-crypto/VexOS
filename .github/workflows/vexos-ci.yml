@@ -376,7 +376,8 @@ jobs:
             "[CI] Mouse pointer movement reached desktop_tick"
             "[CI] Start menu opened by USB mouse click"
             "[CI] Shell opened from Start menu mouse click"
-            "[CI] Window resize drag updated geometry"
+            "[CI] Window resize drag updated geometry",
+            "[CI] USB tablet delivered motion while left button held"
             "[CI] Shell received printable keyboard input"
             "[CI] Shell command submitted through keyboard"
             "[CI] Shell help command executed"
