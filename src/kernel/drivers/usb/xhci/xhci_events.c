@@ -1,5 +1,8 @@
 #include "xhci_internal.h"
 #include "input.h"
+#ifdef VEXOS_CI_INPUT_TEST
+extern void serial_print(const char *str);
+#endif
 
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
@@ -227,6 +230,14 @@ void xhci_poll_events() {
             // QEMU usb-tablet typically uses 16-bit logical coords; map to screen.
             input_pointer_set_abs_scaled(x, y, 0x7FFF, 0x7FFF, buttons);
 
+#ifdef VEXOS_CI_INPUT_TEST
+            static uint8_t ci_mouse_drag_motion_seen;
+            if (!ci_mouse_drag_motion_seen && (buttons & 1u) &&
+                (ddx != 0 || ddy != 0)) {
+              ci_mouse_drag_motion_seen = 1u;
+              serial_print("[CI] USB tablet delivered motion while left button held\n");
+            }
+#endif
             (void)ddx;
             (void)ddy;
           }
