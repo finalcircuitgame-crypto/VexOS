@@ -334,7 +334,7 @@ jobs:
                   # Wait for the title/focus transition before sending editor text.
                   time.sleep(1.0)
           # Let the desktop process the final key and redraw Notepad before capture.
-          time.sleep(0.75)
+          time.sleep(1.5)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
 
           # Open Files from the centered taskbar dock and capture the redesigned file manager.
