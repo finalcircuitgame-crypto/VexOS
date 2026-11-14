@@ -1626,6 +1626,7 @@ void desktop_tick(void) {
 #endif
         ui_changed = 1;
       }
+    }
   }
 
   // Click handling
