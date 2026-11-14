@@ -20,7 +20,7 @@ CFLAGS_EFI = -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -I$(EFI_INC)
 LDFLAGS_EFI = -nostdlib -znocombreloc -T $(EFI_LIB)/elf_x86_64_efi.lds -shared -Bsymbolic -L$(EFI_LIB) $(EFI_LIB)/crt0-efi-x86_64.o
 
 # Kernel Flags
-CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
+CFLAGS_KERNEL = -O2 -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
 
 # CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
 ifeq ($(VEXOS_CI),1)
