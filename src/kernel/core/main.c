@@ -847,7 +847,7 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[CI] Pointer scaling/clamping and keyboard queues passed\n");
   if (!wm_ci_self_test(5u))
     ci_memory_test_fail("window manager focus/open/close/z-order");
-  serial_print("[CI] Window manager focus/open/close/z-order passed\n");
+  serial_print("[CI] Window manager visibility/focus/z-order/geometry passed\n");
   // Run only after desktop_init has installed the framebuffer target.
   ci_framebuffer_syscall_self_test(bootInfo);
 #endif
