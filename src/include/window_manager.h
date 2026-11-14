@@ -3,7 +3,17 @@
 
 #include <stdint.h>
 
-/* Small, bounded core for desktop window visibility, focus, and z-order. */
+/* Bounded window lifecycle, geometry, focus, and z-order primitives. */
+typedef struct {
+  int32_t x;
+  int32_t y;
+  int32_t w;
+  int32_t h;
+} wm_rect_t;
+
+void wm_clamp_rect(wm_rect_t *rect, uint32_t screen_width,
+                   uint32_t screen_height, uint32_t min_width,
+                   uint32_t min_height);
 void wm_init(uint32_t app_count);
 void wm_open(uint32_t app_id);
 void wm_close(uint32_t app_id);
