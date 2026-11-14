@@ -106,3 +106,57 @@ int input_kbd_pop_event(input_kbd_event_t *out) {
   g_kbd_event_r = (g_kbd_event_r + 1u) & KBD_EVENT_MASK;
   return 1;
 }
+
+
+#ifdef VEXOS_CI_INPUT_TEST
+int input_ci_self_test(void) {
+  input_kbd_event_t event;
+  input_pointer_state_t pointer;
+  char character = 0;
+
+  input_init(640u, 480u);
+  input_pointer_set_abs_scaled(32767, 32767, 32767, 32767, 1u);
+  pointer = input_pointer_get();
+  if (pointer.x != 639 || pointer.y != 479 ||
+      pointer.buttons != 1u || !pointer.is_absolute) {
+    return 0;
+  }
+
+  input_pointer_add_rel(10, -1000, 5u);
+  pointer = input_pointer_get();
+  if (pointer.x != 639 || pointer.y != 0 ||
+      pointer.dx != 10 || pointer.dy != -1000 ||
+      pointer.buttons != 5u || pointer.is_absolute) {
+    return 0;
+  }
+
+  input_pointer_add_rel(-700, 900, 0u);
+  pointer = input_pointer_get();
+  if (pointer.x != 0 || pointer.y != 479)
+    return 0;
+
+  input_kbd_push_char('z');
+  input_kbd_push_char('\n');
+  if (!input_kbd_pop_char(&character) || character != 'z')
+    return 0;
+  if (!input_kbd_pop_char(&character) || character != '\n')
+    return 0;
+  if (input_kbd_pop_char(&character))
+    return 0;
+
+  input_kbd_push_event(0x04u, 1);
+  input_kbd_push_event(0x04u, 0);
+  if (!input_kbd_pop_event(&event) || event.usage != 0x04u ||
+      event.pressed != 1u) {
+    return 0;
+  }
+  if (!input_kbd_pop_event(&event) || event.usage != 0x04u ||
+      event.pressed != 0u) {
+    return 0;
+  }
+  if (input_kbd_pop_event(&event))
+    return 0;
+
+  return 1;
+}
+#endif
