@@ -1,5 +1,6 @@
 #include "bootinfo.h"
 #include "gfx.h"
+#include "jpeg.h"
 #include "desktop.h"
 #include "gdt.h"
 #include "heap.h"
@@ -799,6 +800,9 @@ void kernel_main(BootInfo *bootInfo) {
   if (!gfx_ci_self_test())
     ci_memory_test_fail("framebuffer clipping/blending/blitting");
   serial_print("[CI] Framebuffer clipping/blending/blitting passed\n");
+  if (!jpeg_ci_self_test())
+    ci_memory_test_fail("baseline/progressive/truncated JPEG decoder test");
+  serial_print("[CI] JPEG baseline decode and unsupported/truncated rejection passed\n");
   ci_memory_self_test();
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
