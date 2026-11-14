@@ -114,14 +114,16 @@ static void window_resize_begin(app_id_t app, int32_t pointer_x,
   app_raise(app);
 }
 
-static void window_resize_update(int32_t pointer_x, int32_t pointer_y) {
+static int window_resize_update(int32_t pointer_x, int32_t pointer_y) {
   if (!g_window_resize_active || g_window_resize_app >= APP_COUNT || !g_bi)
-    return;
+    return 0;
 
   wm_window_t *win = window_for_app(g_window_resize_app);
   if (!win)
-    return;
+    return 0;
 
+  int32_t old_width = win->w;
+  int32_t old_height = win->h;
   int64_t delta_w = (int64_t)pointer_x - g_window_resize_pointer_x;
   int64_t delta_h = (int64_t)pointer_y - g_window_resize_pointer_y;
   if (delta_w > INT32_MAX) delta_w = INT32_MAX;
@@ -148,6 +150,7 @@ static void window_resize_update(int32_t pointer_x, int32_t pointer_y) {
       g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
   wm_resize_rect(win, (int32_t)delta_w, (int32_t)delta_h,
                  g_bi->width, work_height, min_w, min_h);
+  return win->w != old_width || win->h != old_height;
 }
 
 static void draw_resize_grip(const wm_window_t *win, uint8_t focused) {
@@ -2496,15 +2499,16 @@ void desktop_tick(void) {
   if (g_window_resize_active &&
       (p0.x != g_window_resize_pointer_x ||
        p0.y != g_window_resize_pointer_y)) {
-    window_resize_update(p0.x, p0.y);
-    ui_changed = 1;
+    if (window_resize_update(p0.x, p0.y)) {
+      ui_changed = 1;
 #ifdef VEXOS_CI_INPUT_TEST
-    static uint8_t resize_ci_seen;
-    if (!resize_ci_seen) {
-      resize_ci_seen = 1u;
-      serial_print("[CI] Window resize drag updated geometry\n");
-    }
+      static uint8_t resize_ci_seen;
+      if (!resize_ci_seen) {
+        resize_ci_seen = 1u;
+        serial_print("[CI] Window resize drag updated geometry\n");
+      }
 #endif
+    }
   }
 
   if (!g_back || !g_bg) {
