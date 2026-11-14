@@ -126,7 +126,12 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
         if (usage_n) {
           u = usages[0];
         }
-        if (usage_page == 0x01 && u == 0x02) {
+        /*
+         * QEMU's usb-tablet identifies its top-level collection as
+         * Generic Desktop / Pointer (usage 0x01), while conventional
+         * mice commonly use Mouse (usage 0x02). Both carry pointer axes.
+         */
+        if (usage_page == 0x01 && (u == 0x01 || u == 0x02)) {
           seen_mouse_usage = 1;
         }
         if (seen_mouse_usage) {
@@ -236,6 +241,39 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
     dev->hid_mouse_valid = 1;
   }
 }
+
+#ifdef VEXOS_CI_INPUT_TEST
+/*
+ * Regression fixture copied from QEMU's 74-byte usb-tablet HID report
+ * descriptor. In particular, its Application collection usage is 0x01
+ * (Pointer), not 0x02 (Mouse).
+ */
+int xhci_hid_ci_qemu_tablet_descriptor_test(void) {
+  static const uint8_t qemu_tablet_report[] = {
+      0x05, 0x01, 0x09, 0x01, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00,
+      0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25, 0x01,
+      0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x05,
+      0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00,
+      0x26, 0xFF, 0x7F, 0x35, 0x00, 0x46, 0xFE, 0x7F, 0x75, 0x10,
+      0x95, 0x02, 0x81, 0x02, 0x05, 0x01, 0x09, 0x38, 0x15, 0x81,
+      0x25, 0x7F, 0x35, 0x00, 0x45, 0x00, 0x75, 0x08, 0x95, 0x01,
+      0x81, 0x02, 0xC0, 0xC0
+  };
+  xhci_device_state_t dev = {0};
+  dev.intr_mps = 8u;
+  xhci_hid_parse_report_desc_mouse(&dev, qemu_tablet_report,
+                                   sizeof(qemu_tablet_report));
+  return dev.hid_mouse_valid &&
+         !dev.hid_has_report_id &&
+         dev.hid_buttons_bitoff == 0u && dev.hid_buttons_bits == 3u &&
+         dev.hid_x_bitoff == 8u && dev.hid_x_bits == 16u &&
+         !dev.hid_x_is_relative &&
+         dev.hid_y_bitoff == 24u && dev.hid_y_bits == 16u &&
+         !dev.hid_y_is_relative &&
+         dev.hid_wheel_bitoff == 40u && dev.hid_wheel_bits == 8u &&
+         dev.hid_wheel_is_relative;
+}
+#endif
 
 void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   if (!dev || dev->hid_ifnum == 0xFF) {
