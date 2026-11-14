@@ -79,6 +79,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/app_registry.h"
 #include "../desktop/graphics/graphics.h"
 #include "../desktop/compositor/compositor.h"
+#include "../desktop/compositor/window_compositor.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -935,34 +936,23 @@ static void draw_widgets(void){
 }
 
 
-// Paint windows from back to front. wm_raise() moves the focused app to the
-// end of this list, ensuring it is always rendered above overlapping windows.
+static void draw_shell_window_if_open(void) {
+  if (g_show_shell) draw_shell_window(&g_shell_win);
+}
+static void draw_explorer_window_if_open(void) {
+  if (g_explorer_open) draw_explorer_window(&g_explorer_win);
+}
+static void draw_viewer_window_if_open(void) {
+  if (g_viewer_open) draw_viewer_window(&g_viewer_win);
+}
+static void draw_notepad_window_if_open(void) {
+  draw_notepad_window(&g_notepad_win);
+}
+static void draw_setup_window_if_open(void) {
+  if (g_setup_open) draw_setup_window(&g_setup_win);
+}
 static void draw_open_windows(void) {
-  for (uint32_t i = 0; i < wm_count(); i++) {
-    app_id_t app = wm_app_at(i);
-    if ((uint32_t)app >= APP_COUNT || !g_app_open[app])
-      continue;
-
-    switch (app) {
-      case APP_SHELL:
-        if (g_show_shell) draw_shell_window(&g_shell_win);
-        break;
-      case APP_EXPLORER:
-        if (g_explorer_open) draw_explorer_window(&g_explorer_win);
-        break;
-      case APP_VIEWER:
-        if (g_viewer_open) draw_viewer_window(&g_viewer_win);
-        break;
-      case APP_NOTEPAD:
-        draw_notepad_window(&g_notepad_win);
-        break;
-      case APP_SETUP:
-        if (g_setup_open) draw_setup_window(&g_setup_win);
-        break;
-      default:
-        break;
-    }
-  }
+  window_compositor_draw();
 }nt hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
                     int32_t h) {
   if (px < x || py < y)
@@ -1507,6 +1497,12 @@ void desktop_init(BootInfo *bootInfo) {
     g_app_open[i] = 0;
   wm_init();
   app_registry_init();
+  window_compositor_init();
+  window_compositor_register(APP_SHELL, &g_app_open[APP_SHELL], draw_shell_window_if_open);
+  window_compositor_register(APP_EXPLORER, &g_app_open[APP_EXPLORER], draw_explorer_window_if_open);
+  window_compositor_register(APP_VIEWER, &g_app_open[APP_VIEWER], draw_viewer_window_if_open);
+  window_compositor_register(APP_NOTEPAD, &g_app_open[APP_NOTEPAD], draw_notepad_window_if_open);
+  window_compositor_register(APP_SETUP, &g_app_open[APP_SETUP], draw_setup_window_if_open);
   wm_raise(APP_SHELL);
 
   g_notepad_dragging = 0;
@@ -1633,7 +1629,7 @@ void desktop_init(BootInfo *bootInfo) {
       }
       draw_cursor(p.x, p.y, fg, outline);
     }
-    compositor_blit(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+    compositor_present(g_back, g_bi->width, g_bi->height);
   } else {
     draw_background();
   }
