@@ -24,7 +24,8 @@ CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)
 
 # Optimize CPU-side desktop/rendering and memory paths. Keep hardware drivers
 # at their existing optimization level until their MMIO/DMA paths are audited.
-$(OBJDIR)/core/desktop.o $(OBJDIR)/core/png.o $(OBJDIR)/core/simplefs.o \
+$(OBJDIR)/core/desktop.o $(OBJDIR)/core/png.o $(OBJDIR)/core/jpeg.o \
+$(OBJDIR)/core/picojpeg.o $(OBJDIR)/core/simplefs.o \
 $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
 # CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
