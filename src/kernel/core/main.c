@@ -848,6 +848,7 @@ void kernel_main(BootInfo *bootInfo) {
   if (!wm_ci_self_test(5u))
     ci_memory_test_fail("window manager focus/open/close/z-order");
   serial_print("[CI] Window manager visibility/focus/z-order/geometry passed\n");
+  /* Window drag-resize itself is verified after QMP drives the USB tablet. */
   // Run only after desktop_init has installed the framebuffer target.
   ci_framebuffer_syscall_self_test(bootInfo);
 #endif
