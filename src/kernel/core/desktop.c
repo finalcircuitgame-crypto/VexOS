@@ -87,6 +87,7 @@ static uint8_t g_app_open[APP_COUNT];
 static app_id_t g_app_z[APP_COUNT];
 static uint32_t g_app_z_len;
 static app_id_t g_app_focus;
+static void app_raise(app_id_t app);
 
 static void viewer_clear_content(void) {
   if (g_viewer_pixels) {
