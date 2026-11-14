@@ -130,6 +130,29 @@ void wm_raise(uint32_t app_id) {
   g_focused_app = app_id;
 }
 
+void wm_resize_rect(wm_rect_t *rect, int32_t delta_width,
+                    int32_t delta_height, uint32_t screen_width,
+                    uint32_t screen_height, uint32_t min_width,
+                    uint32_t min_height) {
+  if (!rect || screen_width == 0u || screen_height == 0u)
+    return;
+
+  int64_t width = (int64_t)rect->w + (int64_t)delta_width;
+  int64_t height = (int64_t)rect->h + (int64_t)delta_height;
+  if (width < 1)
+    width = 1;
+  if (height < 1)
+    height = 1;
+  if (width > 0x7FFFFFFFll)
+    width = 0x7FFFFFFFll;
+  if (height > 0x7FFFFFFFll)
+    height = 0x7FFFFFFFll;
+
+  rect->w = (int32_t)width;
+  rect->h = (int32_t)height;
+  wm_clamp_rect(rect, screen_width, screen_height, min_width, min_height);
+}
+
 int wm_is_open(uint32_t app_id) {
   return app_id < g_app_count && g_app_open[app_id] != 0u;
 }
@@ -239,6 +262,20 @@ int wm_ci_self_test(uint32_t restore_app_count) {
   rect.h = 0;
   wm_clamp_rect(&rect, 200u, 120u, 320u, 180u);
   if (rect.x != 0 || rect.y != 0 || rect.w != 200 || rect.h != 120)
+    goto fail;
+
+  rect.x = 40;
+  rect.y = 30;
+  rect.w = 400;
+  rect.h = 260;
+  wm_resize_rect(&rect, 80, 40, 640u, 480u, 320u, 180u);
+  if (rect.x != 40 || rect.y != 30 || rect.w != 480 || rect.h != 300)
+    goto fail;
+  wm_resize_rect(&rect, -1000, -1000, 640u, 480u, 320u, 180u);
+  if (rect.w != 320 || rect.h != 180)
+    goto fail;
+  wm_resize_rect(&rect, 1000, 1000, 640u, 480u, 320u, 180u);
+  if (rect.w != 640 || rect.h != 480 || rect.x != 0 || rect.y != 0)
     goto fail;
 
   wm_init(restore_app_count);
