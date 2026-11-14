@@ -257,7 +257,7 @@ jobs:
               "execute": "input-send-event",
               "arguments": {"events": [
                   {"type": "abs", "data": {"axis": "x", "value": 1200}},
-                  {"type": "abs", "data": {"axis": "y", "value": 25000}}
+                  {"type": "abs", "data": {"axis": "y", "value": 21300}}
               ]}
           })
           time.sleep(0.1)
