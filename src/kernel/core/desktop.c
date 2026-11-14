@@ -2273,6 +2273,7 @@ void desktop_tick(void) {
       int32_t wx = g_viewer_win.x;
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
+      int32_t wh = g_viewer_win.h;
       // Close
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         wm_hide(APP_VIEWER);
