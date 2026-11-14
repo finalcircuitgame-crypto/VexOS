@@ -18,20 +18,22 @@ The current limitations are architectural rather than cosmetic:
 
 ## Phase 0 — make the code testable
 
-Status: in progress.
+Status: in progress. Initial renderer and input regression suites are implemented; this phase stays open until all desktop interaction workflows are green.
 
 - Extract low-level framebuffer operations into `gfx.c` and expose them through `gfx.h`.
 - Keep desktop code responsible for layout and window content, not raw pixel loops.
 - Validate every drawing surface and clip rectangles without integer wraparound.
-- Add kernel-side regression checks for rendering and pointer/keyboard queue behavior.
+- Add kernel-side regression checks for rendering, pointer/keyboard queue behavior, and window-manager focus/visibility/z-order.
 - Keep the existing QEMU boot, storage, keyboard, mouse, shell, and screenshot tests green.
 
 Acceptance: normal and CI kernel builds pass; all existing QEMU markers and the new renderer/input self-tests pass.
 
 ## Phase 1 — kernel and device stability
 
+Status: initial xHCI/HID hardening in progress; full device recovery and block-device work remains.
+
 - Audit every page allocation in xHCI, AHCI, ATA, and the kernel core; failed allocations must fail cleanly rather than dereference null.
-- Validate USB configuration and HID report descriptors before using offsets, lengths, report IDs, or endpoint parameters.
+- Validate USB configuration and HID report descriptors before using offsets, lengths, report IDs, or endpoint parameters. Initial work now guards xHCI page allocations, validates endpoint parameters, bounds parsed HID fields to report packets, and discards truncated reports.
 - Make transfer submission, completion, timeout, and re-arm paths explicit; log recoverable device errors without flooding the serial console.
 - Add deterministic tests for HID report parsing, pointer scaling, keyboard transitions, queue overflow, and device disconnect/reconnect behavior.
 - Separate storage operations from controller details with a small block-device interface. Keep ATA PIO as the first backend and add AHCI only after the interface is tested.
@@ -40,6 +42,8 @@ Acceptance: normal and CI kernel builds pass; all existing QEMU markers and the 
 Acceptance: input devices remain responsive through repeated idle/move/click/key cycles; invalid descriptors and allocation failures do not hang or crash the desktop; storage tests pass through the block-device API.
 
 ## Phase 2 — graphics foundation
+
+Status: reusable framebuffer primitives extracted; richer surfaces, fonts, and dirty-region rendering remain.
 
 - Define the framebuffer contract explicitly: pixel format, bytes per pixel, row pitch, dimensions, and ownership.
 - Introduce reusable surfaces and safe fill, blend, blit, glyph, and text operations.
@@ -50,6 +54,8 @@ Acceptance: input devices remain responsive through repeated idle/move/click/key
 Acceptance: renderer tests pass independently of desktop layout; the same renderer works on the boot framebuffer, desktop backbuffer, and app-owned surfaces.
 
 ## Phase 3 — desktop and window manager
+
+Status: window visibility, focus, and z-order have been extracted into a standalone module; window geometry, event routing, resize/minimize/restore, and app lifecycle are still coupled to desktop.c.
 
 - Separate the window manager from application implementations.
 - Give each window explicit bounds, state, z-order, focus, and event handling.
