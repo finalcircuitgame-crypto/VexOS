@@ -33,16 +33,9 @@ static uint32_t g_shell_line_len;
 static input_pointer_state_t g_last_ptr;
 static uint32_t g_rand_state;
 
-typedef struct {
-  int32_t x;
-  int32_t y;
-  int32_t w;
-  int32_t h;
-} wm_window_t;
-
-static wm_window_t g_shell_win;
-static wm_window_t g_explorer_win;
-static wm_window_t g_viewer_win;
+static desktop_window_t g_shell_win;
+static desktop_window_t g_explorer_win;
+static desktop_window_t g_viewer_win;
 static uint8_t g_shell_dragging;
 static int32_t g_shell_drag_off_x;
 static int32_t g_shell_drag_off_y;
@@ -80,6 +73,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/graphics/graphics.h"
 #include "../desktop/compositor/compositor.h"
 #include "../desktop/compositor/window_compositor.h"
+#include "../desktop/apps/notepad/notepad.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -270,7 +264,7 @@ static int viewer_load_file(const char *name) {
   return 1;
 }
 
-static wm_window_t g_notepad_win;
+static desktop_window_t g_notepad_win;
 static uint8_t g_notepad_dragging;
 static int32_t g_notepad_drag_off_x;
 static int32_t g_notepad_drag_off_y;
@@ -280,7 +274,7 @@ static uint32_t g_notepad_text_len;
 static uint32_t g_notepad_scroll;
 
 // Setup Wizard state
-static wm_window_t g_setup_win;
+static desktop_window_t g_setup_win;
 static uint8_t g_setup_open;
 static uint8_t g_setup_dragging;
 static int32_t g_setup_drag_off_x;
@@ -588,7 +582,7 @@ static void launch_ring3_task(void) {
   Task_Create(ring3_task_entry, stack_top);
 }
 
-static void draw_window_chrome(const wm_window_t *win,const char *title,const char *sub_title,uint8_t focused,uint8_t has_scroll,uint8_t has_save){
+static void draw_window_chrome(const desktop_window_t *win,const char *title,const char *sub_title,uint8_t focused,uint8_t has_scroll,uint8_t has_save){
   if(!g_bi||!win||win->w<40||win->h<40)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;app_id_t app=APP_SHELL;
   if(title&&(title[0]=='F'||title[0]=='E'))app=APP_EXPLORER;else if(title&&title[0]=='V')app=APP_VIEWER;else if(title&&title[0]=='N')app=APP_NOTEPAD;else if(title&&title[0]=='S')app=APP_SETUP;
   gfx_blend_round_rect((uint32_t)(x+4),(uint32_t)(y+6),(uint32_t)w,(uint32_t)h,9u,0x02060Cu,155);gfx_blend_round_rect((uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h,8u,0x101A28u,255);
@@ -601,7 +595,7 @@ static void draw_window_chrome(const wm_window_t *win,const char *title,const ch
   if(has_save){gfx_blend_round_rect((uint32_t)(x+w-85),(uint32_t)(y+6),17u,17u,5u,0x236B59u,255);gfx_draw_string((uint32_t)(x+w-80),(uint32_t)(y+10),"S",0xF0FFF8u);}
 }
 
-static void draw_notepad_window(const wm_window_t *win){
+static void draw_notepad_window(const desktop_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Notepad",g_notepad_name[0]?g_notepad_name:"note.txt",(uint8_t)(wm_get_focus()==APP_NOTEPAD),1,1);
   gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+42),"FILE   EDIT   VIEW",0xB9C9DAu);gfx_draw_string((uint32_t)(x+w-142),(uint32_t)(y+42),"PLAIN TEXT",0x7FA5C8u);
   uint32_t cx=(uint32_t)x+12u,cy=(uint32_t)y+66u,cw=w>24?(uint32_t)w-24u:1u,ch=h>78?(uint32_t)h-78u:1u;gfx_blend_round_rect(cx,cy,cw,ch,5u,0xF4F7FBu,255);gfx_draw_rect(cx+1u,cy+1u,cw-2u,1u,0xFFFFFFu);gfx_draw_rect(cx+34u,cy+1u,1u,ch-2u,0xDCE5EFu);
@@ -610,7 +604,7 @@ static void draw_notepad_window(const wm_window_t *win){
   for(uint32_t i=start;i<g_notepad_text_len&&row<rows;i++){char c=g_notepad_text[i];if(c=='\n'){col=0;row++;line++;if(row<rows){shell_u32_to_dec(num,line);gfx_draw_string(cx+10u,ty+row*16u,num,0x8EA0B4u);}continue;}if(c=='\t'){col=(col+4u)&~3u;continue;}if(c<32||c>126)c='.';if(col<cols){char t[2]={c,0};gfx_draw_string(tx+col*8u,ty+row*16u,t,0x24364Bu);}col++;}
 }
 
-static void draw_setup_window(const wm_window_t *win) {
+static void draw_setup_window(const desktop_window_t *win) {
   if (!g_bi || !win)
     return;
 
@@ -729,7 +723,7 @@ static void draw_setup_window(const wm_window_t *win) {
   gfx_draw_string(btn_x + 14u, btn_y + 5u, btn_label, 0xFFFFFF);
 }
 
-static void draw_explorer_window(const wm_window_t *win){
+static void draw_explorer_window(const desktop_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint32_t total=simplefs_file_count();char cb[32];uint32_t n=shell_u32_to_dec(cb,total);cb[n]=' ';cb[n+1]='i';cb[n+2]='t';cb[n+3]='e';cb[n+4]='m';cb[n+5]='s';cb[n+6]=0;
   draw_window_chrome(win,"Files",cb,(uint8_t)(wm_get_focus()==APP_EXPLORER),1,0);gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),38u,0x17263A);
   gfx_blend_round_rect((uint32_t)(x+12),(uint32_t)(y+38),(uint32_t)(w-24),24u,6u,0x0D1928u,255);gfx_draw_string((uint32_t)(x+22),(uint32_t)(y+46),"<",0xAFC4D8u);gfx_draw_string((uint32_t)(x+42),(uint32_t)(y+46),">",0x71879Du);gfx_draw_rect((uint32_t)(x+62),(uint32_t)(y+43),1u,14u,0x344A60);gfx_draw_string((uint32_t)(x+76),(uint32_t)(y+46),"This PC   >   VexOS Storage",0xDCE8F4u);
@@ -743,7 +737,7 @@ static void draw_explorer_window(const wm_window_t *win){
   gfx_draw_rect((uint32_t)(x+160),(uint32_t)(y+h-28),mw,1u,0x2A3D52u);gfx_draw_string((uint32_t)(x+174),(uint32_t)(y+h-18),"VexOS Storage",0x7891AAu);gfx_draw_string((uint32_t)(x+w-130),(uint32_t)(y+h-18),"Double-click to open",0x7891AAu);
 }
 
-static void draw_viewer_window(const wm_window_t *win) {
+static void draw_viewer_window(const desktop_window_t *win) {
   if (!g_bi || !win)
     return;
 
@@ -865,12 +859,12 @@ static void draw_background(void);
 static void draw_text_panel(void);
 static void draw_taskbar(void);
 static void draw_start_menu(void);
-static void draw_shell_window(const wm_window_t *win);
-static void draw_explorer_window(const wm_window_t *win);
-static void draw_viewer_window(const wm_window_t *win);
-static void draw_notepad_window(const wm_window_t *win);
-static void draw_setup_window(const wm_window_t *win);
-static void draw_window_chrome(const wm_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save);
+static void draw_shell_window(const desktop_window_t *win);
+static void draw_explorer_window(const desktop_window_t *win);
+static void draw_viewer_window(const desktop_window_t *win);
+static void draw_notepad_window(const desktop_window_t *win);
+static void draw_setup_window(const desktop_window_t *win);
+static void draw_window_chrome(const desktop_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save);
 static void draw_desktop_icons(void);
 static void draw_widgets(void);
 
@@ -898,7 +892,7 @@ void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   dst[y * g_bi->pitch + x] = c;
 }
 
-static void draw_shell_window(const wm_window_t *win){
+static void draw_shell_window(const desktop_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(wm_get_focus()==APP_SHELL);draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
   uint32_t px=(uint32_t)x+10u,py=(uint32_t)y+56u,pw=w>20?(uint32_t)w-20u:1u,ph=h>94?(uint32_t)h-94u:1u;gfx_blend_round_rect(px,py,pw,ph,5u,0x091321u,255);gfx_draw_rect(px+1u,py+1u,pw-2u,1u,0x1C344Du);uint32_t tx=px+12u,ty=py+12u,cols=pw>24u?(pw-24u)/8u:0u,rows=ph>20u?(ph-20u)/10u:0u;
   if(cols&&rows){uint32_t cap=cols*rows,start=g_shell_out_len>cap?g_shell_out_len-cap:0u,cx=0,cy=0;for(uint32_t i=start;i<g_shell_out_len&&cy<rows;i++){char c=g_shell_out[i];if(c=='\n'){cx=0;cy++;continue;}if(cx<cols&&c>=32&&c<=126)gfx_draw_glyph(tx+cx*8u,ty+cy*10u,(uint8_t)c,0xD7E7F7u);cx++;if(cx>=cols){cx=0;cy++;}}}
