@@ -276,6 +276,47 @@ jobs:
               ]}
           })
           time.sleep(0.4)
+          # Drag Terminal by its title bar. This must take the clipped,
+          # dirty-region redraw path rather than repainting the whole desktop.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 6407}},
+                  {"type": "abs", "data": {"axis": "y", "value": 2543}}
+              ]}
+          })
+          time.sleep(0.15)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 8710}},
+                  {"type": "abs", "data": {"axis": "y", "value": 4595}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 9606}},
+                  {"type": "abs", "data": {"axis": "y", "value": 5085}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.25)
+
           # Resize Terminal by dragging the lower-right grip with the USB tablet.
           # CI runs the guest framebuffer at 1280x800.
           command({
@@ -388,6 +429,7 @@ jobs:
             "[CI] Mouse pointer movement reached desktop_tick"
             "[CI] Start menu opened by USB mouse click"
             "[CI] Shell opened from Start menu mouse click"
+            "[CI] Window move used clipped dirty-region redraw"
             "[CI] Window resize drag updated geometry"
             "[CI] USB tablet delivered motion while left button held"
             "[CI] Shell received printable keyboard input"
