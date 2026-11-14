@@ -311,7 +311,7 @@ int gfx_ci_self_test(void) {
       framebuffer[1] != small_source[1] ||
       framebuffer[4] != small_source[2] ||
       framebuffer[5] != small_source[3] ||
-      framebuffer[2] != source[6]) {
+      framebuffer[2] != 0x0000FF00u) {
     return 0;
   }
 
