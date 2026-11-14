@@ -20,6 +20,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Validate developer launcher shell syntax
+        run: bash -n run.sh
+
       - name: Install toolchain and VM dependencies
         run: |
           sudo apt-get update
