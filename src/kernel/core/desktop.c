@@ -267,7 +267,6 @@ static int viewer_load_file(const char *name) {
 
   g_viewer_scroll = 0;
   wm_open(APP_VIEWER);
-  wm_open(APP_VIEWER);
   app_raise(APP_VIEWER);
   return 1;
 }
@@ -964,8 +963,8 @@ static void draw_widgets(void){
 }
 
 
-// Paint windows from back to front. app_raise() moves the focused app to the
-// end of this list, ensuring it is always rendered above overlapping windows.
+// Paint windows from back to front. The window manager keeps the focused app
+// at the end of the z-order list so it is rendered above overlapping windows.
 static void draw_open_windows(void) {
   for (uint32_t i = 0; i < wm_z_count(); i++) {
     app_id_t app = (app_id_t)wm_z_at(i);
@@ -974,19 +973,19 @@ static void draw_open_windows(void) {
 
     switch (app) {
       case APP_SHELL:
-        if (wm_is_open(APP_SHELL)) draw_shell_window(&g_shell_win);
+        draw_shell_window(&g_shell_win);
         break;
       case APP_EXPLORER:
-        if (wm_is_open(APP_EXPLORER)) draw_explorer_window(&g_explorer_win);
+        draw_explorer_window(&g_explorer_win);
         break;
       case APP_VIEWER:
-        if (wm_is_open(APP_VIEWER)) draw_viewer_window(&g_viewer_win);
+        draw_viewer_window(&g_viewer_win);
         break;
       case APP_NOTEPAD:
         draw_notepad_window(&g_notepad_win);
         break;
       case APP_SETUP:
-        if (wm_is_open(APP_SETUP)) draw_setup_window(&g_setup_win);
+        draw_setup_window(&g_setup_win);
         break;
       default:
         break;
@@ -1214,7 +1213,6 @@ static void shell_run_line(void) {
     shell_append("opening explorer...\n");
     if (simplefs_init()) {
       wm_open(APP_EXPLORER);
-      wm_open(APP_EXPLORER);
       app_raise(APP_EXPLORER);
     } else {
       shell_append("fs init failed\n");
@@ -1248,7 +1246,6 @@ static void shell_run_line(void) {
 #endif
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
-    wm_open(APP_SETUP);
     wm_open(APP_SETUP);
     app_raise(APP_SETUP);
     g_setup_step = 0;
@@ -1754,7 +1751,7 @@ void desktop_tick(void) {
           ui_changed = 1;
         }
       }
-    } else if (wm_is_focused(APP_SHELL) && wm_is_open(APP_SHELL) && wm_is_open(APP_SHELL)) {
+    } else if (wm_is_focused(APP_SHELL) && wm_is_open(APP_SHELL)) {
       if (c == '\b') {
         if (g_shell_line_len) {
           g_shell_line_len--;
@@ -1807,23 +1804,23 @@ void desktop_tick(void) {
     } else if (g_start_open) {
       int32_t mx=10,mw=280,mh=168,my=tb_y-176;
       if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
-        if(ry>=28&&ry<50){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);
+        if(ry>=28&&ry<50){wm_open(APP_SHELL);app_raise(APP_SHELL);
 #ifdef VEXOS_CI_INPUT_TEST
           serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
           g_start_open=0;ui_changed=1;
-        }else if(ry>=50&&ry<72){if(simplefs_init()){wm_open(APP_EXPLORER);wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
+        }else if(ry>=50&&ry<72){if(simplefs_init()){wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
         }else if(ry>=72&&ry<94){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
-        }else if(ry>=94&&ry<116){wm_open(APP_VIEWER);wm_open(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
-        }else if(ry>=116&&ry<138){wm_open(APP_SETUP);wm_open(APP_SETUP);g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
+        }else if(ry>=94&&ry<116){wm_open(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
+        }else if(ry>=116&&ry<138){wm_open(APP_SETUP);g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
+        }else if(ry>=138&&ry<162){wm_open(APP_SHELL);app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
       }else{g_start_open=0;ui_changed=1;}
     }
 
     // Desktop shortcuts launch their matching applications.
     if(!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
-      if(i==0u){if(simplefs_init()){wm_open(APP_EXPLORER);wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
-      else if(i==1u){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);wm_open(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
+      if(i==0u){if(simplefs_init()){wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
+      else if(i==1u){wm_open(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
 
@@ -1847,18 +1844,15 @@ void desktop_tick(void) {
                      (int32_t)icon)) {
           if (i == 0) {
             wm_open(APP_SHELL);
-            wm_open(APP_SHELL);
             app_raise(APP_SHELL);
           } else if (i == 1) {
             if (simplefs_init()) {
-              wm_open(APP_EXPLORER);
               wm_open(APP_EXPLORER);
               app_raise(APP_EXPLORER);
             } else {
               shell_append("fs init failed\n> ");
             }
           } else if (i == 2) {
-            wm_open(APP_VIEWER);
             wm_open(APP_VIEWER);
             app_raise(APP_VIEWER);
           } else if (i == 3) {
