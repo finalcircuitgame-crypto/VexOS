@@ -341,8 +341,27 @@ void desktop_set_fullscreen_app_active(int active) {
 }
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                      uint32_t c) {
-  gfx_fill_rect(g_bi, g_back, x, y, w, h, c);
+                      uint32_t c);
+static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
+                            uint32_t fg);
+static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                       uint32_t c, uint8_t a);
+static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             uint32_t radius, uint32_t c, uint8_t a);
+static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
+static int streq_n(const char *a, const char *b, uint32_t n);
+
+static inline void put_px(uint32_t x, uint32_t y, uint32_t c);
+
+static void draw_icon_20(uint32_t x, uint32_t y, const uint32_t *pix) {
+  for (uint32_t yy = 0; yy < 20u; yy++) {
+    for (uint32_t xx = 0; xx < 20u; xx++) {
+      uint32_t c = pix[yy * 20u + xx];
+      if (c & 0xFF000000u) {
+        put_px(x + xx, y + yy, c & 0x00FFFFFFu);
+      }
+    }
+  }
 }
 
 static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
@@ -900,8 +919,28 @@ static uint32_t g_last_cursor_buttons;
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                       uint32_t c);
 static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a) {
-  gfx_blend_rect(g_bi, g_back, x, y, w, h, c, a);
+                       uint32_t c, uint8_t a);
+static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             uint32_t radius, uint32_t c, uint8_t a);
+static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg);
+static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
+                            uint32_t fg);
+static void draw_background(void);
+static void draw_text_panel(void);
+static void draw_taskbar(void);
+static void draw_start_menu(void);
+static void draw_shell_window(const wm_window_t *win);
+static void draw_explorer_window(const wm_window_t *win);
+static void draw_viewer_window(const wm_window_t *win);
+static void draw_notepad_window(const wm_window_t *win);
+static void draw_setup_window(const wm_window_t *win);
+static void draw_window_chrome(const wm_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save);
+static void draw_desktop_icons(void);
+static void draw_widgets(void);
+
+static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x,
+                      uint32_t y, uint32_t w, uint32_t h) {
+  gfx_blit_rect(g_bi, dst, src, x, y, w, h);
 }
 
 void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
@@ -911,12 +950,7 @@ void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
 }
 
 static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
-  if (!g_bi)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  dst[y * g_bi->pitch + x] = c;
+  gfx_put_pixel(g_bi, g_back, x, y, c);
 }
 
 static void draw_shell_window(const wm_window_t *win){
@@ -989,51 +1023,14 @@ static void draw_open_windows(void) {
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                       uint32_t c) {
-  if (!g_bi)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = c;
-    }
-  }
+  gfx_fill_rect(g_bi, g_back, x, y, w, h, c);
 }
 
 
 
 static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                        uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = blend_rgb(row[xx], c, a);
-    }
-  }
+  gfx_blend_rect(g_bi, g_back, x, y, w, h, c, a);
 }
 
 static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
