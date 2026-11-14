@@ -322,8 +322,8 @@ jobs:
           command({
               "execute": "input-send-event",
               "arguments": {"events": [
-                  {"type": "abs", "data": {"axis": "x", "value": 22050}},
-                  {"type": "abs", "data": {"axis": "y", "value": 18050}}
+                  {"type": "abs", "data": {"axis": "x", "value": 25250}},
+                  {"type": "abs", "data": {"axis": "y", "value": 20680}}
               ]}
           })
           time.sleep(0.1)
@@ -337,8 +337,8 @@ jobs:
           command({
               "execute": "input-send-event",
               "arguments": {"events": [
-                  {"type": "abs", "data": {"axis": "x", "value": 22600}},
-                  {"type": "abs", "data": {"axis": "y", "value": 18870}}
+                  {"type": "abs", "data": {"axis": "x", "value": 26020}},
+                  {"type": "abs", "data": {"axis": "y", "value": 21900}}
               ]}
           })
           time.sleep(0.1)
@@ -348,8 +348,8 @@ jobs:
           command({
               "execute": "input-send-event",
               "arguments": {"events": [
-                  {"type": "abs", "data": {"axis": "x", "value": 22950}},
-                  {"type": "abs", "data": {"axis": "y", "value": 19300}}
+                  {"type": "abs", "data": {"axis": "x", "value": 26531}},
+                  {"type": "abs", "data": {"axis": "y", "value": 22700}}
               ]}
           })
           time.sleep(0.1)
