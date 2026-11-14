@@ -12,8 +12,11 @@
 
 static BootInfo *g_bi;
 static uint32_t g_tick;
+static uint8_t g_caret_visible;
 static uint32_t *g_back;
 static uint32_t *g_bg;
+static uint8_t g_clip_enabled;
+static uint32_t g_clip_x, g_clip_y, g_clip_x2, g_clip_y2;
 
 extern uint8_t _binary_CGA_F08_start[];
 extern uint8_t _binary_CGA_F08_end[];
@@ -381,7 +384,7 @@ static void draw_window_chrome(const wm_window_t *win, const char *title, const 
   blend_rect((uint32_t)(x + 4), (uint32_t)(y + h), (uint32_t)(w), 4, 0x000000, 100);
 
   // 2. Window background and border
-  draw_rect((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, 0x0E0E10);
+  draw_rect((uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h, 0x101827);
   draw_rect((uint32_t)x, (uint32_t)y, (uint32_t)w, 1, 0x2A3140);
   draw_rect((uint32_t)x, (uint32_t)(y + h - 1), (uint32_t)w, 1, 0x2A3140);
   draw_rect((uint32_t)x, (uint32_t)y, 1, (uint32_t)h, 0x2A3140);
@@ -408,18 +411,24 @@ static void draw_window_chrome(const wm_window_t *win, const char *title, const 
   draw_rect((uint32_t)(x + 1), (uint32_t)(y + 1), (uint32_t)(w - 2), 1, 0x475569); // Glassy top highlight
   draw_rect((uint32_t)(x + 1), (uint32_t)(y + 24), (uint32_t)(w - 2), 1, 0x334155); // Bottom divider
 
+  if (is_focused) draw_rect((uint32_t)x + 1, (uint32_t)y + 24, (uint32_t)w - 2, 1, 0x57D6C7);
+
   // 5. Title & subtitle
   uint32_t text_color = is_focused ? 0xF8FAFC : 0x94A3B8; // Slate-50 vs Slate-400
-  draw_string_8x8((uint32_t)x + 10, (uint32_t)y + 8, title, text_color);
-  if (sub_title && sub_title[0]) {
-    uint32_t sub_color = is_focused ? 0x38BDF8 : 0x64748B; // Sky-400 vs Slate-500
-    uint32_t title_len = 0;
-    while (title[title_len]) title_len++;
-    draw_string_8x8((uint32_t)x + 10 + title_len * 8 + 8, (uint32_t)y + 8, sub_title, sub_color);
+  char caption[96];
+  uint32_t reserved = has_save ? 92 : (has_scroll ? 72 : 32);
+  uint32_t limit = w > (int32_t)(reserved + 10) ? ((uint32_t)w - reserved - 10) / 8 : 0;
+  if (limit > sizeof(caption) - 1) limit = sizeof(caption) - 1;
+  uint32_t n = 0;
+  while (n < limit && title[n]) { caption[n] = title[n]; n++; }
+  if (sub_title && sub_title[0] && n + 1 < limit) {
+    caption[n++] = ' ';
+    for (uint32_t i = 0; sub_title[i] && n < limit; i++) caption[n++] = sub_title[i];
   }
-
+  caption[n] = 0;
+  draw_string_8x8((uint32_t)x + 10, (uint32_t)y + 8, caption, text_color);
   // 6. Close button: red rounded rect
-  blend_round_rect((uint32_t)(x + w - 22), (uint32_t)(y + 4), 18, 16, 3, 0xEF4444, 255);
+  blend_round_rect((uint32_t)(x + w - 22), (uint32_t)(y + 4), 18, 16, 3, 0x733D50, 255);
   draw_string_8x8((uint32_t)(x + w - 17), (uint32_t)(y + 8), "X", 0xFFFFFF);
 
   // 7. Scroll buttons
@@ -657,7 +666,7 @@ static void draw_explorer_window(const wm_window_t *win) {
     uint32_t idx = start + i;
     if (simplefs_file_name_at(idx, name, (uint32_t)sizeof(name))) {
       uint32_t fg = 0xD0D6E0;
-      uint32_t bg_color = 0x0E0E10;
+      uint32_t bg_color = 0x101827;
 
       if (idx % 2 == 1) {
         bg_color = 0x14141A;
@@ -763,6 +772,71 @@ static void draw_window_chrome(const wm_window_t *win, const char *title, const 
 static void draw_desktop_icons(void);
 static void draw_widgets(void);
 
+static uint8_t app_visible(app_id_t app) {
+  switch (app) {
+  case APP_SHELL: return g_show_shell;
+  case APP_EXPLORER: return g_explorer_open;
+  case APP_VIEWER: return g_viewer_open;
+  case APP_NOTEPAD: return g_app_open[app];
+  case APP_SETUP: return g_setup_open;
+  default: return 0;
+  }
+}
+static wm_window_t *app_window(app_id_t app) {
+  wm_window_t *windows[APP_COUNT] = {&g_shell_win,&g_explorer_win,&g_viewer_win,&g_notepad_win,&g_setup_win};
+  return app < APP_COUNT ? windows[app] : NULL;
+}
+static int pointer_window(int32_t x, int32_t y) {
+  if (app_visible(g_app_focus)) {
+    wm_window_t *w=app_window(g_app_focus);
+    if (x>=w->x && x<w->x+w->w && y>=w->y && y<w->y+w->h) return g_app_focus;
+  }
+  for (int i=APP_COUNT-1;i>=0;i--) {
+    if ((app_id_t)i==g_app_focus || !app_visible((app_id_t)i)) continue;
+    wm_window_t *w=app_window((app_id_t)i);
+    if (x>=w->x && x<w->x+w->w && y>=w->y && y<w->y+w->h) return i;
+  }
+  return -1;
+}
+static void draw_app(app_id_t app) {
+  switch(app) {
+  case APP_SHELL: draw_shell_window(&g_shell_win); break;
+  case APP_EXPLORER: draw_explorer_window(&g_explorer_win); break;
+  case APP_VIEWER: draw_viewer_window(&g_viewer_win); break;
+  case APP_NOTEPAD: draw_notepad_window(&g_notepad_win); break;
+  case APP_SETUP: draw_setup_window(&g_setup_win); break;
+  default: break;
+  }
+}
+static void draw_open_windows(void) {
+  for (uint32_t i=0;i<APP_COUNT;i++)
+    if ((app_id_t)i!=g_app_focus && app_visible((app_id_t)i)) draw_app((app_id_t)i);
+  if (app_visible(g_app_focus)) draw_app(g_app_focus);
+}
+static void clamp_window(wm_window_t *w) {
+  int32_t usable_h=g_bi->height>56 ? (int32_t)g_bi->height-56 : (int32_t)g_bi->height;
+  if (w->w>(int32_t)g_bi->width) w->w=g_bi->width;
+  if (w->h>usable_h) w->h=usable_h;
+  int32_t max_x=(int32_t)g_bi->width-w->w, max_y=usable_h-w->h;
+  if(w->x<0) w->x=0; if(w->x>max_x) w->x=max_x;
+  if(w->y<0) w->y=0; if(w->y>max_y) w->y=max_y;
+}
+static int move_window(wm_window_t *w, int32_t x, int32_t y, wm_window_t *damage, uint8_t *valid) {
+  wm_window_t old=*w; w->x=x; w->y=y; clamp_window(w);
+  if (w->x==old.x && w->y==old.y) return 0;
+  int32_t left=old.x<w->x ? old.x : w->x, top=old.y<w->y ? old.y : w->y;
+  int32_t right=(old.x>w->x?old.x:w->x)+w->w+4;
+  int32_t bottom=(old.y>w->y?old.y:w->y)+w->h+4;
+  if (*valid) {
+    if (damage->x<left) left=damage->x;
+    if (damage->y<top) top=damage->y;
+    if (damage->x+damage->w>right) right=damage->x+damage->w;
+    if (damage->y+damage->h>bottom) bottom=damage->y+damage->h;
+  }
+  *damage=(wm_window_t){left,top,right-left,bottom-top}; *valid=1;
+  return 1;
+}
+
 static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y,
                       uint32_t w, uint32_t h) {
   if (!g_bi || !dst || !src)
@@ -774,12 +848,18 @@ static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y
   if (y + h > g_bi->height)
     h = g_bi->height - y;
 
+  if (g_clip_enabled) {
+    uint32_t end_x=x+w, end_y=y+h;
+    if (x<g_clip_x) x=g_clip_x; if (y<g_clip_y) y=g_clip_y;
+    if (end_x>g_clip_x2) end_x=g_clip_x2; if (end_y>g_clip_y2) end_y=g_clip_y2;
+    if (x>=end_x || y>=end_y) return;
+    w=end_x-x; h=end_y-y;
+  }
   for (uint32_t yy = 0; yy < h; yy++) {
     uint32_t *drow = &dst[(y + yy) * g_bi->pitch + x];
     const uint32_t *srow = &src[(y + yy) * g_bi->pitch + x];
-    for (uint32_t xx = 0; xx < w; xx++) {
-      drow[xx] = srow[xx];
-    }
+    size_t pixels=w;
+    __asm__ volatile("cld; rep movsl" : "+D"(drow), "+S"(srow), "+c"(pixels) :: "memory");
   }
 }
 
@@ -802,6 +882,7 @@ static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
     return;
   if (x >= g_bi->width || y >= g_bi->height)
     return;
+  if (g_clip_enabled && (x<g_clip_x || x>=g_clip_x2 || y<g_clip_y || y>=g_clip_y2)) return;
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
   dst[y * g_bi->pitch + x] = c;
 }
@@ -870,140 +951,116 @@ static void draw_shell_window(const wm_window_t *win) {
   // Blinking block cursor (simplified to static for now)
   uint32_t line_len = 0;
   while(g_shell_line[line_len]) line_len++;
-  if (is_focused && ((g_tick / 30) % 2 == 0)) {
+  if (is_focused && g_caret_visible) {
     draw_rect((uint32_t)x + 20 + line_len * 8, input_y + 10, 8, 8, 0x4ADE80);
   }
 }
 
-static void draw_taskbar(void) {
-  if (!g_bi)
-    return;
+typedef struct {
+  uint32_t x, y, w, h, launcher_w, apps_x, app_w, gap;
+  uint8_t labels, status;
+} taskbar_layout_t;
 
-  uint32_t bar_h = 56;
-  if (bar_h > g_bi->height)
-    bar_h = g_bi->height;
-  uint32_t y = g_bi->height - bar_h;
-
-  blend_rect(0, y, g_bi->width, bar_h, 0x0A0D14, 170);
-  draw_rect(0, y, g_bi->width, 1, 0x2A3140);
-
-  uint32_t sy = y + 6;
-  uint32_t sh = bar_h - 12;
-
-  // Search box
-  uint32_t search_w = 260;
-  if (search_w + 16 > g_bi->width)
-    search_w = g_bi->width > 16 ? (g_bi->width - 16) : 1;
-  blend_round_rect(8, sy, search_w, sh, 10, g_start_open ? 0x0F1622 : 0x0B111C,
-                   210);
-  draw_rect(8, sy, search_w, 1, 0x2A3140);
-  draw_rect(8, sy + sh - 1, search_w, 1, 0x0B0E14);
-  draw_string_8x8(16, sy + 6, "Search or run a command", 0xA0A8B5);
-
-  // Status / Clock on the right
-  uint32_t right_w = 140;
-  uint32_t right_x = g_bi->width > right_w + 8 ? g_bi->width - right_w - 8 : 8;
-  if (right_x > 8) {
-    blend_round_rect(right_x, sy, right_w, sh, 10, 0x0B111C, 210);
-    draw_rect(right_x, sy, right_w, 1, 0x2A3140);
-    draw_string_8x8(right_x + 16, sy + 6, "10:42 AM", 0xFFFFFF);
-    draw_string_8x8(right_x + 96, sy + 6, "SYS", 0x4ADE80);
+// Drawing and input use the same responsive geometry.
+static taskbar_layout_t taskbar_layout(void) {
+  taskbar_layout_t t = {12, 0, 0, 48, 116, 164, 120, 8, 1, 1};
+  if (!g_bi) return t;
+  t.y = g_bi->height > 56 ? g_bi->height - 56 : 0;
+  t.w = g_bi->width > 24 ? g_bi->width - 24 : g_bi->width;
+  if (g_bi->width < 840) {
+    t.launcher_w = 44; t.apps_x = 72; t.app_w = 44;
+    t.labels = 0; t.status = g_bi->width >= 480;
   }
+  if (g_bi->height < 56) t.h = g_bi->height;
+  return t;
+}
 
-  // Centered Dock
-  uint32_t dock_w = 420;
-  if (dock_w + 32 > g_bi->width)
-    dock_w = g_bi->width > 32 ? (g_bi->width - 32) : 1;
-  uint32_t dock_x = (g_bi->width - dock_w) / 2u;
-  blend_round_rect(dock_x, sy, dock_w, sh, 12, 0x0B111C, 210);
-  draw_rect(dock_x, sy, dock_w, 1, 0x2A3140);
-  draw_rect(dock_x, sy + sh - 1, dock_w, 1, 0x0B0E14);
-
-  uint32_t icon = 40;
-  uint32_t gap = 10;
-  uint32_t ix = dock_x + 16;
-  uint32_t iy = sy + ((sh > icon) ? ((sh - icon) / 2u) : 0u);
-  const uint32_t *icons[4] = {k_icon_shell_20, k_icon_explorer_20, k_icon_viewer_20,
-                              k_icon_notepad_20};
+static int taskbar_hover(int32_t x, int32_t y) {
+  taskbar_layout_t t = taskbar_layout();
+  if (y < (int32_t)t.y + 6 || y >= (int32_t)(t.y + t.h - 6)) return -1;
+  if (x >= (int32_t)t.x + 8 && x < (int32_t)(t.x + 8 + t.launcher_w)) return 4;
   for (uint32_t i = 0; i < 4; i++) {
-    draw_icon_20_scaled(ix, iy, icons[i], 2);
-    ix += icon + gap;
-    if (ix + icon + 16 > dock_x + dock_w)
-      break;
+    uint32_t left = t.apps_x + i * (t.app_w + t.gap);
+    if (x >= (int32_t)left && x < (int32_t)(left + t.app_w)) return (int)i;
+  }
+  return -1;
+}
+
+static void draw_taskbar_icon(uint32_t x, uint32_t y, uint32_t app) {
+  const uint32_t colors[4] = {0x34566B, 0xD9A441, 0x5389BB, 0x4B9B89};
+  blend_round_rect(x, y, 24, 24, 5, colors[app], 255);
+  if (app == APP_SHELL) {
+    draw_string_8x8(x + 4, y + 8, ">", 0xE6FFF9);
+    draw_rect(x + 13, y + 15, 6, 2, 0x7EE4D2);
+  } else if (app == APP_EXPLORER) {
+    draw_rect(x + 4, y + 6, 7, 3, 0xFFF0B5);
+    draw_rect(x + 4, y + 9, 16, 10, 0xFFF0B5);
+    draw_rect(x + 5, y + 10, 14, 1, 0xAE7724);
+  } else if (app == APP_VIEWER) {
+    draw_rect(x + 4, y + 5, 16, 14, 0xDCEFFF);
+    draw_rect(x + 6, y + 7, 3, 3, 0x5389BB);
+    draw_rect(x + 7, y + 14, 10, 3, 0x5389BB);
+    draw_rect(x + 10, y + 12, 4, 2, 0x5389BB);
+  } else {
+    draw_rect(x + 5, y + 4, 14, 16, 0xE4FFF7);
+    draw_rect(x + 7, y + 8, 10, 1, 0x4B9B89);
+    draw_rect(x + 7, y + 11, 10, 1, 0x4B9B89);
+    draw_rect(x + 7, y + 14, 7, 1, 0x4B9B89);
+  }
+}
+
+static void draw_taskbar(void) {
+  if (!g_bi) return;
+  taskbar_layout_t t = taskbar_layout();
+  input_pointer_state_t p = input_pointer_get();
+  int hover = taskbar_hover(p.x, p.y);
+  // A single floating surface, with comfortable spacing and no nested dock.
+  blend_round_rect(t.x, t.y + 2, t.w, t.h, 12, 0x000000, 90);
+  blend_round_rect(t.x, t.y, t.w, t.h, 12, 0xDCE5EF, 255);
+  uint32_t bx = t.x + 8, by = t.y + 6, bh = t.h > 12 ? t.h - 12 : 1;
+  blend_round_rect(bx, by, t.launcher_w, bh, 7,
+                   g_start_open ? 0x0D756F : (hover == 4 ? 0xC3D2E2 : 0xCBD8E6), 255);
+  uint32_t logo = g_start_open ? 0xE6FFF9 : 0x28566B;
+  draw_rect(bx + 10, by + 10, 6, 6, logo);
+  draw_rect(bx + 18, by + 10, 6, 6, logo);
+  draw_rect(bx + 10, by + 18, 6, 6, logo);
+  draw_rect(bx + 18, by + 18, 6, 6, logo);
+  if (t.labels) draw_string_8x8(bx + 38, by + 14, "Apps", g_start_open ? 0xFFFFFF : 0x23364C);
+  const char *labels[4] = {"Terminal", "Files", "Viewer", "Notes"};
+  for (uint32_t i = 0; i < 4; i++) {
+    uint32_t x = t.apps_x + i * (t.app_w + t.gap);
+    uint8_t open = i == APP_SHELL ? g_show_shell : (i == APP_EXPLORER ? g_explorer_open : (i == APP_VIEWER ? g_viewer_open : g_app_open[i]));
+    uint8_t active = open && g_app_focus == (app_id_t)i;
+    uint32_t bg = active ? 0x0D756F : (hover == (int)i ? 0xC0CFDF : (open ? 0xF5F8FC : 0xDCE5EF));
+    blend_round_rect(x, by, t.app_w, bh, 7, bg, 255);
+    draw_taskbar_icon(x + 10, by + 6, i);
+    if (t.labels) draw_string_8x8(x + 42, by + 14, labels[i], active ? 0xFFFFFF : 0x23364C);
+    if (open) draw_rect(x + 10, by + bh - 3, t.app_w - 20, 2, active ? 0xA6F3DB : 0x5E809D);
+  }
+  if (t.status) {
+    uint32_t x = g_bi->width - 156;
+    draw_rect(x - 16, by + 6, 1, 24, 0xB8C8D9);
+    blend_round_rect(x, by + 6, 6, 6, 3, 0x0D756F, 255);
+    draw_string_8x8(x + 16, by + 6, "VexOS", 0x23364C);
+    draw_string_8x8(x + 16, by + 22, "DESKTOP", 0x5B7087);
   }
 }
 
 static void draw_start_menu(void) {
-  if (!g_bi)
-    return;
-  if (!g_start_open)
-    return;
-
-  uint32_t bar_h = 56;
-  if (bar_h > g_bi->height)
-    bar_h = g_bi->height;
-
-  uint32_t x = 8;
-  uint32_t w = 360;
-  uint32_t h = 280; // Taller for more content
-  if (w + 16 > g_bi->width)
-    w = g_bi->width > 16 ? (g_bi->width - 16) : 1;
-  uint32_t y = (g_bi->height - bar_h) - h - 12; // A bit more spacing
-  if ((int32_t)y < 8)
-    y = 8;
-
-  // Modern blurred/translucent background
-  blend_round_rect(x, y, w, h, 12, 0x0E0E12, 230);
-  draw_rect(x, y, w, 1, 0x334155);
-  draw_rect(x, y + h - 1, w, 1, 0x0B0E14);
-  draw_rect(x, y, 1, h, 0x334155);
-  draw_rect(x + w - 1, y, 1, h, 0x0B0E14);
-
-  // Header
-  draw_string_8x8(x + 20, y + 20, "Pinned Apps", 0xF1F5F9);
-  draw_rect(x + 20, y + 36, w - 40, 1, 0x1E293B);
-
-  // Grid of apps
-  // Row 1
-  uint32_t icon_sz = 40;
-  uint32_t grid_y = y + 50;
-
-  blend_round_rect(x + 24, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_icon_20_scaled(x + 24, grid_y, k_icon_shell_20, 2);
-  draw_string_8x8(x + 26, grid_y + icon_sz + 8, "Shell", 0xCBD5E1);
-
-  blend_round_rect(x + 104, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_icon_20_scaled(x + 104, grid_y, k_icon_explorer_20, 2);
-  draw_string_8x8(x + 98, grid_y + icon_sz + 8, "Explorer", 0xCBD5E1);
-
-  blend_round_rect(x + 184, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_icon_20_scaled(x + 184, grid_y, k_icon_notepad_20, 2);
-  draw_string_8x8(x + 180, grid_y + icon_sz + 8, "Notepad", 0xCBD5E1);
-
-  blend_round_rect(x + 264, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_icon_20_scaled(x + 264, grid_y, k_icon_viewer_20, 2);
-  draw_string_8x8(x + 264, grid_y + icon_sz + 8, "Viewer", 0xCBD5E1);
-
-  // Row 2
-  grid_y += 76;
-  blend_round_rect(x + 24, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_icon_20_scaled(x + 24, grid_y, k_icon_shell_20, 2);
-  draw_string_8x8(x + 26, grid_y + icon_sz + 8, "Setup", 0xCBD5E1);
-
-  blend_round_rect(x + 104, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_string_8x8(x + 120, grid_y + 16, "?", 0x64748B);
-  draw_string_8x8(x + 110, grid_y + icon_sz + 8, "Help", 0xCBD5E1);
-
-  blend_round_rect(x + 184, grid_y, icon_sz, icon_sz, 8, 0x1E293B, 255);
-  draw_string_8x8(x + 200, grid_y + 16, "X", 0x64748B);
-  draw_string_8x8(x + 186, grid_y + icon_sz + 8, "Clear", 0xCBD5E1);
-
-  // User Section / Footer
-  uint32_t footer_y = y + h - 48;
-  draw_rect(x, footer_y, w, 1, 0x1E293B);
-  blend_round_rect(x + 20, footer_y + 8, 24, 24, 12, 0x3B82F6, 255);
-  draw_string_8x8(x + 28, footer_y + 16, "U", 0xFFFFFF);
-  draw_string_8x8(x + 56, footer_y + 16, "Admin User", 0xF1F5F9);
+  if (!g_bi || !g_start_open) return;
+  uint32_t bar_h = g_bi->height < 56 ? g_bi->height : 56;
+  uint32_t y = g_bi->height > bar_h + 152 ? g_bi->height - bar_h - 152 : 0;
+  blend_round_rect(8, y, 200, 144, 8, 0x101B2C, 255);
+  draw_rect(8, y, 200, 1, 0x42617D);
+  const char *labels[] = {"Terminal", "Explorer", "Notepad", "Setup", "Help", "Clear terminal"};
+  input_pointer_state_t p = input_pointer_get();
+  for (uint32_t i = 0; i < 6; i++) {
+    uint32_t ry = y + i * 24;
+    if (p.x >= 8 && p.x < 208 && p.y >= (int32_t)ry && p.y < (int32_t)(ry + 24))
+      blend_round_rect(12, ry + 2, 192, 22, 4, 0x243B55, 255);
+    draw_rect(20, ry + 9, 3, 6, 0x57D6C7);
+    draw_string_8x8(36, ry + 8, labels[i], 0xE2EAF4);
+  }
 }
 
 static void draw_desktop_icons(void) {
@@ -1033,91 +1090,26 @@ static void draw_desktop_icons(void) {
 }
 
 static void draw_widgets(void) {
-  if (!g_bi)
-    return;
-
-  uint32_t bar_h = 56;
-  if (bar_h > g_bi->height)
-    bar_h = g_bi->height;
-
-  uint32_t w = 340;
-  uint32_t x = (g_bi->width > (w + 24)) ? (g_bi->width - w - 24) : 8;
-  uint32_t y = 96;
-
-  uint32_t card_h1 = 110;
-  uint32_t card_h2 = 130;
-  uint32_t card_h3 = 180;
-  if (y + card_h1 + 16 > g_bi->height - bar_h)
-    return;
-
-  // Weather Widget
-  blend_round_rect(x, y, w, card_h1, 14, 0x0E1420, 220); // Deep slate
-  draw_rect(x, y, w, 1, 0x334155);
-  draw_rect(x, y + card_h1 - 1, w, 1, 0x0B0E14);
-  draw_rect(x, y, 1, card_h1, 0x334155);
-  draw_rect(x + w - 1, y, 1, card_h1, 0x0B0E14);
-
-  draw_string_8x8(x + 20, y + 20, "WEATHER", 0x64748B);
-  draw_string_8x8(x + 20, y + 44, "Sunny", 0xF1F5F9);
-  
-  // Big temperature
-  draw_string_8x8(x + 240, y + 36, "73F", 0x38BDF8);
-  draw_string_8x8(x + 20, y + 68, "High: 80F  Low: 62F", 0x94A3B8);
-
-  y += card_h1 + 16;
-  if (y + card_h2 > g_bi->height - bar_h)
-    return;
-
-  // System Widget
-  blend_round_rect(x, y, w, card_h2, 14, 0x0E1420, 220);
-  draw_rect(x, y, w, 1, 0x334155);
-  draw_rect(x, y + card_h2 - 1, w, 1, 0x0B0E14);
-  draw_rect(x, y, 1, card_h2, 0x334155);
-  draw_rect(x + w - 1, y, 1, card_h2, 0x0B0E14);
-
-  draw_string_8x8(x + 20, y + 20, "SYSTEM", 0x64748B);
-  
-  const hw_profile_t *p = hw_profile_get();
-  uint32_t ram_mb = (uint32_t)(p->ram_usable_bytes / (1024ull * 1024ull));
-  
-  char buf[32];
-  draw_string_8x8(x + 20, y + 44, "CPU:", 0x94A3B8);
-  draw_string_8x8(x + 60, y + 44, p->cpu_brand[0] ? p->cpu_brand : "Unknown", 0xF1F5F9);
-
-  draw_string_8x8(x + 20, y + 68, "RAM:", 0x94A3B8);
-  buf[0] = 0;
-  shell_u32_to_dec(buf, ram_mb);
-  draw_string_8x8(x + 60, y + 68, buf, 0xF1F5F9);
-  draw_string_8x8(x + 60 + 8*8, y + 68, "MB", 0xF1F5F9);
-
-  draw_string_8x8(x + 20, y + 92, "GPU:", 0x94A3B8);
-  draw_string_8x8(x + 60, y + 92, p->has_pci_display ? "PCI Display" : "None", 0xF1F5F9);
-
-  y += card_h2 + 16;
-  if (y + card_h3 > g_bi->height - bar_h)
-    return;
-
-  // Calendar Widget
-  blend_round_rect(x, y, w, card_h3, 14, 0x0E1420, 220);
-  draw_rect(x, y, w, 1, 0x334155);
-  draw_rect(x, y + card_h3 - 1, w, 1, 0x0B0E14);
-  draw_rect(x, y, 1, card_h3, 0x334155);
-  draw_rect(x + w - 1, y, 1, card_h3, 0x0B0E14);
-
-  draw_string_8x8(x + 20, y + 20, "CALENDAR", 0x64748B);
-  draw_string_8x8(x + 20, y + 44, "June 2026", 0xF1F5F9);
-  draw_rect(x + 20, y + 64, w - 40, 1, 0x1E293B);
-  
-  // Highlighted current day
-  blend_round_rect(x + 20, y + 76, 24, 24, 4, 0x3B82F6, 255);
-  draw_string_8x8(x + 24, y + 84, "13", 0xFFFFFF);
-  draw_string_8x8(x + 56, y + 84, "Team Meeting 11:00", 0xCBD5E1);
-
-  draw_string_8x8(x + 24, y + 116, "14", 0x94A3B8);
-  draw_string_8x8(x + 56, y + 116, "Project Deadline 3:00", 0xCBD5E1);
-
-  draw_string_8x8(x + 24, y + 148, "15", 0x94A3B8);
-  draw_string_8x8(x + 56, y + 148, "Review PRs", 0xCBD5E1);
+  if (!g_bi || g_bi->width < 640 || g_bi->height < 360) return;
+  uint32_t w = 280, x = g_bi->width - w - 24, y = 80;
+  blend_round_rect(x, y, w, 180, 12, 0x101B2C, 240);
+  draw_rect(x + 20, y + 20, 3, 18, 0x57D6C7);
+  draw_string_8x8(x + 32, y + 24, "VexOS", 0xF1F5F9);
+  draw_string_8x8(x + 20, y + 52, "Your workspace, ready.", 0x94A3B8);
+  draw_rect(x + 20, y + 76, w - 40, 1, 0x2A3B52);
+  const hw_profile_t *hw = hw_profile_get();
+  char buf[12];
+  shell_u32_to_dec(buf, (uint32_t)(hw->ram_usable_bytes / (1024ull * 1024ull)));
+  draw_string_8x8(x + 20, y + 96, "Memory", 0x94A3B8);
+  draw_string_8x8(x + 112, y + 96, buf, 0xE2EAF4);
+  draw_string_8x8(x + 192, y + 96, "MB", 0xE2EAF4);
+  draw_string_8x8(x + 20, y + 120, "Display", 0x94A3B8);
+  shell_u32_to_dec(buf, g_bi->width);
+  draw_string_8x8(x + 112, y + 120, buf, 0xE2EAF4);
+  draw_string_8x8(x + 160, y + 120, "x", 0x64748B);
+  shell_u32_to_dec(buf, g_bi->height);
+  draw_string_8x8(x + 176, y + 120, buf, 0xE2EAF4);
+  draw_string_8x8(x + 20, y + 152, "Open an app from the dock.", 0x57D6C7);
 }
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -1133,11 +1125,16 @@ static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
   if (y2 > g_bi->height)
     y2 = g_bi->height;
 
+  uint32_t start_x=x, start_y=y, end_x=x2, end_y=y2;
+  if (g_clip_enabled) {
+    if (start_x<g_clip_x) start_x=g_clip_x; if (start_y<g_clip_y) start_y=g_clip_y;
+    if (end_x>g_clip_x2) end_x=g_clip_x2; if (end_y>g_clip_y2) end_y=g_clip_y2;
+  }
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
 
-  for (uint32_t yy = y; yy < y2; yy++) {
+  for (uint32_t yy = start_y; yy < end_y; yy++) {
     uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
+    for (uint32_t xx = start_x; xx < end_x; xx++) {
       row[xx] = c;
     }
   }
@@ -1173,11 +1170,16 @@ static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
   if (y2 > g_bi->height)
     y2 = g_bi->height;
 
+  uint32_t start_x=x, start_y=y, end_x=x2, end_y=y2;
+  if (g_clip_enabled) {
+    if (start_x<g_clip_x) start_x=g_clip_x; if (start_y<g_clip_y) start_y=g_clip_y;
+    if (end_x>g_clip_x2) end_x=g_clip_x2; if (end_y>g_clip_y2) end_y=g_clip_y2;
+  }
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
+  for (uint32_t yy = start_y; yy < end_y; yy++) {
     uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = blend_rgb(row[xx], c, a);
+    for (uint32_t xx = start_x; xx < end_x; xx++) {
+      row[xx] = a==255 ? c : blend_rgb(row[xx], c, a);
     }
   }
 }
@@ -1203,10 +1205,15 @@ static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     y2 = g_bi->height;
 
   uint32_t rr = radius * radius;
+  uint32_t start_x=x, start_y=y, end_x=x2, end_y=y2;
+  if (g_clip_enabled) {
+    if (start_x<g_clip_x) start_x=g_clip_x; if (start_y<g_clip_y) start_y=g_clip_y;
+    if (end_x>g_clip_x2) end_x=g_clip_x2; if (end_y>g_clip_y2) end_y=g_clip_y2;
+  }
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
+  for (uint32_t yy = start_y; yy < end_y; yy++) {
     uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
+    for (uint32_t xx = start_x; xx < end_x; xx++) {
       uint32_t inside = 1;
 
       if (xx < x + radius && yy < y + radius) {
@@ -1228,7 +1235,7 @@ static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
       }
 
       if (inside) {
-        row[xx] = blend_rgb(row[xx], c, a);
+        row[xx] = a==255 ? c : blend_rgb(row[xx], c, a);
       }
     }
   }
@@ -1583,71 +1590,27 @@ static void shell_run_line(void) {
 }
 
 static void draw_background(void) {
-  if (!g_bi)
-    return;
-
+  if (!g_bi) return;
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  uint32_t h = g_bi->height ? g_bi->height : 1;
-  uint32_t w = g_bi->width;
-  uint32_t horizon = (h * 52u) / 100u;
-  if (horizon >= h)
-    horizon = h - 1;
-
+  uint32_t h = g_bi->height ? g_bi->height : 1, w = g_bi->width;
+  // Calm layered landscape. Generated once and cached on buffered desktops.
   for (uint32_t y = 0; y < h; y++) {
-    uint32_t *row = &dst[y * g_bi->pitch];
-    uint32_t r, g, b;
-    if (y < horizon) {
-      uint32_t t = (y * 255u) / (horizon ? horizon : 1);
-      r = 10 + (t * 18u) / 255u;
-      g = 14 + (t * 26u) / 255u;
-      b = 24 + (t * 60u) / 255u;
-    } else {
-      uint32_t t = ((y - horizon) * 255u) / ((h - horizon) ? (h - horizon) : 1);
-      r = 10 + (t * 10u) / 255u;
-      g = 30 + (t * 60u) / 255u;
-      b = 50 + (t * 80u) / 255u;
-    }
-    uint32_t base = (r << 16) | (g << 8) | b;
-    for (uint32_t x = 0; x < w; x++) {
-      row[x] = base;
-    }
+    uint32_t r = 10 + y * 4 / h, g = 17 + y * 17 / h, b = 30 + y * 24 / h;
+    uint32_t *row = dst + y * g_bi->pitch;
+    for (uint32_t x = 0; x < w; x++) row[x] = (r << 16) | (g << 8) | b;
   }
-
   for (uint32_t x = 0; x < w; x++) {
-    uint32_t y0 = horizon;
-    dst[y0 * g_bi->pitch + x] = 0xB0C8FF;
-  }
-
-  uint32_t star_count = 220;
-  for (uint32_t i = 0; i < star_count; i++) {
-    uint32_t r0 = shell_next_rand();
-    uint32_t sx = r0 % (w ? w : 1);
-    uint32_t sy = (shell_next_rand() % (horizon ? horizon : 1));
-    uint32_t c = 0xE8F0FF;
-    if ((r0 & 7u) == 0)
-      c = 0xFFFFFF;
-    put_px(sx, sy, c);
-  }
-
-  for (uint32_t i = 0; i < 3; i++) {
-    uint32_t cx = (w * (55u + i * 7u)) / 100u;
-    uint32_t cy = (h * (22u + i * 3u)) / 100u;
-    uint32_t rr = 140 - i * 30;
-    for (int32_t dy = -(int32_t)rr; dy <= (int32_t)rr; dy++) {
-      for (int32_t dx = -(int32_t)rr; dx <= (int32_t)rr; dx++) {
-        uint32_t dd = (uint32_t)(dx * dx + dy * dy);
-        if (dd <= (rr * rr)) {
-          uint32_t px = (uint32_t)((int32_t)cx + dx);
-          uint32_t py = (uint32_t)((int32_t)cy + dy);
-          if (px < w && py < horizon) {
-            uint32_t shade = 0xB0C8FF;
-            if (dd > (uint32_t)((rr * rr) * 7u / 10u))
-              shade = 0x6A88C8;
-            put_px(px, py, shade);
-          }
-        }
-      }
+    int64_t dx = (int64_t)x - (int64_t)w * 3 / 4;
+    uint32_t ridge = h * 57 / 100 + (uint32_t)(dx * dx / ((uint64_t)w * 5 + 1));
+    for (uint32_t y = ridge; y < h; y++) {
+      uint32_t t = (y - ridge) * 20 / h;
+      dst[y * g_bi->pitch + x] = ((19 + t) << 16) | ((48 + t) << 8) | (66 + t);
+    }
+    dx = (int64_t)x - (int64_t)w / 5;
+    ridge = h * 73 / 100 + (uint32_t)(dx * dx / ((uint64_t)w * 6 + 1));
+    for (uint32_t y = ridge; y < h; y++) {
+      uint32_t t = (y - ridge) * 24 / h;
+      dst[y * g_bi->pitch + x] = ((15 + t) << 16) | ((35 + t) << 8) | (49 + t);
     }
   }
 }
@@ -1775,7 +1738,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_bi = bootInfo;
   g_tick = 0;
   g_back = 0;
-  g_bg = 0;
+  g_bg = 0; g_clip_enabled=0;
   g_text_len = 0;
   g_start_open = 0;
   g_show_shell = 0;
@@ -1841,6 +1804,10 @@ void desktop_init(BootInfo *bootInfo) {
     }
   }
 
+  if (!g_back || !g_bg) {
+    kfree(g_back); kfree(g_bg);
+    g_back = NULL; g_bg = NULL;
+  }
   g_last_cursor_x = -1000;
   g_last_cursor_y = -1000;
   g_last_cursor_buttons = 0;
@@ -1894,6 +1861,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_setup_win.y = (int32_t)((g_bi->height - (uint32_t)g_setup_win.h) / 2u);
   if (g_setup_win.x < 16) g_setup_win.x = 16;
   if (g_setup_win.y < 16) g_setup_win.y = 16;
+  for(uint32_t i=0;i<APP_COUNT;i++) clamp_window(app_window((app_id_t)i));
   g_setup_open = 0; // Closed by default, user opens via shell or start menu
   g_setup_step = 0;
   g_setup_disk_ready = 0;
@@ -1917,21 +1885,7 @@ void desktop_init(BootInfo *bootInfo) {
     blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
     draw_desktop_icons();
     draw_widgets();
-    if (g_show_shell) {
-      draw_shell_window(&g_shell_win);
-    }
-    if (g_explorer_open) {
-      draw_explorer_window(&g_explorer_win);
-    }
-    if (g_viewer_open) {
-      draw_viewer_window(&g_viewer_win);
-    }
-    if (g_app_open[APP_NOTEPAD]) {
-      draw_notepad_window(&g_notepad_win);
-    }
-    if (g_setup_open) {
-      draw_setup_window(&g_setup_win);
-    }
+    draw_open_windows();
     draw_taskbar();
     draw_start_menu();
     {
@@ -1962,7 +1916,11 @@ void desktop_tick(void) {
   uint32_t pressed = (buttons) & ~prev_buttons;
   prev_buttons = buttons;
 
-  uint8_t ui_changed = 0;
+  uint8_t caret = (uint8_t)((Timer_Ticks() / 500) % 2 == 0);
+  uint8_t ui_changed = (g_show_shell && g_app_focus == APP_SHELL && caret != g_caret_visible);
+  g_caret_visible = caret;
+  if (taskbar_hover(p0.x, p0.y) != taskbar_hover(g_last_cursor_x, g_last_cursor_y)) ui_changed = 1;
+  if (g_start_open && (p0.x != g_last_cursor_x || p0.y != g_last_cursor_y)) ui_changed = 1;
 
   uint32_t kbd_budget = 32;
   while (kbd_budget--) {
@@ -2014,6 +1972,11 @@ void desktop_tick(void) {
     }
   }
 
+  int clicked_window = pointer_window(p0.x,p0.y);
+  if ((pressed&1u) && clicked_window>=0) {
+    if (g_app_focus!=(app_id_t)clicked_window) { g_app_focus=(app_id_t)clicked_window; ui_changed=1; }
+    g_shell_dragging=g_explorer_dragging=g_viewer_dragging=g_notepad_dragging=g_setup_dragging=0;
+  }
   // Click handling
   if (pressed & 1u) {
     uint32_t bar_h = 56;
@@ -2022,15 +1985,15 @@ void desktop_tick(void) {
     int32_t tb_y = (int32_t)g_bi->height - (int32_t)bar_h;
 
     // Start button hit
-    if (hit_test(p0.x, p0.y, 8, tb_y + 4, 72, (int32_t)bar_h - 8)) {
+    if (taskbar_hover(p0.x, p0.y) == 4) {
       g_start_open = (uint8_t)(g_start_open ? 0u : 1u);
       ui_changed = 1;
       g_shell_dragging = 0;
     } else if (g_start_open) {
       int32_t mx = 8;
-      int32_t mw = 160;
+      int32_t mw = 200;
       int32_t mh = 144;
-      int32_t my = tb_y - mh;
+      int32_t my = tb_y > mh + 8 ? tb_y - mh - 8 : 0;
       if (hit_test(p0.x, p0.y, mx, my, mw, mh)) {
         int32_t ry = p0.y - my;
         if (ry >= 8 && ry < 24) {
@@ -2082,22 +2045,8 @@ void desktop_tick(void) {
 
     // Taskbar dock icons: click to focus/open
     {
-      uint32_t sy = (uint32_t)tb_y + 6u;
-      uint32_t sh = bar_h - 12u;
-
-      uint32_t dock_w = 420;
-      if (dock_w + 32 > g_bi->width)
-        dock_w = g_bi->width > 32 ? (g_bi->width - 32) : 1;
-      uint32_t dock_x = (g_bi->width - dock_w) / 2u;
-
-      uint32_t icon = 40;
-      uint32_t gap = 10;
-      uint32_t ix = dock_x + 16;
-      uint32_t iy = sy + ((sh > icon) ? ((sh - icon) / 2u) : 0u);
-
       for (uint32_t i = 0; i < 4; i++) {
-        if (hit_test(p0.x, p0.y, (int32_t)ix, (int32_t)iy, (int32_t)icon,
-                     (int32_t)icon)) {
+        if (taskbar_hover(p0.x, p0.y) == (int)i) {
           if (i == 0) {
             g_show_shell = 1;
             g_app_open[APP_SHELL] = 1;
@@ -2121,34 +2070,33 @@ void desktop_tick(void) {
           ui_changed = 1;
           break;
         }
-        ix += icon + gap;
-        if (ix + icon + 16 > dock_x + dock_w)
-          break;
+
       }
     }
 
     // Explorer window interactions
-    if (g_explorer_open) {
+    if (g_explorer_open && clicked_window==APP_EXPLORER) {
       int32_t wx = g_explorer_win.x;
       int32_t wy = g_explorer_win.y;
       int32_t ww = g_explorer_win.w;
       int32_t wh = g_explorer_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 22, wy + 4, 18, 16)) {
         g_explorer_open = 0;
+        g_app_open[APP_EXPLORER] = 0;
         g_explorer_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 42, wy + 4, 16, 16)) {
         // scroll up
         if (g_explorer_scroll)
           g_explorer_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 62, wy + 4, 16, 16)) {
         // scroll down
         g_explorer_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 24)) {
         g_explorer_dragging = 1;
         g_explorer_drag_off_x = p0.x - wx;
         g_explorer_drag_off_y = p0.y - wy;
@@ -2207,23 +2155,24 @@ void desktop_tick(void) {
       }
     }
 
-    if (g_viewer_open) {
+    if (g_viewer_open && clicked_window==APP_VIEWER) {
       int32_t wx = g_viewer_win.x;
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
       // Close
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 22, wy + 4, 18, 16)) {
         g_viewer_open = 0;
+        g_app_open[APP_VIEWER] = 0;
         g_viewer_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 42, wy + 4, 16, 16)) {
         if (g_viewer_scroll)
           g_viewer_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 62, wy + 4, 16, 16)) {
         g_viewer_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 24)) {
         g_viewer_dragging = 1;
         g_viewer_drag_off_x = p0.x - wx;
         g_viewer_drag_off_y = p0.y - wy;
@@ -2234,17 +2183,17 @@ void desktop_tick(void) {
     }
 
     // Notepad interactions
-    if (g_app_open[APP_NOTEPAD]) {
+    if (g_app_open[APP_NOTEPAD] && clicked_window==APP_NOTEPAD) {
       int32_t wx = g_notepad_win.x;
       int32_t wy = g_notepad_win.y;
       int32_t ww = g_notepad_win.w;
       int32_t wh = g_notepad_win.h;
 
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 22, wy + 4, 18, 16)) {
         g_app_open[APP_NOTEPAD] = 0;
         g_notepad_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 62, wy + 2, 18, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 82, wy + 4, 16, 16)) {
         // Save
         if (simplefs_init()) {
           if (simplefs_write_file(g_notepad_name, g_notepad_text, g_notepad_text_len)) {
@@ -2256,14 +2205,14 @@ void desktop_tick(void) {
           shell_append("notepad: fs init failed\n> ");
         }
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 40, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 42, wy + 4, 16, 16)) {
         if (g_notepad_scroll)
           g_notepad_scroll--;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 30, wy + 2, 8, 12)) {
+      } else if (hit_test(p0.x, p0.y, wx + ww - 62, wy + 4, 16, 16)) {
         g_notepad_scroll++;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 24)) {
         g_notepad_dragging = 1;
         g_notepad_drag_off_x = p0.x - wx;
         g_notepad_drag_off_y = p0.y - wy;
@@ -2277,20 +2226,20 @@ void desktop_tick(void) {
     }
 
     // Setup Wizard interactions
-    if (g_setup_open) {
+    if (g_setup_open && clicked_window==APP_SETUP) {
       int32_t wx = g_setup_win.x;
       int32_t wy = g_setup_win.y;
       int32_t ww = g_setup_win.w;
       int32_t wh = g_setup_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 22, wy + 4, 18, 16)) {
         g_setup_open = 0;
         g_setup_dragging = 0;
         ui_changed = 1;
       }
       // Title bar drag
-      else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      else if (hit_test(p0.x, p0.y, wx, wy, ww, 24)) {
         g_setup_dragging = 1;
         g_setup_drag_off_x = p0.x - wx;
         g_setup_drag_off_y = p0.y - wy;
@@ -2337,18 +2286,19 @@ void desktop_tick(void) {
 
   // Window manager interactions (shell window)
   if (pressed & 1u) {
-    if (g_show_shell) {
+    if (g_show_shell && clicked_window==APP_SHELL) {
       int32_t wx = g_shell_win.x;
       int32_t wy = g_shell_win.y;
       int32_t ww = g_shell_win.w;
       int32_t wh = g_shell_win.h;
 
       // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 20, wy + 2, 16, 12)) {
+      if (hit_test(p0.x, p0.y, wx + ww - 22, wy + 4, 18, 16)) {
         g_show_shell = 0;
+        g_app_open[APP_SHELL] = 0;
         g_shell_dragging = 0;
         ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 16)) {
+      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 24)) {
         g_shell_dragging = 1;
         g_shell_drag_off_x = p0.x - wx;
         g_shell_drag_off_y = p0.y - wy;
@@ -2365,34 +2315,15 @@ void desktop_tick(void) {
     g_setup_dragging = 0;
   }
 
-  if (g_shell_dragging && (p0.dx || p0.dy)) {
-    g_shell_win.x = p0.x - g_shell_drag_off_x;
-    g_shell_win.y = p0.y - g_shell_drag_off_y;
-    ui_changed = 1;
-  }
-
-  if (g_explorer_dragging && (p0.dx || p0.dy)) {
-    g_explorer_win.x = p0.x - g_explorer_drag_off_x;
-    g_explorer_win.y = p0.y - g_explorer_drag_off_y;
-    ui_changed = 1;
-  }
-
-  if (g_viewer_dragging && (p0.dx || p0.dy)) {
-    g_viewer_win.x = p0.x - g_viewer_drag_off_x;
-    g_viewer_win.y = p0.y - g_viewer_drag_off_y;
-    ui_changed = 1;
-  }
-
-  if (g_notepad_dragging && (p0.dx || p0.dy)) {
-    g_notepad_win.x = p0.x - g_notepad_drag_off_x;
-    g_notepad_win.y = p0.y - g_notepad_drag_off_y;
-    ui_changed = 1;
-  }
-
-  if (g_setup_dragging && (p0.dx || p0.dy)) {
-    g_setup_win.x = p0.x - g_setup_drag_off_x;
-    g_setup_win.y = p0.y - g_setup_drag_off_y;
-    ui_changed = 1;
+  uint8_t full_redraw=ui_changed;
+  wm_window_t damage={0}; uint8_t damage_valid=0;
+  if (g_shell_dragging) ui_changed |= move_window(&g_shell_win, p0.x - g_shell_drag_off_x, p0.y - g_shell_drag_off_y, &damage, &damage_valid);
+  if (g_explorer_dragging) ui_changed |= move_window(&g_explorer_win, p0.x - g_explorer_drag_off_x, p0.y - g_explorer_drag_off_y, &damage, &damage_valid);
+  if (g_viewer_dragging) ui_changed |= move_window(&g_viewer_win, p0.x - g_viewer_drag_off_x, p0.y - g_viewer_drag_off_y, &damage, &damage_valid);
+  if (g_notepad_dragging) ui_changed |= move_window(&g_notepad_win, p0.x - g_notepad_drag_off_x, p0.y - g_notepad_drag_off_y, &damage, &damage_valid);
+  if (g_setup_dragging) ui_changed |= move_window(&g_setup_win, p0.x - g_setup_drag_off_x, p0.y - g_setup_drag_off_y, &damage, &damage_valid);
+  if (!app_visible(g_app_focus)) {
+    for(int i=APP_COUNT-1;i>=0;i--) if(app_visible((app_id_t)i)) { g_app_focus=(app_id_t)i; break; }
   }
 
   if (!g_back || !g_bg) {
@@ -2400,21 +2331,7 @@ void desktop_tick(void) {
     draw_background();
     draw_desktop_icons();
     draw_widgets();
-    if (g_show_shell) {
-      draw_shell_window(&g_shell_win);
-    }
-    if (g_explorer_open) {
-      draw_explorer_window(&g_explorer_win);
-    }
-    if (g_viewer_open) {
-      draw_viewer_window(&g_viewer_win);
-    }
-    if (g_app_open[APP_NOTEPAD]) {
-      draw_notepad_window(&g_notepad_win);
-    }
-    if (g_setup_open) {
-      draw_setup_window(&g_setup_win);
-    }
+    draw_open_windows();
     draw_taskbar();
     draw_start_menu();
     // Draw cursor directly to front buffer.
@@ -2451,39 +2368,41 @@ void desktop_tick(void) {
       g_desktop_dirty = 1;
     }
 
-    if (g_desktop_dirty || g_tick < 2) {
+    uint8_t scene_changed = g_desktop_dirty || g_tick < 2;
+    uint8_t partial=scene_changed && damage_valid && !full_redraw && g_tick>=2;
+    if (scene_changed) {
+      if (partial) {
+        g_clip_enabled=1; g_clip_x=damage.x; g_clip_y=damage.y;
+        g_clip_x2=damage.x+damage.w; g_clip_y2=damage.y+damage.h;
+      }
       blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
-      if (g_show_shell) {
-        draw_shell_window(&g_shell_win);
-      }
-      if (g_explorer_open) {
-        draw_explorer_window(&g_explorer_win);
-      }
-      if (g_viewer_open) {
-        draw_viewer_window(&g_viewer_win);
-      }
-      if (g_app_open[APP_NOTEPAD]) {
-        draw_notepad_window(&g_notepad_win);
-      }
-      if (g_setup_open) {
-        draw_setup_window(&g_setup_win);
-      }
+      draw_open_windows();
       draw_taskbar();
       draw_start_menu();
+      g_clip_enabled=0;
       g_desktop_dirty = 0;
     }
 
     input_pointer_state_t p = input_pointer_get();
 
     // Only copy to hardware framebuffer and redraw cursor if mouse moved, buttons clicked, or UI changed.
-    if (g_desktop_dirty || ui_changed ||
+    if (scene_changed ||
         p.x != g_last_cursor_x || p.y != g_last_cursor_y || p.buttons != g_last_cursor_buttons ||
         g_tick < 2) {
       
       // Restore clean desktop under the old cursor.
-      blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+      if (scene_changed) {
+        if (partial) blit_rect(g_bi->framebuffer,g_back,damage.x,damage.y,damage.w,damage.h);
+        else blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+      }
+      if (!scene_changed || partial) {
+        // Includes the 1px outline and the optional drag marker at +18.
+        int32_t x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
+        int32_t y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
+        blit_rect(g_bi->framebuffer, g_back, (uint32_t)x, (uint32_t)y, 26, 26);
+      }
 
       // Draw cursor directly on the front framebuffer to avoid dirtiness.
       uint32_t *saved_back = g_back;

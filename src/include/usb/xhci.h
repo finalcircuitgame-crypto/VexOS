@@ -21,7 +21,7 @@ typedef struct {
     uint32_t dboff;         // Doorbell Offset
     uint32_t rtsoff;        // Runtime Register Space Offset
     uint32_t hcc_params2;   // Capability Parameters 2
-} __attribute__((packed)) xhci_cap_regs_t;
+} __attribute__((packed, aligned(4))) xhci_cap_regs_t;
 
 // --- Operational Registers (Section 5.4) ---
 typedef struct {
@@ -34,7 +34,7 @@ typedef struct {
     uint8_t  reserved2[16];
     uint64_t dcbaap;        // Device Context Base Address Array Pointer
     uint32_t config;        // Configure
-} __attribute__((packed)) xhci_op_regs_t;
+} __attribute__((packed, aligned(4))) xhci_op_regs_t;
 
 // --- Runtime Registers (Section 5.5) ---
 typedef struct {
@@ -44,20 +44,20 @@ typedef struct {
     uint32_t reserved;
     uint64_t erstba;        // Event Ring Segment Table Base Address
     uint64_t erdp;          // Event Ring Dequeue Pointer
-} __attribute__((packed)) xhci_interrupter_regs_t;
+} __attribute__((packed, aligned(4))) xhci_interrupter_regs_t;
 
 typedef struct {
     uint32_t mfindex;       // Microframe Index
     uint8_t  reserved[28];
     xhci_interrupter_regs_t interrupters[1024];
-} __attribute__((packed)) xhci_runtime_regs_t;
+} __attribute__((packed, aligned(4))) xhci_runtime_regs_t;
 
 // --- TRB (Transfer Request Block) Structure (Section 6.4) ---
 typedef struct {
     uint64_t data;
     uint32_t status;
     uint32_t control;
-} __attribute__((packed)) xhci_trb_t;
+} __attribute__((packed, aligned(16))) xhci_trb_t;
 
 // TRB Types
 #define TRB_TYPE_NORMAL             1

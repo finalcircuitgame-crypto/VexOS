@@ -2,6 +2,10 @@
 
 set -e
 
+# Resolve images/builds relative to this script, regardless of caller cwd.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "Launching VexOS from $(pwd)"
+
 if ! make all; then
     echo "Build failed; not launching QEMU."
     exit 1
@@ -144,7 +148,7 @@ if [ ! -f build/OVMF_VARS_4M.fd ]; then
 fi
 
 qemu-system-x86_64 \
-    -machine q35 \
+    -machine pc \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
     -drive format=raw,file=dist/tiny64.img \

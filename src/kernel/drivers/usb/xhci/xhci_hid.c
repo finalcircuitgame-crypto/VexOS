@@ -216,6 +216,7 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   }
 
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) return;
   for (uint32_t i = 0; i < 4096; i++) {
     buf[i] = 0;
   }
@@ -228,7 +229,7 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   setup |= ((uint64_t)dev->hid_report_desc_len) << 48;
 
   if (!xhci_ep0_control_in(dev, setup, buf, dev->hid_report_desc_len)) {
-    PMM_FreePage(buf);
+    if (!dev->ep0_failed) PMM_FreePage(buf);
     return;
   }
 
@@ -237,18 +238,12 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
 }
 
 static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb) {
-  dev->intr_ring[dev->intr_index] = *trb;
-  dev->intr_ring[dev->intr_index].control &= ~1u;
-  dev->intr_ring[dev->intr_index].control |= (uint32_t)(dev->intr_cycle & 1u);
-
-  dev->intr_index++;
-  if (dev->intr_index == 255) {
-    dev->intr_index = 0;
-    dev->intr_cycle ^= 1;
-  }
+  xhci_ring_enqueue(dev->intr_ring, &dev->intr_index, &dev->intr_cycle, trb);
 }
 
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
+  if (dev->intr_mps > (dev->speed_code==2 ? 8u : (dev->speed_code==1 ? 64u : 1024u)) ||
+      dev->intr_burst > (dev->speed_code>=4 ? 15u : 2u) || dev->intr_esit>4096) return 0;
   if (dev->intr_epaddr == 0 || dev->intr_mps == 0) {
     serial_print("[xHCI] No interrupt IN endpoint found; skipping HID polling\n");
     return 0;
@@ -262,10 +257,12 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   const uint32_t ctx_index = dci + 1;
 
   dev->intr_ring = xhci_alloc_tr_ring();
+  if (!dev->intr_ring) return 0;
   dev->intr_index = 0;
   dev->intr_cycle = 1;
 
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) return 0;
   for (uint32_t i = 0; i < 4096; i++) {
     input_ctx[i] = 0;
   }
@@ -318,7 +315,7 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
       (xhci_ep_ctx_32_t *)(input_ctx + (ctx_index * g_ctx_size));
 
   ep->dword1 = ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16) | (0u << 8) |
-               ((7u & 0x7u) << 3) | 3u;
+               ((7u & 0x7u) << 3) | (3u << 1) | ((uint32_t)dev->intr_burst<<8);
 
   uint64_t trdp = (uint64_t)(uintptr_t)dev->intr_ring;
   trdp &= ~0xFULL;
@@ -326,9 +323,15 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   ep->tr_deq_lo = (uint32_t)(trdp & 0xFFFFFFFFu);
   ep->tr_deq_hi = (uint32_t)((trdp >> 32) & 0xFFFFFFFFu);
 
-  uint32_t interval = dev->intr_interval;
-  ep->dword0 = (interval & 0xFFu) << 16;
-  ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
+  uint32_t interval = xhci_interval(dev->speed_code, dev->intr_interval);
+  if (interval == 0xffffffffu || dev->intr_mps > 4096) return 0;
+  xhci_log_device(dev,"Configure interrupt IN");
+  serial_print(" dci="); xhci_print_u32_dec(dci);
+  serial_print(" mps="); xhci_print_u32_dec(dev->intr_mps);
+  serial_print(" descriptor_interval="); xhci_print_u32_dec(dev->intr_interval);
+  serial_print(" xhci_interval="); xhci_print_u32_dec(interval); serial_print("\n");
+  ep->dword0 = ((interval & 0xFFu) << 16) | ((uint32_t)dev->intr_mult<<8);
+  ep->dword4 = dev->intr_mps | ((dev->intr_esit ? dev->intr_esit : dev->intr_mps)<<16);
 
   xhci_trb_t cmd;
   cmd.data = (uint64_t)(uintptr_t)input_ctx;
@@ -352,7 +355,8 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   xhci_print_u32_dec(evt_slot);
   serial_print("\n");
 
-  return (cc == 1);
+  PMM_FreePage(input_ctx);
+  return (cc == 1 && evt_slot == dev->slot_id);
 }
 
 int xhci_hid_set_protocol_boot(xhci_device_state_t *dev) {
@@ -383,12 +387,13 @@ int xhci_hid_set_idle(xhci_device_state_t *dev) {
 }
 
 void xhci_hid_start_polling(xhci_device_state_t *dev) {
-  if (!dev->intr_ring) {
+  if (!dev->intr_ring || dev->intr_pending || dev->intr_failed) {
     return;
   }
 
   if (!dev->intr_buf) {
     dev->intr_buf = (uint8_t *)PMM_AllocatePage();
+    if (!dev->intr_buf) { dev->intr_failed=1; return; }
     for (uint32_t i = 0; i < 4096; i++) {
       dev->intr_buf[i] = 0;
     }
@@ -404,5 +409,6 @@ void xhci_hid_start_polling(xhci_device_state_t *dev) {
   trb.control = make_trb_control(TRB_TYPE_NORMAL, dev->intr_cycle) | (1u << 5) |
                 (1u << 2);
   xhci_intr_ring_push(dev, &trb);
+  dev->intr_pending=1;
   xhci_ring_doorbell_ep(dev->slot_id, dci);
 }

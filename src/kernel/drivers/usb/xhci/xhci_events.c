@@ -50,103 +50,104 @@ void xhci_event_ring_update_erdp(void) {
   runtime_regs->interrupters[0].erdp = next | (1ULL << 3);
 }
 
+static void dispatch_event(const xhci_trb_t *evt);
 int xhci_poll_event(xhci_trb_t *out) {
-  xhci_trb_t trb = event_ring[event_ring_index];
-
-  if ((trb.control & 1u) != (uint32_t)event_ring_cycle) {
-    return 0;
-  }
-
-  *out = trb;
-
-  event_ring_index++;
-  if (event_ring_index >= 256) {
-    event_ring_index = 0;
-    event_ring_cycle ^= 1;
-  }
-
+  if (!event_ring || !runtime_regs) return 0;
+  volatile xhci_trb_t *src = &event_ring[event_ring_index];
+  uint32_t control = src->control;
+  if ((control & 1u) != event_ring_cycle) return 0;
+  __asm__ volatile("lfence" ::: "memory");
+  out->control = control; out->data = src->data; out->status = src->status;
+  if (++event_ring_index >= 256) { event_ring_index=0; event_ring_cycle^=1; }
   xhci_event_ring_update_erdp();
+  runtime_regs->interrupters[0].iman = 1u; /* IP W1C, interrupts remain disabled */
   return 1;
 }
-
 int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
-  for (uint32_t spins = 0; spins < 5000000; spins++) {
+  uint64_t expected = xhci_last_command, start = xhci_now_ms();
+  for (uint32_t spins=0; !xhci_deadline(start,1000,spins); spins++) {
     xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      continue;
-    }
-
-    if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
-      if (out_slot_id) {
-        *out_slot_id = trb_slot_id(evt.control);
-      }
-      if (out_cc) {
-        *out_cc = trb_cc(evt.status);
-      }
+    if (!xhci_poll_event(&evt)) { __asm__ volatile("pause"); continue; }
+    if (trb_type(evt.control)==TRB_TYPE_COMMAND_COMPLETION && (evt.data & ~15ull)==expected) {
+      uint32_t cc=trb_cc(evt.status), slot=trb_slot_id(evt.control);
+      serial_print("[xHCI] Command completion type=");
+      xhci_print_u32_dec(trb_type(((xhci_trb_t *)expected)->control));
+      serial_print(" slot="); xhci_print_u32_dec(slot);
+      serial_print(" cc="); xhci_print_u32_dec(cc); serial_print("\n");
+      if (out_slot_id) *out_slot_id=slot;
+      if (out_cc) *out_cc=cc;
       return 1;
     }
+    dispatch_event(&evt);
   }
+  serial_print("[xHCI] Command timeout type=");
+  xhci_print_u32_dec(trb_type(((xhci_trb_t *)expected)->control));
+  serial_print("; controller stopped to prevent stale command reuse\n");
+  op_regs->usb_cmd &= ~USB_CMD_RS;
+  xhci_running=0;
   return 0;
 }
-
 int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
-  uint32_t seen_other = 0;
-  for (uint32_t spins = 0; spins < 50000000; spins++) {
+  xhci_device_state_t *dev = &g_devs[slot_id]; uint64_t start=xhci_now_ms();
+  for (uint32_t spins=0; !xhci_deadline(start,1000,spins); spins++) {
     xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      continue;
-    }
-
-    if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT) {
-      uint32_t cc = trb_cc(evt.status);
-      uint32_t eslot = trb_slot_id(evt.control);
-      if (eslot == slot_id) {
-        if (out_cc) {
-          *out_cc = cc;
-        }
+    if (!xhci_poll_event(&evt)) { __asm__ volatile("pause"); continue; }
+    uint32_t dci=(evt.control>>16)&31;
+    uint64_t ptr=evt.data & ~15ull;
+    if (trb_type(evt.control)==TRB_TYPE_TRANSFER_EVENT && trb_slot_id(evt.control)==slot_id && dci==1 &&
+        (ptr==dev->ep0_setup_trb || ptr==dev->ep0_data_trb || ptr==dev->ep0_status_trb)) {
+      uint32_t cc=trb_cc(evt.status), remaining=evt.status & 0xffffff;
+      xhci_log_device(dev,"EP0 completion"); serial_print(" dci=1 cc="); xhci_print_u32_dec(cc);
+      serial_print(" residual="); xhci_print_u32_dec(remaining); serial_print(" trb_low="); xhci_print_hex32((uint32_t)ptr); serial_print("\n");
+      if (cc==13 && ptr==dev->ep0_data_trb) {
+        if (remaining>dev->control_length) { if(out_cc)*out_cc=2; return 1; }
+        dev->control_length-=remaining;
+        continue; /* Short Data stage is not completion of the control request. */
+      }
+      if (cc!=1 || ptr==dev->ep0_status_trb) {
+        if (out_cc) *out_cc=cc;
         return 1;
       }
-
-      (void)seen_other;
-    }
-  }
-  return 0;
-}
-
-void xhci_poll_events() {
-  if (!event_ring) {
-    return;
-  }
-
-  while (1) {
-    xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      break;
-    }
-
-    if (trb_type(evt.control) != TRB_TYPE_TRANSFER_EVENT) {
       continue;
     }
-
+    dispatch_event(&evt); /* Never lose HID input or port changes during enumeration. */
+  }
+  xhci_log_device(dev,"EP0 timeout"); serial_print(" dci=1\n");
+  return 0;
+}
+void xhci_poll_events(void) {
+  if (!xhci_running) return;
+  xhci_trb_t evt;
+  for (uint32_t budget=0; budget<256 && xhci_poll_event(&evt); budget++) dispatch_event(&evt);
+  xhci_service_ports();
+}
+static void dispatch_event(const xhci_trb_t *event) {
+  xhci_trb_t evt=*event;
+  if (trb_type(evt.control)==TRB_TYPE_PORT_STATUS_CHANGE) {
+    uint32_t port=(uint32_t)(evt.data>>24)&255;
+    serial_print("[xHCI] Port Status Change Event port="); xhci_print_u32_dec(port); serial_print("\n");
+    xhci_note_port_event(port); return;
+  }
+  if (trb_type(evt.control)!=TRB_TYPE_TRANSFER_EVENT) return;
     uint32_t cc = trb_cc(evt.status);
     uint32_t slot_id = trb_slot_id(evt.control);
     uint32_t ep_id = (evt.control >> 16) & 0x1Fu;
 
     if (slot_id == 0 || slot_id >= 256) {
-      continue;
+      return;
     }
 
     xhci_device_state_t *dev = &g_devs[slot_id];
     if (dev->slot_id != slot_id) {
-      continue;
+      return;
     }
 
     if (dev->intr_dci == 0) {
-      continue;
+      return;
     }
 
     if (ep_id != (uint32_t)dev->intr_dci) {
-      continue;
+      return;
     }
 
     uint32_t trb_len_remaining = evt.status & 0xFFFFFFu;
@@ -155,8 +156,24 @@ void xhci_poll_events() {
       xfer_len = (uint32_t)dev->intr_mps - trb_len_remaining;
     }
 
+    dev->intr_pending = 0;
+    if (cc != 1 && cc != 13) {
+      xhci_log_device(dev,"HID endpoint stopped"); serial_print(" dci="); xhci_print_u32_dec(ep_id);
+      serial_print(" cc="); xhci_print_u32_dec(cc); serial_print("\n");
+      dev->intr_failed=1; return;
+    }
+    if (++dev->reports <= 4 || dev->reports % 256 == 0) {
+      xhci_log_device(dev,"HID report"); serial_print(" dci="); xhci_print_u32_dec(ep_id);
+      serial_print(" bytes="); xhci_print_u32_dec(xfer_len);
+      serial_print(" count="); xhci_print_u32_dec(dev->reports); serial_print("\n");
+    }
     if ((cc == 1 || cc == 13) && dev->intr_buf) {
       if (dev->hid_mouse_valid) {
+          uint32_t base = dev->hid_has_report_id ? 8 : 0;
+          if (base + dev->hid_x_bitoff + dev->hid_x_bits > xfer_len*8 ||
+              base + dev->hid_y_bitoff + dev->hid_y_bits > xfer_len*8 ||
+              base + dev->hid_buttons_bitoff + dev->hid_buttons_bits > xfer_len*8 ||
+              base + dev->hid_wheel_bitoff + dev->hid_wheel_bits > xfer_len*8) goto rearm;
           const uint8_t *r = dev->intr_buf;
           uint32_t base_bit = 0;
           if (dev->hid_has_report_id) {
@@ -193,6 +210,7 @@ void xhci_poll_events() {
             wheel = dev->hid_wheel_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
           }
 
+          (void)wheel;
           if (dev->hid_x_is_relative && dev->hid_y_is_relative) {
             input_pointer_add_rel(dx, dy, buttons);
           } else {
@@ -214,12 +232,12 @@ void xhci_poll_events() {
             (void)ddx;
             (void)ddy;
           }
-      } else if (dev->hid_proto == 2) {
+      } else if (dev->hid_proto == 2 && xfer_len >= 3) {
           uint8_t buttons = dev->intr_buf[0];
           int8_t dx = (int8_t)dev->intr_buf[1];
           int8_t dy = (int8_t)dev->intr_buf[2];
           int8_t wheel = 0;
-          if (dev->intr_mps >= 4) {
+          if (xfer_len >= 4) {
             wheel = (int8_t)dev->intr_buf[3];
           }
 
@@ -257,5 +275,4 @@ rearm:
     if (dev->intr_ring && dev->intr_mps) {
       xhci_hid_start_polling(dev);
     }
-  }
 }

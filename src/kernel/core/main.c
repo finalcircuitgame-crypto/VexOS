@@ -79,7 +79,7 @@ void taskB() {
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
   serial_print("[KERNEL] Entered kernel_main\n");
-  serial_print("[KERNEL] BUILD: xhci-portscan-v2\n");
+  serial_print("[KERNEL] BUILD: vexos-xhci-usb2-desktop-v4\n");
   // ... Console, PMM, VMM init ...
   serial_print("[KERNEL] Calling ConsoleInit...\n");
   ConsoleInit(bootInfo);
@@ -91,7 +91,7 @@ void kernel_main(BootInfo *bootInfo) {
     fb[i] = 0x001122;
   }
 
-  PrintString("Tiny64 Kernel Loaded!\n", 0xFFFFFF);
+  PrintString("VexOS Kernel Loaded!\n", 0xFFFFFF);
   serial_print("[KERNEL] Setting up GDT...\n");
   SetupGDT();
   // Setup TSS/IST so hardware IRQs can run on a dedicated interrupt stack.
@@ -232,7 +232,7 @@ void kernel_main(BootInfo *bootInfo) {
   uint64_t fb_bytes =
       (uint64_t)bootInfo->pitch * (uint64_t)bootInfo->height * 4u;
   uint64_t slack_bytes = hw_tuning_get()->heap_slack_bytes;
-  uint64_t heap_bytes = fb_bytes + slack_bytes;
+  uint64_t heap_bytes = 2 * fb_bytes + slack_bytes;
   if (heap_bytes < (8ull * 1024ull * 1024ull)) {
     heap_bytes = (8ull * 1024ull * 1024ull);
   }
@@ -359,7 +359,9 @@ void kernel_main(BootInfo *bootInfo) {
       uint64_t wait_ticks = frame_delay - elapsed;
       uint64_t target_ticks = current_ticks + wait_ticks;
       while (Timer_Ticks() < target_ticks) {
-        __asm__ volatile("pause");
+        // IRQ0 wakes us every millisecond; poll USB on each wake.
+        __asm__ volatile("hlt");
+        xhci_poll_events();
       }
     }
     last_frame_ticks = Timer_Ticks();

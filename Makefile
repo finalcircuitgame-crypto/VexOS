@@ -27,13 +27,13 @@ CFLAGS_EFI = -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -I$(EFI_INC)
 LDFLAGS_EFI = -nostdlib -znocombreloc -T $(EFI_LIB)/elf_x86_64_efi.lds -shared -Bsymbolic -L$(EFI_LIB) $(EFI_LIB)/crt0-efi-x86_64.o
 
 # Kernel Flags
-CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
+CFLAGS_KERNEL = -mgeneral-regs-only -fno-builtin -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
 LDFLAGS_KERNEL = -nostdlib -T $(KERNELDIR)/linker.ld -z max-page-size=0x1000
 
 # Targets
 BOOTLOADER_EFI = $(DISTDIR)/BOOTX64.EFI
 KERNEL_ELF = $(DISTDIR)/kernel.elf
-DISK_IMG = $(DISTDIR)/tiny64.img
+DISK_IMG = $(DISTDIR)/vexOS.img
 STORAGE_IMG = $(DISTDIR)/storage.img
 
 # Kernel Objects
@@ -67,14 +67,18 @@ $(FONT_OBJ): CGA.F08
 $(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ)
 	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) -o $@
 
+# Optimize CPU-only rendering/allocation code. Drivers retain their existing
+# optimization level until their MMIO and DMA accesses are audited.
+$(OBJDIR)/core/desktop.o $(OBJDIR)/drivers/console.o $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
+
 # Pattern rules for nested kernel directories
-$(OBJDIR)/%.o: $(KERNELDIR)/%.c
+$(OBJDIR)/%.o: $(KERNELDIR)/%.c Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_KERNEL) -c $< -o $@
+	$(CC) $(CFLAGS_KERNEL) -MMD -MP -c $< -o $@
 
 $(OBJDIR)/%_asm.o: $(KERNELDIR)/%.s
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_KERNEL) -c $< -o $@
+	$(CC) $(CFLAGS_KERNEL) -MMD -MP -c $< -o $@
 
 # Create Disk Image
 $(DISK_IMG): $(BOOTLOADER_EFI) $(KERNEL_ELF)
@@ -95,3 +99,5 @@ $(STORAGE_IMG):
 
 clean:
 	rm -rf $(DISTDIR)/*
+# Track header changes so a successful make cannot silently reuse old headers.
+-include $(KERNEL_OBJS:.o=.d)

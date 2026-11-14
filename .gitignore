@@ -1,0 +1,7 @@
+
+/build/ui-review/
+/build/ui-build.log
+/build/ui-review-results.log
+/build/ui_review.py
+/build/ui-image-build.log
+/build/xhci-*
