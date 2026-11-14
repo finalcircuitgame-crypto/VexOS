@@ -135,7 +135,7 @@ jobs:
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
-            if grep -Fq "[KERNEL] Starting main loop" serial.log 2>/dev/null; then
+            if grep -Fq "[KERNEL] sti" serial.log 2>/dev/null; then
               break
             fi
             if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -166,7 +166,7 @@ jobs:
             "[KERNEL] Desktop initialized" \
             "[CI] Pointer scaling/clamping and keyboard queues passed" \
             "[CI] Window manager visibility/focus/z-order/geometry passed" \
-            "[KERNEL] Starting main loop"; do
+            "[KERNEL] sti"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
               cat serial.log || true
