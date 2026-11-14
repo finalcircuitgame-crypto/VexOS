@@ -1,46 +1,60 @@
 # VexOS
 
-VexOS is a small educational x86_64 operating system project that boots via an EFI bootloader and runs a minimal kernel with a simple desktop environment. It includes basic kernel subsystems (PMM, VMM, heap, tasking), PCI/xHCI support, a SimpleFS persistent storage image, and a fullscreen setup wizard.
+VexOS is an experimental educational x86-64 operating system. It boots through UEFI, enters a freestanding kernel, and provides a framebuffer desktop with a small set of built-in applications. It is an evolving prototype, not a general-purpose replacement for Windows or Linux.
 
-## Key features
-- EFI bootloader (src/boot) that loads kernel.elf and passes a BootInfo struct
-- Kernel core (src/kernel/core): framebuffer console, PMM (physical memory manager), VMM (virtual memory), heap, PCI enumeration and drivers (xhci), simple desktop UI and setup wizard
-- SimpleFS persistent storage image (dist/storage.img) and image embedding helper in run.sh
+## Current capabilities
+
+- UEFI bootloader and x86-64 kernel with physical/virtual memory management, heap allocation, interrupts, and task scheduling.
+- PCI enumeration and an xHCI USB HID path for keyboard and absolute/relative pointer input.
+- A framebuffer desktop with a responsive Start menu, Terminal, Files, Notepad, image Viewer, and Setup Wizard.
+- Shared framebuffer drawing primitives in `src/kernel/core/gfx.c`, with clipped fills, alpha blending, rounded rectangles, bitmap text, and blitting.
+- A small window manager for open/hidden state, focus, z-order, display-bound movement, and bounded mouse resizing.
+- SimpleFS storage backed by a separate raw disk image.
+- Text, PNG, and baseline JPEG file previews. Progressive JPEG is not supported yet.
+
+The desktop and hardware drivers are still under active development. USB disconnect/reconnect recovery, a generalized block-device layer/AHCI backend, a larger font system, centralized event dispatch, and full minimize/maximize/restore behavior remain future work. See [VexOS 2.0 engineering roadmap](VEXOS_2_0_ROADMAP.md).
 
 ## Prerequisites
+
 - GNU toolchain: gcc, ld, objcopy, make
 - mtools (mformat, mmd, mcopy) for writing the EFI image
 - qemu-system-x86_64 and OVMF (UEFI firmware) for running the VM
-- python3 (optional) used by run.sh to embed new.png, new.jpg, or new.jpeg into dist/storage.img
+- python3 (optional) used by `run.sh` to embed `new.png`, `new.jpeg`, or `new.jpg` into `dist/storage.img`
 
 ## Build
+
 Run:
 
     make
 
-The normal build produces the UEFI boot image and kernel only.
-
-DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not**
-built by the kernel Makefile: VexOS still needs a platform backend for
-`DG_Init`, `DG_DrawFrame`, `DG_SleepMs`, `DG_GetTicksMs`, and `DG_GetKey`,
-plus a separate user-mode ELF build and a compatible IWAD in SimpleFS storage. The launcher is configured for Freedoom Phase 1 (`freefreedoom1.wad`), which is freely redistributable under its own license. The
-desktop's `doom` / `ring3` command looks for that `doom.elf` file and reports
-when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a
-no-op placeholder, not a working port.
+The normal build produces the UEFI boot image, kernel, and storage image.
 
 ## Run (development)
-run.sh builds then launches QEMU with OVMF. It will also embed the first available image named `new.png`, `new.jpeg`, or `new.jpg` into the SimpleFS storage image. The file extension is preserved; the viewer identifies the image format from its contents.
 
-    ./run.sh
+From WSL, in the repository root:
 
-## Notes & warnings
-- Large binary artifacts (dist/tiny64.img, dist/storage.img) exceed GitHub recommended sizes; consider using git-lfs or excluding build artifacts from the repository.
+    bash run.sh
+
+The launcher builds and boots VexOS in QEMU with OVMF. It embeds the first available asset named `new.png`, `new.jpeg`, or `new.jpg` into the SimpleFS image while preserving the file's name and detecting its format from its contents. QEMU is configured with the legacy IDE controller expected by the current ATA PIO storage driver.
+
+## DoomGeneric
+
+DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not** built by the normal kernel Makefile. Running it still requires its platform backend, a separate user-mode ELF build, and a compatible IWAD in SimpleFS storage. The desktop's `doom` / `ring3` command looks for `doom.elf` and reports when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a no-op placeholder, not a working port.
+
+## CI and testing
+
+GitHub Actions builds the bootloader, kernel, and disk images, then boots the CI kernel under QEMU. The test workflow covers kernel self-tests, storage operations, USB keyboard and tablet input, Start-menu selection, Terminal commands, Notepad text entry, Files opening, and window resizing. Screenshots and serial logs are uploaded as workflow artifacts.
+
+CI success demonstrates the configured QEMU path; it does not establish compatibility with every physical machine or USB device.
+
+## Notes
+
+Large binary artifacts (for example, `dist/tiny64.img` and `dist/storage.img`) may exceed GitHub's recommended repository size. Consider Git LFS or excluding generated build artifacts from version control.
 
 ## Contributing
-Please open issues or PRs. Keep changes small and document new build dependencies.
+
+Keep changes small, reviewable, and backed by a normal build plus relevant regression tests. Document new dependencies and explicitly list unsupported hardware or file formats.
 
 ## License
-No license file detected. Add a LICENSE if you want to make the project open-source.
 
----
-Generated by repository inspection. Check Makefile and run.sh for advanced build options.
+No license file is currently present. Add a `LICENSE` before redistributing the project as open-source software.
