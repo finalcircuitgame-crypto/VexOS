@@ -264,10 +264,6 @@ static int viewer_load_file(const char *name) {
   return 1;
 }
 
-static uint8_t g_notepad_dragging;
-static int32_t g_notepad_drag_off_x;
-static int32_t g_notepad_drag_off_y;
-
 // Setup Wizard state
 static desktop_window_t g_setup_win;
 static uint8_t g_setup_open;
@@ -1498,10 +1494,6 @@ void desktop_init(BootInfo *bootInfo) {
   window_compositor_register(APP_SETUP, &g_app_open[APP_SETUP], draw_setup_window_if_open);
   wm_raise(APP_SHELL);
 
-  g_notepad_dragging = 0;
-  g_notepad_drag_off_x = 0;
-  g_notepad_drag_off_y = 0;
-
   g_setup_dragging = 0;
   g_setup_drag_off_x = 0;
   g_setup_drag_off_y = 0;
@@ -1845,6 +1837,7 @@ void desktop_tick(void) {
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_viewer_open = 0;
         g_viewer_dragging = 0;
+    notepad_pointer_release();
         viewer_clear_content();
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
@@ -1867,46 +1860,15 @@ void desktop_tick(void) {
       }
     }
 
-    // Notepad interactions
+    // Notepad owns click handling, save operations, and window dragging.
     if (g_app_open[APP_NOTEPAD]) {
-      int32_t wx = notepad_window()->x;
-      int32_t wy = notepad_window()->y;
-      int32_t ww = notepad_window()->w;
-      int32_t wh = notepad_window()->h;
-
-      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_app_open[APP_NOTEPAD] = 0;
-        g_notepad_dragging = 0;
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 86, wy + 5, 20, 20)) {
-        // Save
-        if (simplefs_init()) {
-          if (simplefs_write_file(notepad_filename(), notepad_text(), notepad_text_length())) {
-            shell_append("notepad: saved\n> ");
-          } else {
-            shell_append("notepad: save failed\n> ");
-          }
-        } else {
-          shell_append("notepad: fs init failed\n> ");
-        }
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
-        notepad_scroll_up();
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx + ww - 66, wy + 5, 20, 20)) {
-        notepad_scroll_down();
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
-        g_notepad_dragging = 1;
-        g_notepad_drag_off_x = p0.x - wx;
-        g_notepad_drag_off_y = p0.y - wy;
-        wm_raise(APP_NOTEPAD);
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, wh)) {
-        // Click in body focuses notepad
-        wm_raise(APP_NOTEPAD);
-        ui_changed = 1;
-      }
+      notepad_click_result_t result = notepad_handle_click(p0.x, p0.y);
+      if (result == NOTEPAD_CLICK_CLOSE) { g_app_open[APP_NOTEPAD] = 0; ui_changed = 1; }
+      else if (result == NOTEPAD_CLICK_SAVE_OK) { shell_append("notepad: saved\n> "); ui_changed = 1; }
+      else if (result == NOTEPAD_CLICK_SAVE_FAILED) { shell_append("notepad: save failed\n> "); ui_changed = 1; }
+      else if (result == NOTEPAD_CLICK_FS_FAILED) { shell_append("notepad: fs init failed\n> "); ui_changed = 1; }
+      else if (result == NOTEPAD_CLICK_SCROLL) ui_changed = 1;
+      else if (result == NOTEPAD_CLICK_FOCUS) { wm_raise(APP_NOTEPAD); ui_changed = 1; }
     }
 
     // Setup Wizard interactions
@@ -2003,7 +1965,6 @@ void desktop_tick(void) {
     g_shell_dragging = 0;
     g_explorer_dragging = 0;
     g_viewer_dragging = 0;
-    g_notepad_dragging = 0;
     g_setup_dragging = 0;
   }
 
@@ -2025,10 +1986,10 @@ void desktop_tick(void) {
     ui_changed = 1;
   }
 
-  if (g_notepad_dragging && (p0.dx || p0.dy)) {
-    notepad_window()->x = p0.x - g_notepad_drag_off_x;
-    notepad_window()->y = p0.y - g_notepad_drag_off_y;
-    ui_changed = 1;
+  if (p0.dx || p0.dy) {
+    int32_t old_x = notepad_window()->x, old_y = notepad_window()->y;
+    notepad_pointer_move(p0.x, p0.y);
+    if (old_x != notepad_window()->x || old_y != notepad_window()->y) ui_changed = 1;
   }
 
   if (g_setup_dragging && (p0.dx || p0.dy)) {
