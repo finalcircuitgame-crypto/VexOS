@@ -837,7 +837,7 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Desktop initialized\n");
 
 #ifdef VEXOS_CI_INPUT_TEST
-  if (!input_ci_self_test())
+  if (!input_ci_self_test(bootInfo->width, bootInfo->height))
     ci_memory_test_fail("pointer and keyboard input queues");
   serial_print("[CI] Pointer scaling/clamping and keyboard queues passed\n");
   // Run only after desktop_init has installed the framebuffer target.
