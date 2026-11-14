@@ -78,6 +78,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/window_manager.h"
 #include "../desktop/app_registry.h"
 #include "../desktop/graphics/graphics.h"
+#include "../desktop/compositor/compositor.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -872,25 +873,7 @@ static void draw_window_chrome(const wm_window_t *win, const char *title, const 
 static void draw_desktop_icons(void);
 static void draw_widgets(void);
 
-static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y,
-                      uint32_t w, uint32_t h) {
-  if (!g_bi || !dst || !src)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  if (x + w > g_bi->width)
-    w = g_bi->width - x;
-  if (y + h > g_bi->height)
-    h = g_bi->height - y;
 
-  for (uint32_t yy = 0; yy < h; yy++) {
-    uint32_t *drow = &dst[(y + yy) * g_bi->pitch + x];
-    const uint32_t *srow = &src[(y + yy) * g_bi->pitch + x];
-    for (uint32_t xx = 0; xx < w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
-}
 
 void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   if (!g_bi || !src) return;
@@ -1483,6 +1466,7 @@ static void draw_cursor(int32_t x, int32_t y, uint32_t fg, uint32_t outline) {
 
 void desktop_init(BootInfo *bootInfo) {
   g_bi = bootInfo;
+  compositor_init(bootInfo);
   gfx_init(bootInfo, NULL, _binary_CGA_F08_start);
   g_tick = 0;
   g_back = 0;
@@ -1632,7 +1616,7 @@ void desktop_init(BootInfo *bootInfo) {
     g_back = saved_back;
 
     // Initialize the presented frame.
-    blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
+    compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
     draw_desktop_icons();
     draw_widgets();
     draw_open_windows();
@@ -1649,7 +1633,7 @@ void desktop_init(BootInfo *bootInfo) {
       }
       draw_cursor(p.x, p.y, fg, outline);
     }
-    blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+    compositor_blit(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
   } else {
     draw_background();
   }
@@ -2138,7 +2122,7 @@ void desktop_tick(void) {
     uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
 
     if (scene_changed) {
-      blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
+      compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
       draw_open_windows();
@@ -2155,13 +2139,13 @@ void desktop_tick(void) {
     if (scene_changed || cursor_changed || g_tick < 2u) {
       if (scene_changed) {
         // Scene changes still need a complete presentation.
-        blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+        compositor_blit(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
       } else {
         // Mouse-only updates restore just the old cursor footprint, not the
         // entire screen. The 26px region includes the cursor outline/drag marker.
         int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
         int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
-        blit_rect(g_bi->framebuffer, g_back, (uint32_t)restore_x,
+        compositor_blit(g_bi->framebuffer, g_back, (uint32_t)restore_x,
                   (uint32_t)restore_y, 26u, 26u);
       }
 
@@ -2377,7 +2361,7 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
       }
 
       if (wizard_back) {
-        blit_rect(fb, wizard_back, 0, 0, screen_w, screen_h);
+        compositor_blit(fb, wizard_back, 0, 0, screen_w, screen_h);
       }
 
       needs_redraw = 0;
