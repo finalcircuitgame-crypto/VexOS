@@ -56,6 +56,17 @@ static int32_t g_viewer_drag_off_y;
 static char g_viewer_name[64];
 static char g_viewer_text[1024];
 static uint32_t g_viewer_text_len;
+static uint32_t g_viewer_kind;
+static uint8_t *g_viewer_pixels;
+static uint32_t g_viewer_image_width;
+static uint32_t g_viewer_image_height;
+
+enum {
+  VIEWER_CONTENT_TEXT = 0,
+  VIEWER_CONTENT_PNG = 1,
+  VIEWER_CONTENT_JPEG = 2,
+  VIEWER_CONTENT_BINARY = 3
+};
 
 static uint32_t g_explorer_scroll;
 static uint32_t g_viewer_scroll;
@@ -76,6 +87,159 @@ static uint8_t g_app_open[APP_COUNT];
 static app_id_t g_app_z[APP_COUNT];
 static uint32_t g_app_z_len;
 static app_id_t g_app_focus;
+
+static void viewer_clear_content(void) {
+  if (g_viewer_pixels) {
+    kfree(g_viewer_pixels);
+    g_viewer_pixels = NULL;
+  }
+  g_viewer_image_width = 0;
+  g_viewer_image_height = 0;
+  g_viewer_kind = VIEWER_CONTENT_TEXT;
+  g_viewer_text_len = 0;
+  g_viewer_text[0] = 0;
+}
+
+static void viewer_set_message(uint32_t kind, const char *message) {
+  uint32_t i = 0;
+  if (message) {
+    while (i + 1u < (uint32_t)sizeof(g_viewer_text) && message[i]) {
+      g_viewer_text[i] = message[i];
+      i++;
+    }
+  }
+  g_viewer_text[i] = 0;
+  g_viewer_text_len = i;
+  g_viewer_kind = kind;
+}
+
+static int viewer_is_text(const uint8_t *data, uint32_t length) {
+  if (!data)
+    return 0;
+  for (uint32_t i = 0; i < length; i++) {
+    uint8_t c = data[i];
+    if (c == 0)
+      return 0;
+    if (c < 32u && c != '\n' && c != '\r' && c != '\t')
+      return 0;
+  }
+  return 1;
+}
+
+static void viewer_copy_name(const char *name) {
+  uint32_t i = 0;
+  while (i + 1u < (uint32_t)sizeof(g_viewer_name) && name && name[i]) {
+    g_viewer_name[i] = name[i];
+    i++;
+  }
+  g_viewer_name[i] = 0;
+}
+
+static int viewer_load_file(const char *name) {
+  uint32_t file_size = 0;
+  uint32_t out_len = 0;
+  uint8_t header[8] = {0};
+  static const uint8_t png_signature[8] = {137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u};
+
+  if (!name || !simplefs_init() || !simplefs_file_size(name, &file_size) ||
+      file_size == 0) {
+    return 0;
+  }
+
+  viewer_clear_content();
+  viewer_copy_name(name);
+
+  if (file_size >= sizeof(header) &&
+      simplefs_read_file(name, header, (uint32_t)sizeof(header), &out_len)) {
+    uint8_t is_png = 1;
+    for (uint32_t i = 0; i < (uint32_t)sizeof(png_signature); i++) {
+      if (header[i] != png_signature[i]) {
+        is_png = 0;
+        break;
+      }
+    }
+
+    if (is_png) {
+      if (file_size > 8u * 1024u * 1024u) {
+        viewer_set_message(VIEWER_CONTENT_BINARY,
+                           "PNG file is too large to preview.");
+      } else {
+        uint8_t *file_data = (uint8_t *)kmalloc(file_size);
+        if (!file_data) {
+          viewer_set_message(VIEWER_CONTENT_BINARY,
+                             "Not enough memory to open this PNG.");
+        } else {
+          uint32_t bytes_read = 0;
+          uint32_t image_width = 0;
+          uint32_t image_height = 0;
+          uint8_t *image_pixels = NULL;
+          int read_ok = simplefs_read_file(name, file_data, file_size, &bytes_read) &&
+                        bytes_read == file_size;
+          int decode_ok = read_ok &&
+                          png_decode_rgba(file_data, file_size, &image_width,
+                                          &image_height, &image_pixels);
+          kfree(file_data);
+
+          if (decode_ok && image_pixels && image_width && image_height) {
+            g_viewer_pixels = image_pixels;
+            g_viewer_image_width = image_width;
+            g_viewer_image_height = image_height;
+            g_viewer_kind = VIEWER_CONTENT_PNG;
+            g_viewer_text[0] = 0;
+            g_viewer_text_len = 0;
+          } else {
+            if (image_pixels)
+              kfree(image_pixels);
+            viewer_set_message(VIEWER_CONTENT_BINARY,
+                               read_ok ? "PNG encoding is not supported or is invalid."
+                                       : "Could not read the complete PNG file.");
+          }
+        }
+      }
+    } else if (header[0] == 0xFFu && header[1] == 0xD8u) {
+      viewer_set_message(VIEWER_CONTENT_JPEG,
+                         "JPEG image detected. This build does not decode JPEG yet.");
+    } else {
+      uint32_t text_len = 0;
+      if (!simplefs_read_file(name, g_viewer_text,
+                              (uint32_t)sizeof(g_viewer_text) - 1u,
+                              &text_len)) {
+        return 0;
+      }
+      if (text_len >= (uint32_t)sizeof(g_viewer_text))
+        text_len = (uint32_t)sizeof(g_viewer_text) - 1u;
+      if (viewer_is_text((const uint8_t *)g_viewer_text, text_len)) {
+        g_viewer_text[text_len] = 0;
+        g_viewer_text_len = text_len;
+        g_viewer_kind = VIEWER_CONTENT_TEXT;
+      } else {
+        viewer_set_message(VIEWER_CONTENT_BINARY,
+                           "Binary file. Preview supports text and PNG images.");
+      }
+    }
+  } else {
+    uint32_t text_len = 0;
+    if (!simplefs_read_file(name, g_viewer_text,
+                            (uint32_t)sizeof(g_viewer_text) - 1u, &text_len)) {
+      return 0;
+    }
+    if (text_len >= (uint32_t)sizeof(g_viewer_text))
+      text_len = (uint32_t)sizeof(g_viewer_text) - 1u;
+    if (viewer_is_text((const uint8_t *)g_viewer_text, text_len)) {
+      g_viewer_text[text_len] = 0;
+      g_viewer_text_len = text_len;
+    } else {
+      viewer_set_message(VIEWER_CONTENT_BINARY,
+                         "Binary file. Preview supports text and PNG images.");
+    }
+  }
+
+  g_viewer_scroll = 0;
+  g_viewer_open = 1;
+  g_app_open[APP_VIEWER] = 1;
+  app_raise(APP_VIEWER);
+  return 1;
+}
 
 static void app_raise(app_id_t app) {
   if ((uint32_t)app >= APP_COUNT)
@@ -597,12 +761,119 @@ static void draw_explorer_window(const wm_window_t *win){
   draw_rect((uint32_t)(x+160),(uint32_t)(y+h-28),mw,1u,0x2A3D52u);draw_string_8x8((uint32_t)(x+174),(uint32_t)(y+h-18),"VexOS Storage",0x7891AAu);draw_string_8x8((uint32_t)(x+w-130),(uint32_t)(y+h-18),"Double-click to open",0x7891AAu);
 }
 
-static void draw_viewer_window(const wm_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Viewer",g_viewer_name[0]?g_viewer_name:"Preview",(uint8_t)(g_app_focus==APP_VIEWER),1,0);draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+42),"PREVIEW   /   TEXT CONTENT",0xAFC2D6u);
-  uint32_t px=(uint32_t)x+12u,py=(uint32_t)y+68u,pw=w>24?(uint32_t)w-24u:1u,ph=h>80?(uint32_t)h-80u:1u;blend_round_rect(px,py,pw,ph,5u,0xF4F7FBu,255);uint32_t tx=px+16u,ty=py+14u,cols=w>56?(uint32_t)(w-56)/8u:0u,rows=h>104?(uint32_t)(h-104)/16u:0u,start=0,skip=g_viewer_scroll;for(uint32_t i=0;i<g_viewer_text_len&&skip;i++)if(g_viewer_text[i]=='\n'){skip--;start=i+1u;}uint32_t cx=0,cy=0;
-  for(uint32_t i=start;i<g_viewer_text_len&&cy<rows;i++){char c=g_viewer_text[i];if(c=='\n'){cx=0;cy++;continue;}if(c=='\t'){cx=(cx+4u)&~3u;continue;}if(c<32||c>126)c='.';if(cx<cols){char t[2]={c,0};draw_string_8x8(tx+cx*8u,ty+cy*16u,t,0x26384Du);}cx++;}
-}
+static void draw_viewer_window(const wm_window_t *win) {
+  if (!g_bi || !win)
+    return;
 
+  int32_t x = win->x;
+  int32_t y = win->y;
+  int32_t w = win->w;
+  int32_t h = win->h;
+  draw_window_chrome(win, "Viewer", g_viewer_name[0] ? g_viewer_name : "Preview",
+                     (uint8_t)(g_app_focus == APP_VIEWER), 1, 0);
+
+  draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
+            (uint32_t)(w - 2), 30u, 0x17263A);
+  const char *toolbar_label =
+      g_viewer_kind == VIEWER_CONTENT_PNG ? "IMAGE PREVIEW / PNG" :
+      g_viewer_kind == VIEWER_CONTENT_JPEG ? "IMAGE DETECTED / JPEG" :
+      g_viewer_kind == VIEWER_CONTENT_BINARY ? "PREVIEW UNAVAILABLE" :
+      "PREVIEW / TEXT CONTENT";
+  draw_string_8x8((uint32_t)(x + 14), (uint32_t)(y + 42),
+                  toolbar_label, 0xAFC2D6u);
+
+  uint32_t px = (uint32_t)x + 12u;
+  uint32_t py = (uint32_t)y + 68u;
+  uint32_t pw = w > 24 ? (uint32_t)w - 24u : 1u;
+  uint32_t ph = h > 80 ? (uint32_t)h - 80u : 1u;
+
+  if (g_viewer_kind == VIEWER_CONTENT_PNG && g_viewer_pixels &&
+      g_viewer_image_width && g_viewer_image_height) {
+    draw_rect(px, py, pw, ph, 0x182230);
+
+    uint32_t max_w = pw > 16u ? pw - 16u : 1u;
+    uint32_t max_h = ph > 16u ? ph - 16u : 1u;
+    uint64_t sx = ((uint64_t)max_w << 16) / g_viewer_image_width;
+    uint64_t sy = ((uint64_t)max_h << 16) / g_viewer_image_height;
+    uint64_t scale = sx < sy ? sx : sy;
+    if (scale == 0)
+      scale = 1;
+
+    uint32_t draw_w = (uint32_t)(((uint64_t)g_viewer_image_width * scale) >> 16);
+    uint32_t draw_h = (uint32_t)(((uint64_t)g_viewer_image_height * scale) >> 16);
+    if (draw_w == 0) draw_w = 1;
+    if (draw_h == 0) draw_h = 1;
+    if (draw_w > max_w) draw_w = max_w;
+    if (draw_h > max_h) draw_h = max_h;
+
+    uint32_t image_x = px + (pw - draw_w) / 2u;
+    uint32_t image_y = py + (ph - draw_h) / 2u;
+
+    for (uint32_t iy = 0; iy < draw_h; iy++) {
+      uint32_t src_y = (uint32_t)(((uint64_t)iy * g_viewer_image_height) / draw_h);
+      if (src_y >= g_viewer_image_height)
+        src_y = g_viewer_image_height - 1u;
+      for (uint32_t ix = 0; ix < draw_w; ix++) {
+        uint32_t src_x = (uint32_t)(((uint64_t)ix * g_viewer_image_width) / draw_w);
+        if (src_x >= g_viewer_image_width)
+          src_x = g_viewer_image_width - 1u;
+
+        uint32_t si = (src_y * g_viewer_image_width + src_x) * 4u;
+        uint8_t r = g_viewer_pixels[si + 0u];
+        uint8_t g = g_viewer_pixels[si + 1u];
+        uint8_t b = g_viewer_pixels[si + 2u];
+        uint32_t checker = (((ix / 8u) + (iy / 8u)) & 1u) ? 0xDCE4EEu : 0xF7F9FCu;
+        uint32_t a = g_viewer_pixels[si + 3u];
+        uint32_t inv = 255u - a;
+        uint32_t br = (checker >> 16) & 0xFFu;
+        uint32_t bg = (checker >> 8) & 0xFFu;
+        uint32_t bb = checker & 0xFFu;
+        uint32_t out_r = ((uint32_t)r * a + br * inv) / 255u;
+        uint32_t out_g = ((uint32_t)g * a + bg * inv) / 255u;
+        uint32_t out_b = ((uint32_t)b * a + bb * inv) / 255u;
+        put_px(image_x + ix, image_y + iy,
+               (out_r << 16) | (out_g << 8) | out_b);
+      }
+    }
+    return;
+  }
+
+  blend_round_rect(px, py, pw, ph, 5u, 0xF4F7FBu, 255);
+  uint32_t tx = px + 16u;
+  uint32_t ty = py + 14u;
+  uint32_t cols = w > 56 ? (uint32_t)(w - 56) / 8u : 0u;
+  uint32_t rows = h > 104 ? (uint32_t)(h - 104) / 16u : 0u;
+  uint32_t start = 0;
+  uint32_t skip = g_viewer_scroll;
+  for (uint32_t i = 0; i < g_viewer_text_len && skip; i++) {
+    if (g_viewer_text[i] == '\n') {
+      skip--;
+      start = i + 1u;
+    }
+  }
+
+  uint32_t cx = 0;
+  uint32_t cy = 0;
+  for (uint32_t i = start; i < g_viewer_text_len && cy < rows; i++) {
+    char c = g_viewer_text[i];
+    if (c == '\n') {
+      cx = 0;
+      cy++;
+      continue;
+    }
+    if (c == '\t') {
+      cx = (cx + 4u) & ~3u;
+      continue;
+    }
+    if (c < 32 || c > 126)
+      c = '.';
+    if (cx < cols) {
+      char t[2] = {c, 0};
+      draw_string_8x8(tx + cx * 8u, ty + cy * 16u, t, 0x26384Du);
+    }
+    cx++;
+  }
+}
 static int32_t g_last_cursor_x;
 static int32_t g_last_cursor_y;
 static uint32_t g_last_cursor_buttons;
@@ -1085,33 +1356,17 @@ static void shell_run_line(void) {
     if (i >= g_shell_line_len) {
       shell_append("view: missing name\n");
     } else {
-      if (simplefs_init()) {
-        char name[64];
-        uint32_t n = 0;
-        while (i < g_shell_line_len && n + 1u < (uint32_t)sizeof(name)) {
-          name[n++] = g_shell_line[i++];
-        }
-        name[n] = 0;
-        uint32_t out_len = 0;
-        if (simplefs_read_file(name, g_viewer_text, (uint32_t)sizeof(g_viewer_text) - 1u,
-                               &out_len)) {
-          if (out_len >= (uint32_t)sizeof(g_viewer_text))
-            out_len = (uint32_t)sizeof(g_viewer_text) - 1u;
-          g_viewer_text[out_len] = 0;
-          g_viewer_text_len = out_len;
-          // Copy name
-          for (uint32_t k = 0; k + 1u < (uint32_t)sizeof(g_viewer_name) && name[k]; k++) {
-            g_viewer_name[k] = name[k];
-            g_viewer_name[k + 1u] = 0;
-          }
-          g_viewer_open = 1;
-          g_app_open[APP_VIEWER] = 1;
-          app_raise(APP_VIEWER);
-        } else {
-          shell_append("view: read failed\n");
-        }
+      char name[64];
+      uint32_t n = 0;
+      while (i < g_shell_line_len && n + 1u < (uint32_t)sizeof(name))
+        name[n++] = g_shell_line[i++];
+      name[n] = 0;
+      if (viewer_load_file(name)) {
+        shell_append("viewer: opened ");
+        shell_append(name);
+        shell_append("\n");
       } else {
-        shell_append("fs init failed\n");
+        shell_append("view: could not open file\n");
       }
     }
   } else if (g_shell_line_len == 7 && streq_n(g_shell_line, "notepad", 7)) {
@@ -1434,6 +1689,10 @@ void desktop_init(BootInfo *bootInfo) {
   g_viewer_name[0] = 0;
   g_viewer_text[0] = 0;
   g_viewer_text_len = 0;
+  g_viewer_kind = VIEWER_CONTENT_TEXT;
+  g_viewer_pixels = NULL;
+  g_viewer_image_width = 0;
+  g_viewer_image_height = 0;
   g_explorer_scroll = 0;
   g_viewer_scroll = 0;
   g_explorer_selected = 0xFFFFFFFFu;
@@ -1463,13 +1722,16 @@ void desktop_init(BootInfo *bootInfo) {
     uint64_t pixels = (uint64_t)g_bi->pitch * (uint64_t)g_bi->height;
     uint64_t bytes = pixels * 4u;
     if (bytes <= 0xFFFFFFFFu) {
-      if (hw_tuning_allow_backbuffer(bytes)) {
+      uint64_t pair_bytes = bytes * 2u;
+      if (pair_bytes >= bytes && hw_tuning_allow_backbuffer(pair_bytes)) {
         g_back = (uint32_t *)kmalloc((uint32_t)bytes);
         g_bg = (uint32_t *)kmalloc((uint32_t)bytes);
       } else {
         const hw_profile_t *hw = hw_profile_get();
         uint64_t min_free = 16ull * 1024ull * 1024ull;
-        if (hw && hw->ram_usable_bytes && (bytes + min_free) <= hw->ram_usable_bytes) {
+        if (hw && hw->ram_usable_bytes &&
+            pair_bytes >= bytes && pair_bytes <= UINT64_MAX - min_free &&
+            (pair_bytes + min_free) <= hw->ram_usable_bytes) {
           g_back = (uint32_t *)kmalloc((uint32_t)bytes);
           g_bg = (uint32_t *)kmalloc((uint32_t)bytes);
         }
@@ -1804,28 +2066,10 @@ void desktop_tick(void) {
             // double click opens
             uint32_t dt = g_tick - g_explorer_last_click_tick;
             if (g_explorer_last_click_index == idx && dt < 25u) {
-              uint32_t out_len = 0;
-              if (simplefs_read_file(name, g_viewer_text,
-                                     (uint32_t)sizeof(g_viewer_text) - 1u,
-                                     &out_len)) {
-                if (out_len >= (uint32_t)sizeof(g_viewer_text))
-                  out_len = (uint32_t)sizeof(g_viewer_text) - 1u;
-                g_viewer_text[out_len] = 0;
-                g_viewer_text_len = out_len;
-                g_viewer_scroll = 0;
-                // copy name
-                for (uint32_t k = 0; k < (uint32_t)sizeof(g_viewer_name); k++) {
-                  g_viewer_name[k] = 0;
-                }
-                for (uint32_t k = 0;
-                     k + 1u < (uint32_t)sizeof(g_viewer_name) && name[k]; k++) {
-                  g_viewer_name[k] = name[k];
-                  g_viewer_name[k + 1u] = 0;
-                }
-                g_viewer_open = 1;
-                g_app_open[APP_VIEWER] = 1;
-                app_raise(APP_VIEWER);
+              if (viewer_load_file(name)) {
                 ui_changed = 1;
+              } else {
+                shell_append("viewer: could not open file\n");
               }
             }
 
@@ -1844,6 +2088,7 @@ void desktop_tick(void) {
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_viewer_open = 0;
         g_viewer_dragging = 0;
+        viewer_clear_content();
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         if (g_viewer_scroll)
@@ -2037,32 +2282,28 @@ void desktop_tick(void) {
   }
 
   if (!g_back || !g_bg) {
-    // Fallback: old full redraw path if buffers aren't available.
+    // Low-memory fallback: render directly to the hardware framebuffer.
     draw_background();
     draw_desktop_icons();
     draw_widgets();
     draw_open_windows();
     draw_taskbar();
     draw_start_menu();
-    // Draw cursor directly to front buffer.
-    input_pointer_state_t p = input_pointer_get();
 
+    input_pointer_state_t p = input_pointer_get();
     uint32_t fg = 0xFFFFFF;
     uint32_t outline = 0x000000;
-    if (p.buttons & 1u) {
+    if (p.buttons & 1u)
       fg = 0xFFCC00;
-    } else if (p.buttons & 2u) {
+    else if (p.buttons & 2u)
       fg = 0x00CCFF;
-    }
     draw_cursor(p.x, p.y, fg, outline);
 
     if ((p.buttons & 1u) && (p.dx || p.dy)) {
       int32_t ix = p.x + 18;
       int32_t iy = p.y + 18;
-      if (ix < 0)
-        ix = 0;
-      if (iy < 0)
-        iy = 0;
+      if (ix < 0) ix = 0;
+      if (iy < 0) iy = 0;
       draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
       draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
       draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
@@ -2072,13 +2313,10 @@ void desktop_tick(void) {
     g_last_cursor_y = p.y;
     g_last_cursor_buttons = p.buttons;
   } else {
-    // Cache clean desktop drawing in g_back and only redraw if something changed.
     static uint8_t g_desktop_dirty = 1;
-    if (ui_changed) {
-      g_desktop_dirty = 1;
-    }
+    uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
 
-    if (g_desktop_dirty || g_tick < 2) {
+    if (scene_changed) {
       blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
@@ -2089,42 +2327,45 @@ void desktop_tick(void) {
     }
 
     input_pointer_state_t p = input_pointer_get();
+    uint8_t cursor_changed =
+        (uint8_t)(p.x != g_last_cursor_x || p.y != g_last_cursor_y ||
+                  p.buttons != g_last_cursor_buttons);
 
-    // Only copy to hardware framebuffer and redraw cursor if mouse moved, buttons clicked, or UI changed.
-    if (g_desktop_dirty || ui_changed ||
-        p.x != g_last_cursor_x || p.y != g_last_cursor_y || p.buttons != g_last_cursor_buttons ||
-        g_tick < 2) {
-      
-      // Restore clean desktop under the old cursor.
-      blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+    if (scene_changed || cursor_changed || g_tick < 2u) {
+      if (scene_changed) {
+        // Scene changes still need a complete presentation.
+        blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+      } else {
+        // Mouse-only updates restore just the old cursor footprint, not the
+        // entire screen. The 26px region includes the cursor outline/drag marker.
+        int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
+        int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
+        blit_rect(g_bi->framebuffer, g_back, (uint32_t)restore_x,
+                  (uint32_t)restore_y, 26u, 26u);
+      }
 
-      // Draw cursor directly on the front framebuffer to avoid dirtiness.
       uint32_t *saved_back = g_back;
       g_back = NULL;
 
       uint32_t fg = 0xFFFFFF;
       uint32_t outline = 0x000000;
-      if (p.buttons & 1u) {
+      if (p.buttons & 1u)
         fg = 0xFFCC00;
-      } else if (p.buttons & 2u) {
+      else if (p.buttons & 2u)
         fg = 0x00CCFF;
-      }
-
       draw_cursor(p.x, p.y, fg, outline);
+
       if ((p.buttons & 1u) && (p.dx || p.dy)) {
         int32_t ix = p.x + 18;
         int32_t iy = p.y + 18;
-        if (ix < 0)
-          ix = 0;
-        if (iy < 0)
-          iy = 0;
+        if (ix < 0) ix = 0;
+        if (iy < 0) iy = 0;
         draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
         draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
         draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
       }
 
       g_back = saved_back;
-
       g_last_cursor_x = p.x;
       g_last_cursor_y = p.y;
       g_last_cursor_buttons = p.buttons;
