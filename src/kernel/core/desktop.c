@@ -1837,7 +1837,6 @@ void desktop_tick(void) {
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_viewer_open = 0;
         g_viewer_dragging = 0;
-    notepad_pointer_release();
         viewer_clear_content();
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
@@ -1965,6 +1964,7 @@ void desktop_tick(void) {
     g_shell_dragging = 0;
     g_explorer_dragging = 0;
     g_viewer_dragging = 0;
+    notepad_pointer_release();
     g_setup_dragging = 0;
   }
 
