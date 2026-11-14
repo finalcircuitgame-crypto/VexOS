@@ -1,5 +1,6 @@
 #include "notepad.h"
 #include "../../graphics/graphics.h"
+#include "../../../include/simplefs.h"
 #define NOTEPAD_TEXT_CAPACITY 4096u
 static desktop_window_t g_window;
 static char g_filename[64];
@@ -12,6 +13,9 @@ void notepad_init(uint32_t screen_width, uint32_t screen_height) {
   g_text[0] = 0;
   g_text_length = 0;
   g_scroll = 0;
+  g_dragging = 0;
+  g_drag_offset_x = 0;
+  g_drag_offset_y = 0;
   const char *name = "note.txt";
   uint32_t i = 0;
   while (i + 1u < sizeof(g_filename) && name[i]) {
@@ -46,6 +50,28 @@ uint8_t notepad_handle_char(char value) {
 
 void notepad_scroll_up(void) { if (g_scroll) --g_scroll; }
 void notepad_scroll_down(void) { ++g_scroll; }
+
+static uint8_t g_dragging;
+static int32_t g_drag_offset_x, g_drag_offset_y;
+static uint8_t notepad_hit(int32_t px,int32_t py,int32_t x,int32_t y,int32_t w,int32_t h) {
+  return (uint8_t)(px>=x && py>=y && px<x+w && py<y+h);
+}
+notepad_click_result_t notepad_handle_click(int32_t x,int32_t y) {
+  int32_t wx=g_window.x, wy=g_window.y, ww=g_window.w, wh=g_window.h;
+  if(notepad_hit(x,y,wx+ww-24,wy+5,20,20)){g_dragging=0;return NOTEPAD_CLICK_CLOSE;}
+  if(notepad_hit(x,y,wx+ww-86,wy+5,20,20)){
+    if(!simplefs_init())return NOTEPAD_CLICK_FS_FAILED;
+    return simplefs_write_file(g_filename,g_text,g_text_length)?NOTEPAD_CLICK_SAVE_OK:NOTEPAD_CLICK_SAVE_FAILED;
+  }
+  if(notepad_hit(x,y,wx+ww-46,wy+5,20,20)){notepad_scroll_up();return NOTEPAD_CLICK_SCROLL;}
+  if(notepad_hit(x,y,wx+ww-66,wy+5,20,20)){notepad_scroll_down();return NOTEPAD_CLICK_SCROLL;}
+  if(notepad_hit(x,y,wx,wy,ww,30)){g_dragging=1;g_drag_offset_x=x-wx;g_drag_offset_y=y-wy;return NOTEPAD_CLICK_FOCUS;}
+  if(notepad_hit(x,y,wx,wy,ww,wh))return NOTEPAD_CLICK_FOCUS;
+  return NOTEPAD_CLICK_NONE;
+}
+void notepad_pointer_move(int32_t x,int32_t y){if(g_dragging){g_window.x=x-g_drag_offset_x;g_window.y=y-g_drag_offset_y;}}
+void notepad_pointer_release(void){g_dragging=0;}
+
 
 
 static void draw_line_number(uint32_t x, uint32_t y, uint32_t number) {
