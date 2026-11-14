@@ -34,12 +34,7 @@ static uint32_t g_shell_line_len;
 static input_pointer_state_t g_last_ptr;
 static uint32_t g_rand_state;
 
-typedef struct {
-  int32_t x;
-  int32_t y;
-  int32_t w;
-  int32_t h;
-} wm_window_t;
+typedef wm_rect_t wm_window_t;
 
 static wm_window_t g_shell_win;
 static wm_window_t g_explorer_win;
@@ -82,6 +77,16 @@ typedef enum {
   APP_SETUP = 4,
   APP_COUNT = 5
 } app_id_t;
+
+static void constrain_desktop_window(wm_window_t *win,
+                                     uint32_t min_width,
+                                     uint32_t min_height) {
+  if (!g_bi || !win)
+    return;
+  uint32_t work_height =
+      g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
+  wm_clamp_rect(win, g_bi->width, work_height, min_width, min_height);
+}
 
 static void app_raise(app_id_t app);
 
@@ -1737,8 +1742,11 @@ void desktop_init(BootInfo *bootInfo) {
   g_setup_win.h = 320;
   g_setup_win.x = (int32_t)((g_bi->width - (uint32_t)g_setup_win.w) / 2u);
   g_setup_win.y = (int32_t)((g_bi->height - (uint32_t)g_setup_win.h) / 2u);
-  if (g_setup_win.x < 16) g_setup_win.x = 16;
-  if (g_setup_win.y < 16) g_setup_win.y = 16;
+  constrain_desktop_window(&g_shell_win, 320u, 220u);
+  constrain_desktop_window(&g_explorer_win, 420u, 280u);
+  constrain_desktop_window(&g_viewer_win, 360u, 220u);
+  constrain_desktop_window(&g_notepad_win, 420u, 280u);
+  constrain_desktop_window(&g_setup_win, 420u, 280u);
   wm_hide(APP_SETUP); // Closed by default, user opens via shell or start menu
   g_setup_step = 0;
   g_setup_disk_ready = 0;
@@ -2255,30 +2263,35 @@ void desktop_tick(void) {
   if (g_shell_dragging && (p0.dx || p0.dy)) {
     g_shell_win.x = p0.x - g_shell_drag_off_x;
     g_shell_win.y = p0.y - g_shell_drag_off_y;
+    constrain_desktop_window(&g_shell_win, 320u, 220u);
     ui_changed = 1;
   }
 
   if (g_explorer_dragging && (p0.dx || p0.dy)) {
     g_explorer_win.x = p0.x - g_explorer_drag_off_x;
     g_explorer_win.y = p0.y - g_explorer_drag_off_y;
+    constrain_desktop_window(&g_explorer_win, 420u, 280u);
     ui_changed = 1;
   }
 
   if (g_viewer_dragging && (p0.dx || p0.dy)) {
     g_viewer_win.x = p0.x - g_viewer_drag_off_x;
     g_viewer_win.y = p0.y - g_viewer_drag_off_y;
+    constrain_desktop_window(&g_viewer_win, 360u, 220u);
     ui_changed = 1;
   }
 
   if (g_notepad_dragging && (p0.dx || p0.dy)) {
     g_notepad_win.x = p0.x - g_notepad_drag_off_x;
     g_notepad_win.y = p0.y - g_notepad_drag_off_y;
+    constrain_desktop_window(&g_notepad_win, 420u, 280u);
     ui_changed = 1;
   }
 
   if (g_setup_dragging && (p0.dx || p0.dy)) {
     g_setup_win.x = p0.x - g_setup_drag_off_x;
     g_setup_win.y = p0.y - g_setup_drag_off_y;
+    constrain_desktop_window(&g_setup_win, 420u, 280u);
     ui_changed = 1;
   }
 
