@@ -264,14 +264,9 @@ static int viewer_load_file(const char *name) {
   return 1;
 }
 
-static desktop_window_t g_notepad_win;
 static uint8_t g_notepad_dragging;
 static int32_t g_notepad_drag_off_x;
 static int32_t g_notepad_drag_off_y;
-static char g_notepad_name[64];
-static char g_notepad_text[4096];
-static uint32_t g_notepad_text_len;
-static uint32_t g_notepad_scroll;
 
 // Setup Wizard state
 static desktop_window_t g_setup_win;
@@ -598,10 +593,10 @@ static void draw_window_chrome(const desktop_window_t *win,const char *title,con
 static void draw_notepad_window(const desktop_window_t *win) {
   notepad_render_context_t context = {
     .window = win,
-    .filename = g_notepad_name,
-    .text = g_notepad_text,
-    .text_length = g_notepad_text_len,
-    .scroll = g_notepad_scroll,
+    .filename = notepad_filename(),
+    .text = notepad_text(),
+    .text_length = notepad_text_length(),
+    .scroll = notepad_scroll(),
     .focused = (uint8_t)(wm_get_focus() == APP_NOTEPAD),
     .draw_chrome = draw_window_chrome
   };
@@ -944,7 +939,7 @@ static void draw_viewer_window_if_open(void) {
   if (g_viewer_open) draw_viewer_window(&g_viewer_win);
 }
 static void draw_notepad_window_if_open(void) {
-  draw_notepad_window(&g_notepad_win);
+  draw_notepad_window(notepad_window());
 }
 static void draw_setup_window_if_open(void) {
   if (g_setup_open) draw_setup_window(&g_setup_win);
@@ -1506,10 +1501,6 @@ void desktop_init(BootInfo *bootInfo) {
   g_notepad_dragging = 0;
   g_notepad_drag_off_x = 0;
   g_notepad_drag_off_y = 0;
-  g_notepad_name[0] = 0;
-  g_notepad_text[0] = 0;
-  g_notepad_text_len = 0;
-  g_notepad_scroll = 0;
 
   g_setup_dragging = 0;
   g_setup_drag_off_x = 0;
@@ -1563,25 +1554,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_viewer_win.x = ((int32_t)g_bi->width - g_viewer_win.w) / 2 + 30;
   g_viewer_win.y = ((int32_t)g_bi->height - g_viewer_win.h) / 2 + 26;
 
-  // Make sure the notepad window is always on-screen.
-  if (g_notepad_win.x + g_notepad_win.w > (int32_t)g_bi->width)
-    g_notepad_win.x = 8;
-  if (g_notepad_win.y + g_notepad_win.h > (int32_t)g_bi->height)
-    g_notepad_win.y = 48;
-
-  g_notepad_win.w = (int32_t)(g_bi->width > 720u ? 660u : (g_bi->width > 48u ? g_bi->width - 48u : g_bi->width));
-  g_notepad_win.h = (int32_t)(g_bi->height > 560u ? 480u : (g_bi->height > 80u ? g_bi->height - 80u : g_bi->height));
-  g_notepad_win.x = ((int32_t)g_bi->width - g_notepad_win.w) / 2 + 54;
-  g_notepad_win.y = ((int32_t)g_bi->height - g_notepad_win.h) / 2 + 38;
-
-  // Default notepad file name
-  {
-    const char *def = "note.txt";
-    for (uint32_t i = 0; i + 1u < (uint32_t)sizeof(g_notepad_name) && def[i]; i++) {
-      g_notepad_name[i] = def[i];
-      g_notepad_name[i + 1u] = 0;
-    }
-  }
+  notepad_init(g_bi->width, g_bi->height);
 
   // Setup wizard window (centered)
   g_setup_win.w = 480;
@@ -1669,36 +1642,19 @@ void desktop_tick(void) {
 
     // Route keyboard input to focused app.
     if (wm_get_focus() == APP_NOTEPAD && g_app_open[APP_NOTEPAD]) {
-      if (c == '\b') {
-        if (g_notepad_text_len) {
-          g_notepad_text_len--;
-          g_notepad_text[g_notepad_text_len] = 0;
-          ui_changed = 1;
-        }
-      } else if (c == '\n') {
-        if (g_notepad_text_len + 1u < (uint32_t)sizeof(g_notepad_text)) {
-          g_notepad_text[g_notepad_text_len++] = '\n';
-          g_notepad_text[g_notepad_text_len] = 0;
-          ui_changed = 1;
-        }
-      } else if (c >= 32 && c <= 126) {
-        if (g_notepad_text_len + 1u < (uint32_t)sizeof(g_notepad_text)) {
-          g_notepad_text[g_notepad_text_len++] = c;
-          g_notepad_text[g_notepad_text_len] = 0;
+      if (notepad_handle_char(c)) ui_changed = 1;
 #ifdef VEXOS_CI_INPUT_TEST
-          static uint8_t ci_notepad_text_seen;
-          if (!ci_notepad_text_seen && g_notepad_text_len >= 3u &&
-              g_notepad_text[g_notepad_text_len - 3u] == 'v' &&
-              g_notepad_text[g_notepad_text_len - 2u] == 'e' &&
-              g_notepad_text[g_notepad_text_len - 1u] == 'x') {
-            ci_notepad_text_seen = 1;
-            serial_print("[CI] Notepad accepted the full typed text vex\n");
-          }
-#endif
-          ui_changed = 1;
-        }
+      static uint8_t ci_notepad_text_seen;
+      const char *np_text = notepad_text();
+      uint32_t np_len = notepad_text_length();
+      if (!ci_notepad_text_seen && np_len >= 3u &&
+          np_text[np_len - 3u] == 'v' && np_text[np_len - 2u] == 'e' &&
+          np_text[np_len - 1u] == 'x') {
+        ci_notepad_text_seen = 1;
+        serial_print("[CI] Notepad accepted the full typed text vex\\n");
       }
-    } else if (wm_get_focus() == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
+#endif
+    }else if (wm_get_focus() == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
       if (c == '\b') {
         if (g_shell_line_len) {
           g_shell_line_len--;
@@ -1913,10 +1869,10 @@ void desktop_tick(void) {
 
     // Notepad interactions
     if (g_app_open[APP_NOTEPAD]) {
-      int32_t wx = g_notepad_win.x;
-      int32_t wy = g_notepad_win.y;
-      int32_t ww = g_notepad_win.w;
-      int32_t wh = g_notepad_win.h;
+      int32_t wx = notepad_window()->x;
+      int32_t wy = notepad_window()->y;
+      int32_t ww = notepad_window()->w;
+      int32_t wh = notepad_window()->h;
 
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
         g_app_open[APP_NOTEPAD] = 0;
@@ -1925,7 +1881,7 @@ void desktop_tick(void) {
       } else if (hit_test(p0.x, p0.y, wx + ww - 86, wy + 5, 20, 20)) {
         // Save
         if (simplefs_init()) {
-          if (simplefs_write_file(g_notepad_name, g_notepad_text, g_notepad_text_len)) {
+          if (simplefs_write_file(notepad_filename(), notepad_text(), notepad_text_length())) {
             shell_append("notepad: saved\n> ");
           } else {
             shell_append("notepad: save failed\n> ");
@@ -1935,11 +1891,10 @@ void desktop_tick(void) {
         }
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
-        if (g_notepad_scroll)
-          g_notepad_scroll--;
+        notepad_scroll_up();
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 66, wy + 5, 20, 20)) {
-        g_notepad_scroll++;
+        notepad_scroll_down();
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_notepad_dragging = 1;
@@ -2071,8 +2026,8 @@ void desktop_tick(void) {
   }
 
   if (g_notepad_dragging && (p0.dx || p0.dy)) {
-    g_notepad_win.x = p0.x - g_notepad_drag_off_x;
-    g_notepad_win.y = p0.y - g_notepad_drag_off_y;
+    notepad_window()->x = p0.x - g_notepad_drag_off_x;
+    notepad_window()->y = p0.y - g_notepad_drag_off_y;
     ui_changed = 1;
   }
 
