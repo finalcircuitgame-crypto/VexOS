@@ -90,7 +90,8 @@ void gfx_blend_rect(const BootInfo *surface, uint32_t *target, uint32_t x,
   }
 
   if (alpha == 255u) {
-    gfx_fill_rect(surface, pixels, x, y, width, height, color);
+    gfx_fill_rect(surface, pixels, x, y, width, height,
+                  color & 0x00FFFFFFu);
     return;
   }
 
@@ -286,6 +287,9 @@ int gfx_ci_self_test(void) {
 
   gfx_blend_rect(&surface, NULL, 0u, 0u, 1u, 1u, 0x00FF0000u, 128u);
   if (framebuffer[0] != 0x00800000u)
+    return 0;
+  gfx_blend_rect(&surface, NULL, 3u, 0u, 1u, 1u, 0xFFFFFFFFu, 255u);
+  if (framebuffer[3] != 0x00FFFFFFu)
     return 0;
 
   gfx_blend_round_rect(&surface, NULL, 0u, 0u, 4u, 4u, 1u,
