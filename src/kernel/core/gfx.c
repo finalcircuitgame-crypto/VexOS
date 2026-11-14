@@ -257,3 +257,64 @@ void gfx_blit_frame(const BootInfo *surface, const uint32_t *source,
       dst_row[x] = src_row[x];
   }
 }
+
+
+#ifdef VEXOS_CI_INPUT_TEST
+int gfx_ci_self_test(void) {
+  uint32_t framebuffer[16];
+  for (uint32_t i = 0; i < 16u; ++i)
+    framebuffer[i] = 0u;
+
+  BootInfo surface;
+  surface.framebuffer = framebuffer;
+  surface.width = 4u;
+  surface.height = 4u;
+  surface.pitch = 4u;
+  surface.LargestFreeRegion.Base = 0u;
+  surface.LargestFreeRegion.Size = 0u;
+
+  /* A deliberately oversized rectangle must clip without wrapping. */
+  gfx_fill_rect(&surface, NULL, 2u, 2u, UINT32_MAX, UINT32_MAX,
+                0x00112233u);
+  if (framebuffer[10] != 0x00112233u ||
+      framebuffer[11] != 0x00112233u ||
+      framebuffer[14] != 0x00112233u ||
+      framebuffer[15] != 0x00112233u ||
+      framebuffer[9] != 0u) {
+    return 0;
+  }
+
+  gfx_blend_rect(&surface, NULL, 0u, 0u, 1u, 1u, 0x00FF0000u, 128u);
+  if (framebuffer[0] != 0x00800000u)
+    return 0;
+
+  gfx_blend_round_rect(&surface, NULL, 0u, 0u, 4u, 4u, 1u,
+                       0x0000FF00u, 255u);
+  if (framebuffer[10] != 0x0000FF00u ||
+      framebuffer[0] != 0x00800000u) {
+    return 0;
+  }
+
+  uint32_t source[16];
+  for (uint32_t i = 0; i < 16u; ++i)
+    source[i] = 0x000000A5u + i;
+  gfx_blit_rect(&surface, framebuffer, source, 1u, 1u, 2u, 2u);
+  if (framebuffer[5] != source[5] || framebuffer[6] != source[6] ||
+      framebuffer[9] != source[9] || framebuffer[10] != source[10]) {
+    return 0;
+  }
+
+  uint32_t small_source[4] = {
+      0x00101010u, 0x00202020u, 0x00303030u, 0x00404040u};
+  gfx_blit_frame(&surface, small_source, 2u, 2u, 2u);
+  if (framebuffer[0] != small_source[0] ||
+      framebuffer[1] != small_source[1] ||
+      framebuffer[4] != small_source[2] ||
+      framebuffer[5] != small_source[3] ||
+      framebuffer[2] != source[6]) {
+    return 0;
+  }
+
+  return 1;
+}
+#endif
