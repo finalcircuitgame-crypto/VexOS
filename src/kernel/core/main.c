@@ -739,9 +739,11 @@ void kernel_main(BootInfo *bootInfo) {
   uint64_t fb_bytes =
       (uint64_t)bootInfo->pitch * (uint64_t)bootInfo->height * 4u;
   uint64_t slack_bytes = hw_tuning_get()->heap_slack_bytes;
-  uint64_t heap_bytes = fb_bytes + slack_bytes;
-  if (heap_bytes < (8ull * 1024ull * 1024ull)) {
-    heap_bytes = (8ull * 1024ull * 1024ull);
+  // The desktop owns two full framebuffer buffers (background + backbuffer).
+  // Keep additional working room for decoded image data and filesystem reads.
+  uint64_t heap_bytes = (2ull * fb_bytes) + slack_bytes;
+  if (heap_bytes < (24ull * 1024ull * 1024ull)) {
+    heap_bytes = (24ull * 1024ull * 1024ull);
   }
   uint64_t heap_pages = (heap_bytes + 4095ull) / 4096ull;
   if (heap_pages < 4) {
@@ -906,7 +908,10 @@ void kernel_main(BootInfo *bootInfo) {
       uint64_t wait_ticks = frame_delay - elapsed;
       uint64_t target_ticks = current_ticks + wait_ticks;
       while (Timer_Ticks() < target_ticks) {
-        __asm__ volatile("pause");
+        // IRQ0 advances Timer_Ticks; halt until the next tick instead of
+        // burning a CPU core in a polling loop. STI;HLT avoids the check/HLT
+        // lost-wakeup window when the timer fires between the condition and HLT.
+        __asm__ volatile("sti; hlt" ::: "memory");
       }
     }
     last_frame_ticks = Timer_Ticks();
