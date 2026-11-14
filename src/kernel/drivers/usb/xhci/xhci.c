@@ -78,6 +78,36 @@ void xhci_print_hex32(uint32_t v);
 
 xhci_trb_t *xhci_alloc_tr_ring(void);
 
+static void xhci_release_init_pages(uint32_t scratchpad_count) {
+  if (dcbaa) {
+    uint64_t *sp_array = (uint64_t *)(uintptr_t)dcbaa[0];
+    if (sp_array) {
+      if (scratchpad_count > 512u)
+        scratchpad_count = 512u;
+      for (uint32_t i = 0; i < scratchpad_count; ++i) {
+        if (sp_array[i])
+          PMM_FreePage((void *)(uintptr_t)sp_array[i]);
+      }
+      PMM_FreePage(sp_array);
+    }
+    PMM_FreePage(dcbaa);
+    dcbaa = NULL;
+  }
+
+  if (command_ring) {
+    PMM_FreePage(command_ring);
+    command_ring = NULL;
+  }
+  if (event_ring) {
+    PMM_FreePage(event_ring);
+    event_ring = NULL;
+  }
+  if (erst) {
+    PMM_FreePage(erst);
+    erst = NULL;
+  }
+}
+
 void xhci_cmd_ring_push(const xhci_trb_t *trb);
 
 int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup, void *buf,
@@ -1139,6 +1169,10 @@ void xhci_init(uint64_t mmio_phys) {
 
   // 4) DCBAA + Scratchpad Buffers (xHCI 4.2 + 6.1)
   dcbaa = (uint64_t *)PMM_AllocatePage();
+  if (!dcbaa) {
+    serial_print("[xHCI] DCBAA allocation failed; controller disabled\n");
+    return;
+  }
   for (int i = 0; i < 512; i++)
     dcbaa[i] = 0;
 
@@ -1148,6 +1182,11 @@ void xhci_init(uint64_t mmio_phys) {
   uint32_t max_sp_lo = (hcs2 >> 27) & 0x1F;
   uint32_t max_sp_hi = (hcs2 >> 21) & 0x1F;
   uint32_t scratchpad_count = (max_sp_hi << 5) | max_sp_lo;
+  if (scratchpad_count > 512u) {
+    serial_print("[xHCI] Scratchpad array exceeds one-page capacity; controller disabled\n");
+    xhci_release_init_pages(0u);
+    return;
+  }
 
   if (scratchpad_count > 0) {
     serial_print("[xHCI] Scratchpads: ");
@@ -1173,21 +1212,35 @@ void xhci_init(uint64_t mmio_phys) {
     // Scratchpad Buffer Array is an array of 64-bit pointers, one per
     // scratchpad buffer. Typically fits in one page.
     uint64_t *sp_array = (uint64_t *)PMM_AllocatePage();
+    if (!sp_array) {
+      serial_print("[xHCI] Scratchpad array allocation failed; controller disabled\n");
+      xhci_release_init_pages(0u);
+      return;
+    }
     for (uint32_t i = 0; i < 512; i++)
       sp_array[i] = 0;
+    dcbaa[0] = (uint64_t)(uintptr_t)sp_array;
 
     for (uint32_t i = 0; i < scratchpad_count; i++) {
       void *sp_buf = PMM_AllocatePage();
+      if (!sp_buf) {
+        serial_print("[xHCI] Scratchpad buffer allocation failed; controller disabled\n");
+        xhci_release_init_pages(scratchpad_count);
+        return;
+      }
       sp_array[i] = (uint64_t)(uintptr_t)sp_buf;
     }
-
-    dcbaa[0] = (uint64_t)(uintptr_t)sp_array;
   }
 
   op_regs->dcbaap = (uint64_t)(uintptr_t)dcbaa;
 
   // 5) Command Ring: 256 TRBs with last TRB as Link TRB
   command_ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!command_ring) {
+    serial_print("[xHCI] Command ring allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   for (int i = 0; i < XHCI_CMD_RING_TRBS; i++) {
     command_ring[i].data = 0;
     command_ring[i].status = 0;
@@ -1208,6 +1261,11 @@ void xhci_init(uint64_t mmio_phys) {
 
   // 6) Event Ring + ERST (single segment)
   event_ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!event_ring) {
+    serial_print("[xHCI] Event ring allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   for (int i = 0; i < XHCI_EVT_RING_TRBS; i++) {
     event_ring[i].data = 0;
     event_ring[i].status = 0;
@@ -1215,6 +1273,11 @@ void xhci_init(uint64_t mmio_phys) {
   }
 
   erst = (xhci_erst_entry_t *)PMM_AllocatePage();
+  if (!erst) {
+    serial_print("[xHCI] Event Ring Segment Table allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   erst[0].segment_base = (uint64_t)(uintptr_t)event_ring;
   erst[0].segment_size = XHCI_EVT_RING_TRBS;
   erst[0].rsvd = 0;
