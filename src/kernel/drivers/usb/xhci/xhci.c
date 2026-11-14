@@ -1005,7 +1005,11 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   uint32_t evt_slot = 0;
   uint32_t cc = 0;
   if (!xhci_wait_for_command_completion(&evt_slot, &cc)) {
-    serial_print("[xHCI] AddressDevice: timeout\n");
+    /*
+     * The command may still be in flight after a timeout. Keep input_ctx,
+     * dev_ctx, and ep0_ring alive rather than freeing memory DMA may use.
+     */
+    serial_print("[xHCI] AddressDevice: timeout; retaining in-flight DMA pages\n");
     return 0;
   }
 
@@ -1015,8 +1019,16 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   xhci_print_u32_dec(evt_slot);
   serial_print("\n");
 
-  if (cc != 1)
+  if (cc != 1) {
+    PMM_FreePage(input_ctx);
+    dcbaa[slot_id] = 0;
+    PMM_FreePage(ep0_ring);
+    PMM_FreePage(dev_ctx);
     return 0;
+  }
+
+  /* A completed AddressDevice command has consumed its input context. */
+  PMM_FreePage(input_ctx);
 
   // Save device state for EP0 transfers (per-slot)
   xhci_device_state_t *dev = &g_devs[slot_id];
