@@ -4,6 +4,7 @@
 #define WM_NO_FOCUS 0xFFFFFFFFu
 
 static uint8_t g_app_open[WM_MAX_APPS];
+static uint8_t g_app_visible[WM_MAX_APPS];
 static uint8_t g_z_order[WM_MAX_APPS];
 static uint32_t g_app_count;
 static uint32_t g_z_count;
@@ -16,6 +17,7 @@ void wm_init(uint32_t app_count) {
     g_focused_app = WM_NO_FOCUS;
     for (uint32_t i = 0; i < WM_MAX_APPS; ++i) {
       g_app_open[i] = 0u;
+      g_app_visible[i] = 0u;
       g_z_order[i] = 0u;
     }
     return;
@@ -26,6 +28,7 @@ void wm_init(uint32_t app_count) {
   g_focused_app = WM_NO_FOCUS;
   for (uint32_t i = 0; i < WM_MAX_APPS; ++i) {
     g_app_open[i] = 0u;
+    g_app_visible[i] = 0u;
     g_z_order[i] = 0u;
   }
   for (uint32_t i = 0; i < app_count; ++i)
@@ -38,8 +41,20 @@ void wm_open(uint32_t app_id) {
 }
 
 void wm_close(uint32_t app_id) {
-  if (app_id < g_app_count)
+  if (app_id < g_app_count) {
     g_app_open[app_id] = 0u;
+    g_app_visible[app_id] = 0u;
+  }
+}
+
+void wm_show(uint32_t app_id) {
+  if (app_id < g_app_count && g_app_open[app_id])
+    g_app_visible[app_id] = 1u;
+}
+
+void wm_hide(uint32_t app_id) {
+  if (app_id < g_app_count)
+    g_app_visible[app_id] = 0u;
 }
 
 void wm_raise(uint32_t app_id) {
@@ -67,6 +82,11 @@ void wm_raise(uint32_t app_id) {
 
 int wm_is_open(uint32_t app_id) {
   return app_id < g_app_count && g_app_open[app_id] != 0u;
+}
+
+int wm_is_visible(uint32_t app_id) {
+  return app_id < g_app_count && g_app_open[app_id] != 0u &&
+         g_app_visible[app_id] != 0u;
 }
 
 int wm_is_focused(uint32_t app_id) {
@@ -106,21 +126,42 @@ int wm_ci_self_test(uint32_t restore_app_count) {
 
   wm_open(1u);
   wm_raise(1u);
-  if (!wm_is_open(1u) || !wm_is_focused(1u) ||
-      wm_z_at(wm_z_count() - 1u) != 1u) {
+  if (!wm_is_open(1u) || wm_is_visible(1u) ||
+      !wm_is_focused(1u) || wm_z_at(wm_z_count() - 1u) != 1u) {
     goto fail;
   }
 
+  wm_show(1u);
+  if (!wm_is_visible(1u))
+    goto fail;
+  wm_hide(1u);
+  if (!wm_is_open(1u) || wm_is_visible(1u) || !wm_is_focused(1u))
+    goto fail;
+  wm_show(1u);
+  if (!wm_is_visible(1u))
+    goto fail;
+
   wm_open(2u);
+  wm_show(2u);
   wm_raise(2u);
-  if (!wm_is_focused(2u) || wm_z_at(wm_z_count() - 1u) != 2u ||
+  if (!wm_is_visible(2u) || !wm_is_focused(2u) ||
+      wm_z_at(wm_z_count() - 1u) != 2u ||
       wm_z_at(wm_z_count() - 2u) != 1u) {
     goto fail;
   }
 
-  wm_close(1u);
-  if (wm_is_open(1u) || !wm_is_open(2u) || !wm_is_focused(2u))
+  wm_hide(1u);
+  if (!wm_is_open(1u) || wm_is_visible(1u) ||
+      !wm_is_open(2u) || !wm_is_visible(2u) ||
+      !wm_is_focused(2u)) {
     goto fail;
+  }
+  wm_close(1u);
+  if (wm_is_open(1u) || wm_is_visible(1u) ||
+      !wm_is_open(2u) || !wm_is_visible(2u) ||
+      !wm_is_focused(2u)) {
+    goto fail;
+  }
 
   wm_raise(1u);
   if (!wm_is_focused(1u) || wm_z_at(wm_z_count() - 1u) != 1u)
