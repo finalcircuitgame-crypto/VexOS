@@ -9,6 +9,65 @@ extern uint8_t _binary_CGA_F08_start[];
 #define GFX_GLYPH_WIDTH 8u
 #define GFX_GLYPH_HEIGHT 8u
 
+static uint8_t g_gfx_clip_enabled;
+static uint32_t g_gfx_clip_x;
+static uint32_t g_gfx_clip_y;
+static uint32_t g_gfx_clip_width;
+static uint32_t g_gfx_clip_height;
+
+void gfx_set_clip_rect(uint32_t x, uint32_t y, uint32_t width,
+                       uint32_t height) {
+  g_gfx_clip_x = x;
+  g_gfx_clip_y = y;
+  g_gfx_clip_width = width;
+  g_gfx_clip_height = height;
+  g_gfx_clip_enabled = 1u;
+}
+
+void gfx_reset_clip_rect(void) {
+  g_gfx_clip_enabled = 0u;
+}
+
+void gfx_get_clip_rect(const BootInfo *surface, uint32_t *x, uint32_t *y,
+                       uint32_t *width, uint32_t *height) {
+  if (!surface || !x || !y || !width || !height) {
+    return;
+  }
+
+  if (!g_gfx_clip_enabled) {
+    *x = 0u;
+    *y = 0u;
+    *width = surface->width;
+    *height = surface->height;
+    return;
+  }
+
+  uint64_t left = g_gfx_clip_x;
+  uint64_t top = g_gfx_clip_y;
+  uint64_t right = left + g_gfx_clip_width;
+  uint64_t bottom = top + g_gfx_clip_height;
+  if (left > surface->width) left = surface->width;
+  if (top > surface->height) top = surface->height;
+  if (right > surface->width) right = surface->width;
+  if (bottom > surface->height) bottom = surface->height;
+  if (right < left) right = left;
+  if (bottom < top) bottom = top;
+
+  *x = (uint32_t)left;
+  *y = (uint32_t)top;
+  *width = (uint32_t)(right - left);
+  *height = (uint32_t)(bottom - top);
+}
+
+static int gfx_point_in_clip(uint32_t x, uint32_t y) {
+  if (!g_gfx_clip_enabled)
+    return 1;
+  uint64_t right = (uint64_t)g_gfx_clip_x + g_gfx_clip_width;
+  uint64_t bottom = (uint64_t)g_gfx_clip_y + g_gfx_clip_height;
+  return x >= g_gfx_clip_x && y >= g_gfx_clip_y &&
+         (uint64_t)x < right && (uint64_t)y < bottom;
+}
+
 static uint32_t *gfx_resolve_target(const BootInfo *surface,
                                     uint32_t *target) {
   if (!surface || !surface->framebuffer || surface->width == 0u ||
@@ -31,6 +90,23 @@ static int gfx_clip_rect(const BootInfo *surface, uint32_t *x, uint32_t *y,
     *width = surface->width - *x;
   if (*height > surface->height - *y)
     *height = surface->height - *y;
+
+  if (g_gfx_clip_enabled) {
+    uint64_t right = (uint64_t)*x + *width;
+    uint64_t bottom = (uint64_t)*y + *height;
+    uint64_t clip_right = (uint64_t)g_gfx_clip_x + g_gfx_clip_width;
+    uint64_t clip_bottom = (uint64_t)g_gfx_clip_y + g_gfx_clip_height;
+    uint64_t left = *x > g_gfx_clip_x ? *x : g_gfx_clip_x;
+    uint64_t top = *y > g_gfx_clip_y ? *y : g_gfx_clip_y;
+    if (right > clip_right) right = clip_right;
+    if (bottom > clip_bottom) bottom = clip_bottom;
+    if (right <= left || bottom <= top)
+      return 0;
+    *x = (uint32_t)left;
+    *y = (uint32_t)top;
+    *width = (uint32_t)(right - left);
+    *height = (uint32_t)(bottom - top);
+  }
 
   return *width != 0u && *height != 0u;
 }
@@ -59,7 +135,8 @@ static uint32_t gfx_blend_rgb(uint32_t destination, uint32_t source,
 void gfx_put_pixel(const BootInfo *surface, uint32_t *target, uint32_t x,
                    uint32_t y, uint32_t color) {
   uint32_t *pixels = gfx_resolve_target(surface, target);
-  if (!pixels || x >= surface->width || y >= surface->height)
+  if (!pixels || x >= surface->width || y >= surface->height ||
+      !gfx_point_in_clip(x, y))
     return;
 
   pixels[(uint64_t)y * surface->pitch + x] = color;
@@ -108,11 +185,15 @@ void gfx_blend_round_rect(const BootInfo *surface, uint32_t *target,
                           uint32_t height, uint32_t radius, uint32_t color,
                           uint8_t alpha) {
   uint32_t *pixels = gfx_resolve_target(surface, target);
-  if (!pixels || alpha == 0u ||
-      !gfx_clip_rect(surface, &x, &y, &width, &height)) {
+  if (!pixels || alpha == 0u || width == 0u || height == 0u)
     return;
-  }
 
+  /* Keep the original shape bounds; the active dirty clip must not create
+     artificial rounded corners along the clipped edges. */
+  uint32_t shape_x = x;
+  uint32_t shape_y = y;
+  uint64_t shape_right = (uint64_t)x + width;
+  uint64_t shape_bottom = (uint64_t)y + height;
   uint32_t max_radius = (width < height ? width : height) / 2u;
   if (radius > max_radius)
     radius = max_radius;
@@ -121,38 +202,48 @@ void gfx_blend_round_rect(const BootInfo *surface, uint32_t *target,
     return;
   }
 
+  if (!gfx_clip_rect(surface, &x, &y, &width, &height))
+    return;
+
   uint32_t right = x + width;
   uint32_t bottom = y + height;
   uint64_t radius_squared = (uint64_t)radius * radius;
+  uint64_t shape_left_radius = (uint64_t)shape_x + radius;
+  uint64_t shape_top_radius = (uint64_t)shape_y + radius;
+  uint64_t shape_right_radius = shape_right - radius;
+  uint64_t shape_bottom_radius = shape_bottom - radius;
 
   for (uint32_t py = y; py < bottom; ++py) {
     uint32_t *row = &pixels[(uint64_t)py * surface->pitch];
     for (uint32_t px = x; px < right; ++px) {
-      int32_t dx = 0;
-      int32_t dy = 0;
+      int64_t dx = 0;
+      int64_t dy = 0;
       int in_corner = 0;
 
-      if (px < x + radius && py < y + radius) {
-        dx = (int32_t)px - (int32_t)(x + radius);
-        dy = (int32_t)py - (int32_t)(y + radius);
+      if ((uint64_t)px < shape_left_radius &&
+          (uint64_t)py < shape_top_radius) {
+        dx = (int64_t)px - (int64_t)shape_left_radius;
+        dy = (int64_t)py - (int64_t)shape_top_radius;
         in_corner = 1;
-      } else if (px >= right - radius && py < y + radius) {
-        dx = (int32_t)px - (int32_t)(right - radius - 1u);
-        dy = (int32_t)py - (int32_t)(y + radius);
+      } else if ((uint64_t)px >= shape_right_radius &&
+                 (uint64_t)py < shape_top_radius) {
+        dx = (int64_t)px - (int64_t)(shape_right_radius - 1u);
+        dy = (int64_t)py - (int64_t)shape_top_radius;
         in_corner = 1;
-      } else if (px < x + radius && py >= bottom - radius) {
-        dx = (int32_t)px - (int32_t)(x + radius);
-        dy = (int32_t)py - (int32_t)(bottom - radius - 1u);
+      } else if ((uint64_t)px < shape_left_radius &&
+                 (uint64_t)py >= shape_bottom_radius) {
+        dx = (int64_t)px - (int64_t)shape_left_radius;
+        dy = (int64_t)py - (int64_t)(shape_bottom_radius - 1u);
         in_corner = 1;
-      } else if (px >= right - radius && py >= bottom - radius) {
-        dx = (int32_t)px - (int32_t)(right - radius - 1u);
-        dy = (int32_t)py - (int32_t)(bottom - radius - 1u);
+      } else if ((uint64_t)px >= shape_right_radius &&
+                 (uint64_t)py >= shape_bottom_radius) {
+        dx = (int64_t)px - (int64_t)(shape_right_radius - 1u);
+        dy = (int64_t)py - (int64_t)(shape_bottom_radius - 1u);
         in_corner = 1;
       }
 
       if (!in_corner ||
-          ((uint64_t)((int64_t)dx * dx + (int64_t)dy * dy) <=
-           radius_squared)) {
+          ((uint64_t)(dx * dx + dy * dy) <= radius_squared)) {
         row[px] = gfx_blend_rgb(row[px], color, alpha);
       }
     }
@@ -177,7 +268,8 @@ void gfx_draw_glyph8(const BootInfo *surface, uint32_t *target, uint32_t x,
       uint32_t px = x + column;
       if (px >= surface->width)
         break;
-      if (bits & (uint8_t)(1u << (7u - column)))
+      if ((bits & (uint8_t)(1u << (7u - column))) &&
+          gfx_point_in_clip(px, py))
         pixels[(uint64_t)py * surface->pitch + px] = foreground;
     }
   }
@@ -315,6 +407,21 @@ int gfx_ci_self_test(void) {
       framebuffer[1] != small_source[1] ||
       framebuffer[4] != small_source[2] ||
       framebuffer[5] != small_source[3] ||
+      framebuffer[2] != 0x0000FF00u) {
+    return 0;
+  }
+
+  /* Global dirty clipping must restrict fills without changing outer pixels. */
+  gfx_set_clip_rect(1u, 1u, 2u, 2u);
+  gfx_fill_rect(&surface, NULL, 0u, 0u, 4u, 4u, 0x00123456u);
+  gfx_reset_clip_rect();
+  if (framebuffer[0] != small_source[0] ||
+      framebuffer[1] != small_source[1] ||
+      framebuffer[4] != small_source[2] ||
+      framebuffer[5] != 0x00123456u ||
+      framebuffer[6] != 0x00123456u ||
+      framebuffer[9] != 0x00123456u ||
+      framebuffer[10] != 0x00123456u ||
       framebuffer[2] != 0x0000FF00u) {
     return 0;
   }
