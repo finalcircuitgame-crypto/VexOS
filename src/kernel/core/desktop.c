@@ -958,11 +958,28 @@ static void draw_viewer_window(const wm_window_t *win) {
     uint32_t image_x = px + (pw - draw_w) / 2u;
     uint32_t image_y = py + (ph - draw_h) / 2u;
 
-    for (uint32_t iy = 0; iy < draw_h; iy++) {
+    uint32_t clip_x = 0u, clip_y = 0u, clip_w = 0u, clip_h = 0u;
+    gfx_get_clip_rect(g_bi, &clip_x, &clip_y, &clip_w, &clip_h);
+    uint64_t clip_right = (uint64_t)clip_x + clip_w;
+    uint64_t clip_bottom = (uint64_t)clip_y + clip_h;
+    uint32_t draw_x_begin = clip_x > image_x ? clip_x - image_x : 0u;
+    uint32_t draw_y_begin = clip_y > image_y ? clip_y - image_y : 0u;
+    uint32_t draw_x_end = clip_right > image_x
+                              ? (uint32_t)(clip_right - image_x)
+                              : 0u;
+    uint32_t draw_y_end = clip_bottom > image_y
+                              ? (uint32_t)(clip_bottom - image_y)
+                              : 0u;
+    if (draw_x_end > draw_w) draw_x_end = draw_w;
+    if (draw_y_end > draw_h) draw_y_end = draw_h;
+
+    /* Avoid scaling every source pixel when a dirty redraw exposes only part
+       of an image window. */
+    for (uint32_t iy = draw_y_begin; iy < draw_y_end; iy++) {
       uint32_t src_y = (uint32_t)(((uint64_t)iy * g_viewer_image_height) / draw_h);
       if (src_y >= g_viewer_image_height)
         src_y = g_viewer_image_height - 1u;
-      for (uint32_t ix = 0; ix < draw_w; ix++) {
+      for (uint32_t ix = draw_x_begin; ix < draw_x_end; ix++) {
         uint32_t src_x = (uint32_t)(((uint64_t)ix * g_viewer_image_width) / draw_w);
         if (src_x >= g_viewer_image_width)
           src_x = g_viewer_image_width - 1u;
