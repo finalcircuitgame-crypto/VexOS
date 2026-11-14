@@ -26,6 +26,10 @@ uint32_t notepad_scroll(void);
 uint8_t notepad_handle_char(char value);
 void notepad_scroll_up(void);
 void notepad_scroll_down(void);
+typedef enum { NOTEPAD_CLICK_NONE=0, NOTEPAD_CLICK_CLOSE, NOTEPAD_CLICK_SAVE_OK, NOTEPAD_CLICK_SAVE_FAILED, NOTEPAD_CLICK_FS_FAILED, NOTEPAD_CLICK_SCROLL, NOTEPAD_CLICK_FOCUS } notepad_click_result_t;
+notepad_click_result_t notepad_handle_click(int32_t x, int32_t y);
+void notepad_pointer_move(int32_t x, int32_t y);
+void notepad_pointer_release(void);
 
 
 #endif
