@@ -18,19 +18,19 @@ The current limitations are architectural rather than cosmetic:
 
 ## Phase 0 — make the code testable
 
-Status: in progress. Initial renderer and input regression suites are implemented; this phase stays open until all desktop interaction workflows are green.
+Status: core regression suites are implemented and the current PR head has passed the QEMU interaction workflow; keep open while the wallpaper refresh and final review are validated.
 
 - Extract low-level framebuffer operations into `gfx.c` and expose them through `gfx.h`.
 - Keep desktop code responsible for layout and window content, not raw pixel loops.
 - Validate every drawing surface and clip rectangles without integer wraparound.
-- Add kernel-side regression checks for rendering, pointer/keyboard queue behavior, and window-manager focus/visibility/z-order.
+- Add kernel-side regression checks for rendering, pointer/keyboard queue behavior, window-manager visibility/focus/z-order/geometry, and baseline/progressive-marker/truncated JPEG behavior.
 - Keep the existing QEMU boot, storage, keyboard, mouse, shell, and screenshot tests green.
 
 Acceptance: normal and CI kernel builds pass; all existing QEMU markers and the new renderer/input self-tests pass.
 
 ## Phase 1 — kernel and device stability
 
-Status: initial xHCI/HID hardening in progress; full device recovery and block-device work remains.
+Status: initial xHCI/HID allocation and report-length hardening is implemented; repeated-device stress, disconnect/reconnect recovery, and block-device work remain.
 
 - Audit every page allocation in xHCI, AHCI, ATA, and the kernel core; failed allocations must fail cleanly rather than dereference null.
 - Validate USB configuration and HID report descriptors before using offsets, lengths, report IDs, or endpoint parameters. Initial work now guards xHCI page allocations, validates endpoint parameters, bounds parsed HID fields to report packets, and discards truncated reports.
@@ -43,7 +43,7 @@ Acceptance: input devices remain responsive through repeated idle/move/click/key
 
 ## Phase 2 — graphics foundation
 
-Status: reusable framebuffer primitives extracted; richer surfaces, fonts, and dirty-region rendering remain.
+Status: reusable clipped framebuffer primitives and a procedural planet/orbit wallpaper are in the PR; typed surfaces, a larger font interface, image transforms, and dirty-region rendering remain.
 
 - Define the framebuffer contract explicitly: pixel format, bytes per pixel, row pitch, dimensions, and ownership.
 - Introduce reusable surfaces and safe fill, blend, blit, glyph, and text operations.
@@ -55,7 +55,7 @@ Acceptance: renderer tests pass independently of desktop layout; the same render
 
 ## Phase 3 — desktop and window manager
 
-Status: window visibility, focus, and z-order have been extracted into a standalone module; window geometry, event routing, resize/minimize/restore, and app lifecycle are still coupled to desktop.c.
+Status: window visibility, focus, z-order, and display-bound geometry clamping are in a standalone module; the Start menu is responsive. Event routing, actual resize/minimize/maximize/restore controls, and full app lifecycle are still coupled to desktop.c.
 
 - Separate the window manager from application implementations.
 - Give each window explicit bounds, state, z-order, focus, and event handling.
@@ -70,7 +70,7 @@ Acceptance: overlapping windows retain correct z-order and focus; resize, drag, 
 
 - Make the file manager support selection, navigation, metadata, and clear error states.
 - Make the text editor handle file open/save, dirty state, and bounded text editing.
-- Keep PNG and baseline JPEG previews reliable; add progressive JPEG only with a decoder and fixture tests that cover it.
+- Keep PNG and baseline JPEG previews reliable; baseline JPEG now has a real decoder fixture in CI. Progressive JPEG remains unsupported until a decoder and fixtures are integrated.
 - Make the terminal use a real command registry and report command errors consistently.
 - Add a settings app for display, input, and storage information.
 - Use the same app lifecycle and window API for every application.
