@@ -32,7 +32,7 @@ void input_kbd_push_event(uint8_t usage, int pressed);
 int input_kbd_pop_event(input_kbd_event_t *out);
 
 #ifdef VEXOS_CI_INPUT_TEST
-int input_ci_self_test(void);
+int input_ci_self_test(uint32_t screen_width, uint32_t screen_height);
 #endif
 
 #endif
