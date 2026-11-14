@@ -25,20 +25,12 @@ static uint32_t g_text_len;
 static uint8_t g_start_open;
 static uint8_t g_show_shell;
 
-static char g_shell_out[4096];
-static uint32_t g_shell_out_len;
-static char g_shell_line[256];
-static uint32_t g_shell_line_len;
 
 static input_pointer_state_t g_last_ptr;
 static uint32_t g_rand_state;
 
-static desktop_window_t g_shell_win;
 static desktop_window_t g_explorer_win;
 static desktop_window_t g_viewer_win;
-static uint8_t g_shell_dragging;
-static int32_t g_shell_drag_off_x;
-static int32_t g_shell_drag_off_y;
 static uint8_t g_explorer_open;
 static uint8_t g_viewer_open;
 static uint8_t g_explorer_dragging;
@@ -74,6 +66,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/compositor/compositor.h"
 #include "../desktop/compositor/window_compositor.h"
 #include "../desktop/apps/notepad/notepad.h"
+#include "../desktop/apps/terminal/terminal.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -887,12 +880,7 @@ void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
   dst[y * g_bi->pitch + x] = c;
 }
 
-static void draw_shell_window(const desktop_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(wm_get_focus()==APP_SHELL);draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
-  uint32_t px=(uint32_t)x+10u,py=(uint32_t)y+56u,pw=w>20?(uint32_t)w-20u:1u,ph=h>94?(uint32_t)h-94u:1u;gfx_blend_round_rect(px,py,pw,ph,5u,0x091321u,255);gfx_draw_rect(px+1u,py+1u,pw-2u,1u,0x1C344Du);uint32_t tx=px+12u,ty=py+12u,cols=pw>24u?(pw-24u)/8u:0u,rows=ph>20u?(ph-20u)/10u:0u;
-  if(cols&&rows){uint32_t cap=cols*rows,start=g_shell_out_len>cap?g_shell_out_len-cap:0u,cx=0,cy=0;for(uint32_t i=start;i<g_shell_out_len&&cy<rows;i++){char c=g_shell_out[i];if(c=='\n'){cx=0;cy++;continue;}if(cx<cols&&c>=32&&c<=126)gfx_draw_glyph(tx+cx*8u,ty+cy*10u,(uint8_t)c,0xD7E7F7u);cx++;if(cx>=cols){cx=0;cy++;}}}
-  uint32_t iy=(uint32_t)(y+h-30);gfx_blend_round_rect((uint32_t)(x+10),iy,(uint32_t)(w-20),24u,5u,0x1A2C40u,255);gfx_draw_rect((uint32_t)(x+18),iy+1u,(uint32_t)(w-36),1u,0x35516Du);gfx_draw_string((uint32_t)(x+22),iy+8u,">",0x79E0B0u);gfx_draw_string((uint32_t)(x+38),iy+8u,g_shell_line,0xF1F6FCu);uint32_t len=0;while(g_shell_line[len])len++;if(focused&&((g_tick/30u)%2u==0u))gfx_draw_rect((uint32_t)(x+38)+len*8u,iy+8u,7u,8u,0x79E0B0u);
-}
+static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
 
 static void draw_taskbar(void){
   if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh;gfx_blend_rect(0u,y,g_bi->width,bh,0x080E18u,224u);gfx_draw_rect(0u,y,g_bi->width,1u,0x53799Cu);uint32_t sy=y+6u,sh=bh-12u;
@@ -926,7 +914,7 @@ static void draw_widgets(void){
 
 
 static void draw_shell_window_if_open(void) {
-  if (g_show_shell) draw_shell_window(&g_shell_win);
+  if (g_show_shell) draw_shell_window(terminal_window());
 }
 static void draw_explorer_window_if_open(void) {
   if (g_explorer_open) draw_explorer_window(&g_explorer_win);
@@ -1043,17 +1031,7 @@ static uint32_t shell_next_rand(void) {
   return g_rand_state;
 }
 
-static void shell_append(const char *s) {
-  while (s && *s) {
-    if (g_shell_out_len + 1u >= (uint32_t)sizeof(g_shell_out)) {
-      for (uint32_t i = 0; i < (uint32_t)sizeof(g_shell_out) / 2u; i++) {
-        g_shell_out[i] = g_shell_out[i + (uint32_t)sizeof(g_shell_out) / 2u];
-      }
-      g_shell_out_len = (uint32_t)sizeof(g_shell_out) / 2u;
-    }
-    g_shell_out[g_shell_out_len++] = *s++;
-  }
-}
+static void shell_append(const char *s) { terminal_append(s); }
 
 static int streq_n(const char *a, const char *b, uint32_t n) {
   for (uint32_t i = 0; i < n; i++) {
@@ -1066,6 +1044,8 @@ static int streq_n(const char *a, const char *b, uint32_t n) {
 }
 
 static void shell_run_line(void) {
+  const char *g_shell_line = terminal_line();
+  uint32_t g_shell_line_len = terminal_line_length();
   for (uint32_t i = 0; i < g_shell_line_len; i++) {
     char t[2] = {g_shell_line[i], 0};
     shell_append(t);
@@ -1083,7 +1063,7 @@ static void shell_run_line(void) {
     shell_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
   } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "clear", 5)) ||
              (g_shell_line_len == 3 && streq_n(g_shell_line, "cls", 3))) {
-    g_shell_out_len = 0;
+    terminal_clear_output();
   } else if (g_shell_line_len >= 4 && streq_n(g_shell_line, "echo", 4)) {
     uint32_t i = 4;
     while (i < g_shell_line_len && (g_shell_line[i] == ' '))
@@ -1264,8 +1244,7 @@ static void shell_run_line(void) {
     shell_append("unknown\n");
   }
 
-  g_shell_line_len = 0;
-  g_shell_line[0] = 0;
+  terminal_clear_line();
   shell_append("> ");
 }
 
@@ -1453,8 +1432,6 @@ void desktop_init(BootInfo *bootInfo) {
   g_text_len = 0;
   g_start_open = 0;
   g_show_shell = 0;
-  g_shell_out_len = 0;
-  g_shell_line_len = 0;
   g_rand_state = 0xC001D00Du;
   g_last_ptr.x = 0;
   g_last_ptr.y = 0;
@@ -1462,9 +1439,6 @@ void desktop_init(BootInfo *bootInfo) {
   g_last_ptr.dy = 0;
   g_last_ptr.buttons = 0;
   g_last_ptr.is_absolute = 0;
-  g_shell_dragging = 0;
-  g_shell_drag_off_x = 0;
-  g_shell_drag_off_y = 0;
   g_explorer_open = 0;
   g_viewer_open = 0;
   g_explorer_dragging = 0;
@@ -1526,16 +1500,8 @@ void desktop_init(BootInfo *bootInfo) {
   g_last_cursor_buttons = 0;
 
   input_init(bootInfo->width, bootInfo->height);
+  terminal_init(g_bi->width, g_bi->height);
   shell_append("> ");
-
-  g_shell_win.x = 16;
-  g_shell_win.y = 48;
-  g_shell_win.w = (int32_t)((g_bi->width * 2u) / 3u);
-  if (g_shell_win.w < 220)
-    g_shell_win.w = 220;
-  g_shell_win.h = (int32_t)(g_bi->height / 2u);
-  if (g_shell_win.h < 140)
-    g_shell_win.h = 140;
 
   g_explorer_win.w = (int32_t)(g_bi->width > 760u ? 720u : (g_bi->width > 48u ? g_bi->width - 48u : g_bi->width));
   g_explorer_win.h = (int32_t)(g_bi->height > 560u ? 500u : (g_bi->height > 80u ? g_bi->height - 80u : g_bi->height));
@@ -1647,35 +1613,19 @@ void desktop_tick(void) {
       }
 #endif
     } else if (wm_get_focus() == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
-      if (c == '\b') {
-        if (g_shell_line_len) {
-          g_shell_line_len--;
-          g_shell_line[g_shell_line_len] = 0;
-          ui_changed = 1;
-        }
-      } else {
-        if (c == '\n') {
+      uint8_t input_result = terminal_handle_char(c);
+      if (input_result == 2u) {
 #ifdef VEXOS_CI_INPUT_TEST
-          serial_print("[CI] Shell command submitted through keyboard\n");
+        serial_print("[CI] Shell command submitted through keyboard\\n");
 #endif
-          shell_run_line();
-          ui_changed = 1;
-        } else if (c >= 32 && c <= 126) {
+        shell_run_line(); ui_changed = 1;
+      } else if (input_result == 1u) {
 #ifdef VEXOS_CI_INPUT_TEST
-          static uint8_t ci_shell_char_seen;
-          if (!ci_shell_char_seen) {
-            ci_shell_char_seen = 1;
-            serial_print("[CI] Shell received printable keyboard input\n");
-          }
+        static uint8_t ci_shell_char_seen;
+        if (!ci_shell_char_seen) { ci_shell_char_seen = 1; serial_print("[CI] Shell received printable keyboard input\\n"); }
 #endif
-          if (g_shell_line_len + 1u < (uint32_t)sizeof(g_shell_line)) {
-            g_shell_line[g_shell_line_len++] = c;
-            g_shell_line[g_shell_line_len] = 0;
-            ui_changed = 1;
-          }
-        }
+        ui_changed = 1;
       }
-    }
   }
 
   // Click handling
@@ -1695,7 +1645,6 @@ void desktop_tick(void) {
       }
 #endif
       ui_changed = 1;
-      g_shell_dragging = 0;
     } else if (g_start_open) {
       int32_t mx=10,mw=280,mh=168,my=tb_y-176;
       if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
@@ -1934,45 +1883,17 @@ void desktop_tick(void) {
     }
   }
 
-  // Window manager interactions (shell window)
-  if (pressed & 1u) {
-    if (g_show_shell) {
-      int32_t wx = g_shell_win.x;
-      int32_t wy = g_shell_win.y;
-      int32_t ww = g_shell_win.w;
-      int32_t wh = g_shell_win.h;
-
-      // Close button
-      if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_show_shell = 0;
-        g_shell_dragging = 0;
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
-        g_shell_dragging = 1;
-        g_shell_drag_off_x = p0.x - wx;
-        g_shell_drag_off_y = p0.y - wy;
-        wm_raise(APP_SHELL);
-        ui_changed = 1;
-      } else if (hit_test(p0.x, p0.y, wx, wy, ww, wh)) {
-        wm_raise(APP_SHELL);
-        ui_changed = 1;
-      }
-    }
-  }
+  if (pressed & 1u) if (g_show_shell) {terminal_click_result_t r=terminal_handle_click(p0.x,p0.y);if(r==TERMINAL_CLICK_CLOSE){g_show_shell=0;ui_changed=1;}else if(r==TERMINAL_CLICK_FOCUS){wm_raise(APP_SHELL);ui_changed=1;}}
 
   if (!(buttons & 1u)) {
-    g_shell_dragging = 0;
     g_explorer_dragging = 0;
     g_viewer_dragging = 0;
     notepad_pointer_release();
+    terminal_pointer_release();
     g_setup_dragging = 0;
   }
 
-  if (g_shell_dragging && (p0.dx || p0.dy)) {
-    g_shell_win.x = p0.x - g_shell_drag_off_x;
-    g_shell_win.y = p0.y - g_shell_drag_off_y;
-    ui_changed = 1;
-  }
+  if (p0.dx || p0.dy) {int32_t ox=terminal_window()->x,oy=terminal_window()->y;terminal_pointer_move(p0.x,p0.y);if(ox!=terminal_window()->x||oy!=terminal_window()->y)ui_changed=1;}
 
   if (g_explorer_dragging && (p0.dx || p0.dy)) {
     g_explorer_win.x = p0.x - g_explorer_drag_off_x;
