@@ -941,11 +941,95 @@ static void draw_taskbar(void){
   uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);draw_string_8x8(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);draw_string_8x8(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
 }
 
-static void draw_start_menu(void){
-  if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
-  draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);draw_string_8x8(x+16u,y+9u,"VEXOS",0xF0F6FCu);draw_string_8x8(x+208u,y+9u,"APPS",0x7FA0BEu);draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
-  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};const char *labels[6]={"Terminal","Files","Notepad","Viewer","Setup","Help"};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);draw_string_8x8(x+23u,ry+6u,"?",0xEAF3FCu);}draw_string_8x8(x+46u,ry+7u,labels[i],0xDCE8F4u);if(i==0u)draw_string_8x8(x+232u,ry+7u,">",0x75A8D4u);}
+typedef struct {
+  uint32_t x;
+  uint32_t y;
+  uint32_t width;
+  uint32_t height;
+  uint32_t row_top;
+  uint32_t row_height;
+} start_menu_layout_t;
+
+static start_menu_layout_t start_menu_layout(void) {
+  start_menu_layout_t layout = {0u, 0u, 0u, 0u, 36u, 1u};
+  if (!g_bi || !g_bi->width || !g_bi->height)
+    return layout;
+
+  layout.width = g_bi->width > 384u ? 360u :
+                 (g_bi->width > 24u ? g_bi->width - 24u : g_bi->width);
+  layout.x = g_bi->width > layout.width + 12u ? 12u : 0u;
+
+  uint32_t bar_height = g_bi->height < 56u ? g_bi->height : 56u;
+  uint32_t available_height =
+      g_bi->height > bar_height + 16u
+          ? g_bi->height - bar_height - 16u
+          : g_bi->height;
+  layout.height = available_height < 270u ? available_height : 270u;
+  uint32_t bar_y = g_bi->height - bar_height;
+  layout.y = bar_y > layout.height + 8u
+                 ? bar_y - layout.height - 8u
+                 : 0u;
+
+  uint32_t rows_area = layout.height > layout.row_top + 10u
+                           ? layout.height - layout.row_top - 10u
+                           : 6u;
+  layout.row_height = rows_area / 6u;
+  if (layout.row_height == 0u)
+    layout.row_height = 1u;
+  return layout;
+}
+
+static void draw_start_menu(void) {
+  if (!g_bi || !g_start_open)
+    return;
+
+  start_menu_layout_t menu = start_menu_layout();
+  if (menu.width < 120u || menu.height < 70u)
+    return;
+
+  uint32_t x = menu.x;
+  uint32_t y = menu.y;
+  uint32_t w = menu.width;
+  uint32_t h = menu.height;
+  blend_round_rect(x, y, w, h, 12u, 0x101B2Au, 250u);
+  draw_rect(x + 1u, y + 1u, w - 2u, 1u, 0x5A83A8u);
+  draw_rect(x + 1u, y + h - 1u, w - 2u, 1u, 0x26394Fu);
+  draw_rect(x + 1u, y + 1u, 1u, h - 2u, 0x354B63u);
+  draw_rect(x + w - 2u, y + 1u, 1u, h - 2u, 0x26394Fu);
+
+  draw_string_8x8(x + 18u, y + 12u, "VEXOS", 0xF0F6FCu);
+  draw_string_8x8(x + w - 104u, y + 12u, "APPLICATIONS", 0x7FA0BEu);
+  draw_rect(x + 14u, y + 28u, w - 28u, 1u, 0x2B4057u);
+
+  const app_id_t apps[5] = {
+      APP_SHELL, APP_EXPLORER, APP_NOTEPAD, APP_VIEWER, APP_SETUP};
+  const char *labels[6] = {
+      "Terminal", "Files", "Notepad", "Viewer", "Setup", "Help"};
+  const char *categories[6] = {
+      "SYSTEM", "STORAGE", "EDITOR", "IMAGES", "SYSTEM", "GUIDE"};
+
+  for (uint32_t i = 0; i < 6u; ++i) {
+    uint32_t row_y = y + menu.row_top + i * menu.row_height;
+    uint32_t row_h = menu.row_height > 2u ? menu.row_height - 2u : 1u;
+    uint32_t icon_size = row_h > 24u ? 22u : row_h - 2u;
+    if ((i & 1u) == 0u)
+      blend_round_rect(x + 10u, row_y, w - 20u, row_h, 5u,
+                       0x1A2D42u, 150u);
+    if (i < 5u) {
+      draw_app_icon(x + 18u, row_y + (row_h - icon_size) / 2u,
+                    icon_size, apps[i]);
+    } else {
+      blend_round_rect(x + 18u, row_y + (row_h - icon_size) / 2u,
+                       icon_size, icon_size, 5u, 0x334B65u, 255u);
+      draw_string_8x8(x + 25u, row_y + (row_h - 8u) / 2u,
+                      "?", 0xEAF3FCu);
+    }
+    draw_string_8x8(x + 52u, row_y + (row_h - 8u) / 2u,
+                    labels[i], 0xDCE8F4u);
+    if (w >= 300u)
+      draw_string_8x8(x + w - 76u, row_y + (row_h - 8u) / 2u,
+                      categories[i], 0x7FA0BEu);
+  }
 }
 
 static void draw_desktop_icons(void){
@@ -1812,25 +1896,65 @@ void desktop_tick(void) {
       ui_changed = 1;
       g_shell_dragging = 0;
     } else if (g_start_open) {
-      int32_t mx=10,mw=280,mh=168,my=tb_y-176;
-      if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
-        if(ry>=28&&ry<50){wm_open(APP_SHELL);
-      wm_show(APP_SHELL);app_raise(APP_SHELL);
+      start_menu_layout_t menu = start_menu_layout();
+      if (hit_test(p0.x, p0.y, (int32_t)menu.x, (int32_t)menu.y,
+                   (int32_t)menu.width, (int32_t)menu.height)) {
+        int32_t relative_y = p0.y - (int32_t)menu.y;
+        if (relative_y >= (int32_t)menu.row_top &&
+            menu.row_height != 0u) {
+          uint32_t selected =
+              (uint32_t)(relative_y - (int32_t)menu.row_top) /
+              menu.row_height;
+          if (selected < 6u) {
+            switch (selected) {
+              case 0u:
+                wm_open(APP_SHELL);
+                wm_show(APP_SHELL);
+                app_raise(APP_SHELL);
 #ifdef VEXOS_CI_INPUT_TEST
-          serial_print("[CI] Shell opened from Start menu mouse click\n");
+                serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
-          g_start_open=0;ui_changed=1;
-        }else if(ry>=50&&ry<72){if(simplefs_init()){wm_open(APP_EXPLORER);
-      wm_show(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
-        }else if(ry>=72&&ry<94){wm_open(APP_NOTEPAD);
-            wm_show(APP_NOTEPAD);app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
-        }else if(ry>=94&&ry<116){wm_open(APP_VIEWER);
-      wm_show(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
-        }else if(ry>=116&&ry<138){wm_open(APP_SETUP);
-      wm_show(APP_SETUP);g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){wm_open(APP_SHELL);
-      wm_show(APP_SHELL);app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
-      }else{g_start_open=0;ui_changed=1;}
+                break;
+              case 1u:
+                if (simplefs_init()) {
+                  wm_open(APP_EXPLORER);
+                  wm_show(APP_EXPLORER);
+                  app_raise(APP_EXPLORER);
+                } else {
+                  shell_append("fs init failed\n> ");
+                }
+                break;
+              case 2u:
+                wm_open(APP_NOTEPAD);
+                wm_show(APP_NOTEPAD);
+                app_raise(APP_NOTEPAD);
+                break;
+              case 3u:
+                wm_open(APP_VIEWER);
+                wm_show(APP_VIEWER);
+                app_raise(APP_VIEWER);
+                break;
+              case 4u:
+                wm_open(APP_SETUP);
+                wm_show(APP_SETUP);
+                g_setup_step = 0;
+                app_raise(APP_SETUP);
+                break;
+              case 5u:
+                wm_open(APP_SHELL);
+                wm_show(APP_SHELL);
+                app_raise(APP_SHELL);
+                shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");
+                break;
+            }
+            g_start_open = 0;
+            ui_changed = 1;
+          }
+        }
+      } else {
+        g_start_open = 0;
+        ui_changed = 1;
+      }
     }
 
     // Desktop shortcuts launch their matching applications.
