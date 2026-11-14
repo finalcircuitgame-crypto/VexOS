@@ -978,19 +978,23 @@ static void draw_open_windows(void) {
 
     switch (app) {
       case APP_SHELL:
-        draw_shell_window(&g_shell_win);
+        if (g_show_shell)
+          draw_shell_window(&g_shell_win);
         break;
       case APP_EXPLORER:
-        draw_explorer_window(&g_explorer_win);
+        if (g_explorer_open)
+          draw_explorer_window(&g_explorer_win);
         break;
       case APP_VIEWER:
-        draw_viewer_window(&g_viewer_win);
+        if (g_viewer_open)
+          draw_viewer_window(&g_viewer_win);
         break;
       case APP_NOTEPAD:
         draw_notepad_window(&g_notepad_win);
         break;
       case APP_SETUP:
-        draw_setup_window(&g_setup_win);
+        if (g_setup_open)
+          draw_setup_window(&g_setup_win);
         break;
       default:
         break;
@@ -1653,7 +1657,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_setup_win.y = (int32_t)((g_bi->height - (uint32_t)g_setup_win.h) / 2u);
   if (g_setup_win.x < 16) g_setup_win.x = 16;
   if (g_setup_win.y < 16) g_setup_win.y = 16;
-  wm_close(APP_SETUP); // Closed by default, user opens via shell or start menu
+  g_setup_open = 0; // Closed by default, user opens via shell or start menu
   g_setup_step = 0;
   g_setup_disk_ready = 0;
   g_setup_partition_done = 0;
@@ -2091,7 +2095,7 @@ void desktop_tick(void) {
 
   // Window manager interactions (shell window)
   if (pressed & 1u) {
-    if (wm_is_open(APP_SHELL)) {
+    if (g_show_shell && wm_is_open(APP_SHELL)) {
       int32_t wx = g_shell_win.x;
       int32_t wy = g_shell_win.y;
       int32_t ww = g_shell_win.w;
