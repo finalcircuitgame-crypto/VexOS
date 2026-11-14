@@ -78,6 +78,36 @@ void xhci_print_hex32(uint32_t v);
 
 xhci_trb_t *xhci_alloc_tr_ring(void);
 
+static void xhci_release_init_pages(uint32_t scratchpad_count) {
+  if (dcbaa) {
+    uint64_t *sp_array = (uint64_t *)(uintptr_t)dcbaa[0];
+    if (sp_array) {
+      if (scratchpad_count > 512u)
+        scratchpad_count = 512u;
+      for (uint32_t i = 0; i < scratchpad_count; ++i) {
+        if (sp_array[i])
+          PMM_FreePage((void *)(uintptr_t)sp_array[i]);
+      }
+      PMM_FreePage(sp_array);
+    }
+    PMM_FreePage(dcbaa);
+    dcbaa = NULL;
+  }
+
+  if (command_ring) {
+    PMM_FreePage(command_ring);
+    command_ring = NULL;
+  }
+  if (event_ring) {
+    PMM_FreePage(event_ring);
+    event_ring = NULL;
+  }
+  if (erst) {
+    PMM_FreePage(erst);
+    erst = NULL;
+  }
+}
+
 void xhci_cmd_ring_push(const xhci_trb_t *trb);
 
 int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup, void *buf,
@@ -151,7 +181,13 @@ int xhci_ep0_control_no_data_out(xhci_device_state_t *dev, uint64_t setup) {
 }
 
 static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
+  if (!dev)
+    return 0;
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[xHCI] Could not allocate configuration descriptor buffer\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     buf[i] = 0;
 
@@ -710,6 +746,10 @@ static int xhci_cmd_enable_slot(uint32_t *out_slot_id) {
 
 xhci_trb_t *xhci_alloc_tr_ring(void) {
   xhci_trb_t *ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!ring) {
+    serial_print("[xHCI] Could not allocate transfer ring\n");
+    return NULL;
+  }
   for (int i = 0; i < 256; i++) {
     ring[i].data = 0;
     ring[i].status = 0;
@@ -759,6 +799,10 @@ static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
     return 0;
 
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    serial_print("[xHCI] EvaluateContext: input context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     input_ctx[i] = 0;
 
@@ -799,8 +843,14 @@ static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
 }
 
 static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
+  if (!dev)
+    return 0;
   // USB Device Descriptor is 18 bytes
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[xHCI] Could not allocate device descriptor buffer\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     buf[i] = 0;
 
@@ -869,18 +919,38 @@ static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
 
 static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
                                    uint32_t speed_code) {
-  // Allocate Device Context and EP0 transfer ring
+  if (slot_id == 0u || slot_id >= 256u || !dcbaa) {
+    serial_print("[xHCI] AddressDevice: invalid slot or missing DCBAA\n");
+    return 0;
+  }
+
+  // Allocate Device Context and EP0 transfer ring.
   uint8_t *dev_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!dev_ctx) {
+    serial_print("[xHCI] AddressDevice: device context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     dev_ctx[i] = 0;
 
   xhci_trb_t *ep0_ring = xhci_alloc_tr_ring();
+  if (!ep0_ring) {
+    PMM_FreePage(dev_ctx);
+    return 0;
+  }
 
-  // Write DCBAA entry for this slot
+  // Write DCBAA entry for this slot.
   dcbaa[slot_id] = (uint64_t)(uintptr_t)dev_ctx;
 
-  // Allocate Input Context (must hold Input Control + Slot + EP0)
+  // Allocate Input Context (must hold Input Control + Slot + EP0).
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    dcbaa[slot_id] = 0;
+    PMM_FreePage(ep0_ring);
+    PMM_FreePage(dev_ctx);
+    serial_print("[xHCI] AddressDevice: input context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     input_ctx[i] = 0;
 
@@ -935,7 +1005,11 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   uint32_t evt_slot = 0;
   uint32_t cc = 0;
   if (!xhci_wait_for_command_completion(&evt_slot, &cc)) {
-    serial_print("[xHCI] AddressDevice: timeout\n");
+    /*
+     * The command may still be in flight after a timeout. Keep input_ctx,
+     * dev_ctx, and ep0_ring alive rather than freeing memory DMA may use.
+     */
+    serial_print("[xHCI] AddressDevice: timeout; retaining in-flight DMA pages\n");
     return 0;
   }
 
@@ -945,8 +1019,16 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   xhci_print_u32_dec(evt_slot);
   serial_print("\n");
 
-  if (cc != 1)
+  if (cc != 1) {
+    PMM_FreePage(input_ctx);
+    dcbaa[slot_id] = 0;
+    PMM_FreePage(ep0_ring);
+    PMM_FreePage(dev_ctx);
     return 0;
+  }
+
+  /* A completed AddressDevice command has consumed its input context. */
+  PMM_FreePage(input_ctx);
 
   // Save device state for EP0 transfers (per-slot)
   xhci_device_state_t *dev = &g_devs[slot_id];
@@ -1099,6 +1181,10 @@ void xhci_init(uint64_t mmio_phys) {
 
   // 4) DCBAA + Scratchpad Buffers (xHCI 4.2 + 6.1)
   dcbaa = (uint64_t *)PMM_AllocatePage();
+  if (!dcbaa) {
+    serial_print("[xHCI] DCBAA allocation failed; controller disabled\n");
+    return;
+  }
   for (int i = 0; i < 512; i++)
     dcbaa[i] = 0;
 
@@ -1108,6 +1194,11 @@ void xhci_init(uint64_t mmio_phys) {
   uint32_t max_sp_lo = (hcs2 >> 27) & 0x1F;
   uint32_t max_sp_hi = (hcs2 >> 21) & 0x1F;
   uint32_t scratchpad_count = (max_sp_hi << 5) | max_sp_lo;
+  if (scratchpad_count > 512u) {
+    serial_print("[xHCI] Scratchpad array exceeds one-page capacity; controller disabled\n");
+    xhci_release_init_pages(0u);
+    return;
+  }
 
   if (scratchpad_count > 0) {
     serial_print("[xHCI] Scratchpads: ");
@@ -1133,21 +1224,35 @@ void xhci_init(uint64_t mmio_phys) {
     // Scratchpad Buffer Array is an array of 64-bit pointers, one per
     // scratchpad buffer. Typically fits in one page.
     uint64_t *sp_array = (uint64_t *)PMM_AllocatePage();
+    if (!sp_array) {
+      serial_print("[xHCI] Scratchpad array allocation failed; controller disabled\n");
+      xhci_release_init_pages(0u);
+      return;
+    }
     for (uint32_t i = 0; i < 512; i++)
       sp_array[i] = 0;
+    dcbaa[0] = (uint64_t)(uintptr_t)sp_array;
 
     for (uint32_t i = 0; i < scratchpad_count; i++) {
       void *sp_buf = PMM_AllocatePage();
+      if (!sp_buf) {
+        serial_print("[xHCI] Scratchpad buffer allocation failed; controller disabled\n");
+        xhci_release_init_pages(scratchpad_count);
+        return;
+      }
       sp_array[i] = (uint64_t)(uintptr_t)sp_buf;
     }
-
-    dcbaa[0] = (uint64_t)(uintptr_t)sp_array;
   }
 
   op_regs->dcbaap = (uint64_t)(uintptr_t)dcbaa;
 
   // 5) Command Ring: 256 TRBs with last TRB as Link TRB
   command_ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!command_ring) {
+    serial_print("[xHCI] Command ring allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   for (int i = 0; i < XHCI_CMD_RING_TRBS; i++) {
     command_ring[i].data = 0;
     command_ring[i].status = 0;
@@ -1168,6 +1273,11 @@ void xhci_init(uint64_t mmio_phys) {
 
   // 6) Event Ring + ERST (single segment)
   event_ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!event_ring) {
+    serial_print("[xHCI] Event ring allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   for (int i = 0; i < XHCI_EVT_RING_TRBS; i++) {
     event_ring[i].data = 0;
     event_ring[i].status = 0;
@@ -1175,6 +1285,11 @@ void xhci_init(uint64_t mmio_phys) {
   }
 
   erst = (xhci_erst_entry_t *)PMM_AllocatePage();
+  if (!erst) {
+    serial_print("[xHCI] Event Ring Segment Table allocation failed; controller disabled\n");
+    xhci_release_init_pages(scratchpad_count);
+    return;
+  }
   erst[0].segment_base = (uint64_t)(uintptr_t)event_ring;
   erst[0].segment_size = XHCI_EVT_RING_TRBS;
   erst[0].rsvd = 0;

@@ -1,8 +1,12 @@
 #include "bootinfo.h"
+#include "gfx.h"
+#include "jpeg.h"
 #include "desktop.h"
 #include "gdt.h"
 #include "heap.h"
 #include "hw_profile.h"
+#include "input.h"
+#include "window_manager.h"
 #include "idt.h"
 #include "pmm.h"
 #include "simplefs.h"
@@ -203,6 +207,7 @@ static void ci_memory_self_test(void) {
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
+extern int xhci_hid_ci_qemu_tablet_descriptor_test(void);
 
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -793,6 +798,12 @@ void kernel_main(BootInfo *bootInfo) {
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
 #ifdef VEXOS_CI_INPUT_TEST
+  if (!gfx_ci_self_test())
+    ci_memory_test_fail("framebuffer clipping/blending/blitting");
+  serial_print("[CI] Framebuffer clipping/blending/blitting passed\n");
+  if (!jpeg_ci_self_test())
+    ci_memory_test_fail("baseline/progressive/truncated JPEG decoder test");
+  serial_print("[CI] JPEG baseline decode and unsupported/truncated rejection passed\n");
   ci_memory_self_test();
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
@@ -832,6 +843,16 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Desktop initialized\n");
 
 #ifdef VEXOS_CI_INPUT_TEST
+  if (!input_ci_self_test(bootInfo->width, bootInfo->height))
+    ci_memory_test_fail("pointer and keyboard input queues");
+  serial_print("[CI] Pointer scaling/clamping and keyboard queues passed\n");
+  if (!xhci_hid_ci_qemu_tablet_descriptor_test())
+    ci_memory_test_fail("QEMU USB tablet HID Pointer descriptor parsing");
+  serial_print("[CI] QEMU USB tablet Pointer collection and absolute axes parsed\n");
+  if (!wm_ci_self_test(5u))
+    ci_memory_test_fail("window manager focus/open/close/z-order");
+  serial_print("[CI] Window manager visibility/focus/z-order/geometry passed\n");
+  /* Window drag-resize itself is verified after QMP drives the USB tablet. */
   // Run only after desktop_init has installed the framebuffer target.
   ci_framebuffer_syscall_self_test(bootInfo);
 #endif

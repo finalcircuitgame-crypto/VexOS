@@ -1,4 +1,6 @@
 #include "../../include/desktop.h"
+#include "../../include/gfx.h"
+#include "../../include/window_manager.h"
 #include "../../include/input.h"
 #include "../../include/heap.h"
 #include "../../include/hw_profile.h"
@@ -23,7 +25,6 @@ static char g_text[1024];
 static uint32_t g_text_len;
 
 static uint8_t g_start_open;
-static uint8_t g_show_shell;
 
 static char g_shell_out[4096];
 static uint32_t g_shell_out_len;
@@ -33,21 +34,16 @@ static uint32_t g_shell_line_len;
 static input_pointer_state_t g_last_ptr;
 static uint32_t g_rand_state;
 
-typedef struct {
-  int32_t x;
-  int32_t y;
-  int32_t w;
-  int32_t h;
-} wm_window_t;
+typedef wm_rect_t wm_window_t;
 
 static wm_window_t g_shell_win;
 static wm_window_t g_explorer_win;
 static wm_window_t g_viewer_win;
+static wm_window_t g_notepad_win;
+static wm_window_t g_setup_win;
 static uint8_t g_shell_dragging;
 static int32_t g_shell_drag_off_x;
 static int32_t g_shell_drag_off_y;
-static uint8_t g_explorer_open;
-static uint8_t g_viewer_open;
 static uint8_t g_explorer_dragging;
 static int32_t g_explorer_drag_off_x;
 static int32_t g_explorer_drag_off_y;
@@ -84,11 +80,150 @@ typedef enum {
   APP_COUNT = 5
 } app_id_t;
 
-static uint8_t g_app_open[APP_COUNT];
-static app_id_t g_app_z[APP_COUNT];
-static uint32_t g_app_z_len;
-static app_id_t g_app_focus;
 static void app_raise(app_id_t app);
+
+static uint8_t g_window_resize_active;
+static app_id_t g_window_resize_app = APP_COUNT;
+static int32_t g_window_resize_pointer_x;
+static int32_t g_window_resize_pointer_y;
+static int32_t g_window_resize_width;
+static int32_t g_window_resize_height;
+
+static wm_window_t *window_for_app(app_id_t app) {
+  switch (app) {
+    case APP_SHELL: return &g_shell_win;
+    case APP_EXPLORER: return &g_explorer_win;
+    case APP_VIEWER: return &g_viewer_win;
+    case APP_NOTEPAD: return &g_notepad_win;
+    case APP_SETUP: return &g_setup_win;
+    default: return NULL;
+  }
+}
+
+static void window_resize_begin(app_id_t app, int32_t pointer_x,
+                                int32_t pointer_y) {
+  wm_window_t *win = window_for_app(app);
+  if (!win)
+    return;
+  g_window_resize_active = 1u;
+  g_window_resize_app = app;
+  g_window_resize_pointer_x = pointer_x;
+  g_window_resize_pointer_y = pointer_y;
+  g_window_resize_width = win->w;
+  g_window_resize_height = win->h;
+  app_raise(app);
+}
+
+static int window_resize_update(int32_t pointer_x, int32_t pointer_y) {
+  if (!g_window_resize_active || g_window_resize_app >= APP_COUNT || !g_bi)
+    return 0;
+
+  wm_window_t *win = window_for_app(g_window_resize_app);
+  if (!win)
+    return 0;
+
+  int32_t old_width = win->w;
+  int32_t old_height = win->h;
+  int64_t delta_w = (int64_t)pointer_x - g_window_resize_pointer_x;
+  int64_t delta_h = (int64_t)pointer_y - g_window_resize_pointer_y;
+  if (delta_w > INT32_MAX) delta_w = INT32_MAX;
+  if (delta_w < INT32_MIN) delta_w = INT32_MIN;
+  if (delta_h > INT32_MAX) delta_h = INT32_MAX;
+  if (delta_h < INT32_MIN) delta_h = INT32_MIN;
+  win->w = g_window_resize_width;
+  win->h = g_window_resize_height;
+  uint32_t min_w = 320u;
+  uint32_t min_h = 220u;
+  if (g_window_resize_app == APP_EXPLORER ||
+      g_window_resize_app == APP_NOTEPAD) {
+    min_w = 420u;
+    min_h = 280u;
+  } else if (g_window_resize_app == APP_VIEWER) {
+    min_w = 360u;
+    min_h = 220u;
+  } else if (g_window_resize_app == APP_SETUP) {
+    min_w = 420u;
+    min_h = 280u;
+  }
+
+  uint32_t work_height =
+      g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
+  wm_resize_rect(win, (int32_t)delta_w, (int32_t)delta_h,
+                 g_bi->width, work_height, min_w, min_h);
+  return win->w != old_width || win->h != old_height;
+}
+
+static void desktop_dirty_add_rect(wm_rect_t *dirty, uint8_t *valid,
+                                    int32_t x, int32_t y,
+                                    int32_t width, int32_t height) {
+  if (!dirty || !valid || !g_bi || width <= 0 || height <= 0)
+    return;
+
+  /* Include the window shadow/border around both its old and new bounds. */
+  int64_t left = (int64_t)x - 6;
+  int64_t top = (int64_t)y - 6;
+  int64_t right = (int64_t)x + width + 6;
+  int64_t bottom = (int64_t)y + height + 6;
+  if (left < 0) left = 0;
+  if (top < 0) top = 0;
+  if (right > g_bi->width) right = g_bi->width;
+  if (bottom > g_bi->height) bottom = g_bi->height;
+  if (right <= left || bottom <= top)
+    return;
+
+  if (!*valid) {
+    dirty->x = (int32_t)left;
+    dirty->y = (int32_t)top;
+    dirty->w = (int32_t)(right - left);
+    dirty->h = (int32_t)(bottom - top);
+    *valid = 1u;
+    return;
+  }
+
+  int64_t old_left = dirty->x;
+  int64_t old_top = dirty->y;
+  int64_t old_right = old_left + dirty->w;
+  int64_t old_bottom = old_top + dirty->h;
+  if (left > old_left) left = old_left;
+  if (top > old_top) top = old_top;
+  if (right < old_right) right = old_right;
+  if (bottom < old_bottom) bottom = old_bottom;
+  dirty->x = (int32_t)left;
+  dirty->y = (int32_t)top;
+  dirty->w = (int32_t)(right - left);
+  dirty->h = (int32_t)(bottom - top);
+}
+
+static void desktop_dirty_add_window(wm_rect_t *dirty, uint8_t *valid,
+                                     const wm_window_t *win) {
+  if (!win)
+    return;
+  desktop_dirty_add_rect(dirty, valid, win->x, win->y, win->w, win->h);
+}
+
+static void draw_resize_grip(const wm_window_t *win, uint8_t focused) {
+  if (!win || win->w < 40 || win->h < 40)
+    return;
+  uint32_t color = focused ? 0x008DB4D7u : 0x005B7188u;
+  uint32_t x = (uint32_t)(win->x + win->w - 10);
+  uint32_t y = (uint32_t)(win->y + win->h - 10);
+  gfx_put_pixel(g_bi, g_back, x + 6u, y + 2u, color);
+  gfx_put_pixel(g_bi, g_back, x + 4u, y + 4u, color);
+  gfx_put_pixel(g_bi, g_back, x + 5u, y + 4u, color);
+  gfx_put_pixel(g_bi, g_back, x + 2u, y + 6u, color);
+  gfx_put_pixel(g_bi, g_back, x + 3u, y + 6u, color);
+  gfx_put_pixel(g_bi, g_back, x + 4u, y + 6u, color);
+}
+
+static void constrain_desktop_window(wm_window_t *win,
+                                     uint32_t min_width,
+                                     uint32_t min_height) {
+  if (!g_bi || !win)
+    return;
+  uint32_t work_height =
+      g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
+  wm_clamp_rect(win, g_bi->width, work_height, min_width, min_height);
+}
 
 static void viewer_clear_content(void) {
   if (g_viewer_pixels) {
@@ -271,37 +406,16 @@ static int viewer_load_file(const char *name) {
   }
 
   g_viewer_scroll = 0;
-  g_viewer_open = 1;
-  g_app_open[APP_VIEWER] = 1;
+  wm_open(APP_VIEWER);
+      wm_show(APP_VIEWER);
   app_raise(APP_VIEWER);
   return 1;
 }
 
 static void app_raise(app_id_t app) {
-  if ((uint32_t)app >= APP_COUNT)
-    return;
-
-  uint32_t found = g_app_z_len;
-  for (uint32_t i = 0; i < g_app_z_len; i++) {
-    if (g_app_z[i] == app) {
-      found = i;
-      break;
-    }
-  }
-
-  if (found < g_app_z_len) {
-    for (uint32_t i = found + 1u; i < g_app_z_len; i++)
-      g_app_z[i - 1u] = g_app_z[i];
-    g_app_z_len--;
-  }
-
-  if (g_app_z_len < APP_COUNT)
-    g_app_z[g_app_z_len++] = app;
-
-  g_app_focus = app;
+  wm_raise((uint32_t)app);
 }
 
-static wm_window_t g_notepad_win;
 static uint8_t g_notepad_dragging;
 static int32_t g_notepad_drag_off_x;
 static int32_t g_notepad_drag_off_y;
@@ -311,8 +425,6 @@ static uint32_t g_notepad_text_len;
 static uint32_t g_notepad_scroll;
 
 // Setup Wizard state
-static wm_window_t g_setup_win;
-static uint8_t g_setup_open;
 static uint8_t g_setup_dragging;
 static int32_t g_setup_drag_off_x;
 static int32_t g_setup_drag_off_y;
@@ -656,7 +768,7 @@ static void draw_window_chrome(const wm_window_t *win,const char *title,const ch
 }
 
 static void draw_notepad_window(const wm_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Notepad",g_notepad_name[0]?g_notepad_name:"note.txt",(uint8_t)(g_app_focus==APP_NOTEPAD),1,1);
+  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Notepad",g_notepad_name[0]?g_notepad_name:"note.txt",(uint8_t)(wm_is_focused(APP_NOTEPAD)),1,1);
   draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+42),"FILE   EDIT   VIEW",0xB9C9DAu);draw_string_8x8((uint32_t)(x+w-142),(uint32_t)(y+42),"PLAIN TEXT",0x7FA5C8u);
   uint32_t cx=(uint32_t)x+12u,cy=(uint32_t)y+66u,cw=w>24?(uint32_t)w-24u:1u,ch=h>78?(uint32_t)h-78u:1u;blend_round_rect(cx,cy,cw,ch,5u,0xF4F7FBu,255);draw_rect(cx+1u,cy+1u,cw-2u,1u,0xFFFFFFu);draw_rect(cx+34u,cy+1u,1u,ch-2u,0xDCE5EFu);
   uint32_t tx=cx+46u,ty=cy+12u,cols=w>72?(uint32_t)(w-72)/8u:0u,rows=h>100?(uint32_t)(h-100)/16u:0u,start=0,skip=g_notepad_scroll;for(uint32_t i=0;i<g_notepad_text_len&&skip;i++)if(g_notepad_text[i]=='\n'){skip--;start=i+1u;}
@@ -673,10 +785,10 @@ static void draw_setup_window(const wm_window_t *win) {
   int32_t w = win->w;
   int32_t h = win->h;
 
-  uint8_t is_focused = (g_app_focus == APP_SETUP);
+  uint8_t is_focused = (wm_is_focused(APP_SETUP));
   draw_window_chrome(win, "Setup Wizard", NULL, is_focused, 0, 0);
 
-  if (!g_setup_open)
+  if (!wm_is_visible(APP_SETUP))
     return;
 
   const char *step_titles[] = {
@@ -785,7 +897,7 @@ static void draw_setup_window(const wm_window_t *win) {
 
 static void draw_explorer_window(const wm_window_t *win){
   if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint32_t total=simplefs_file_count();char cb[32];uint32_t n=shell_u32_to_dec(cb,total);cb[n]=' ';cb[n+1]='i';cb[n+2]='t';cb[n+3]='e';cb[n+4]='m';cb[n+5]='s';cb[n+6]=0;
-  draw_window_chrome(win,"Files",cb,(uint8_t)(g_app_focus==APP_EXPLORER),1,0);draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),38u,0x17263A);
+  draw_window_chrome(win,"Files",cb,(uint8_t)(wm_is_focused(APP_EXPLORER)),1,0);draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),38u,0x17263A);
   blend_round_rect((uint32_t)(x+12),(uint32_t)(y+38),(uint32_t)(w-24),24u,6u,0x0D1928u,255);draw_string_8x8((uint32_t)(x+22),(uint32_t)(y+46),"<",0xAFC4D8u);draw_string_8x8((uint32_t)(x+42),(uint32_t)(y+46),">",0x71879Du);draw_rect((uint32_t)(x+62),(uint32_t)(y+43),1u,14u,0x344A60);draw_string_8x8((uint32_t)(x+76),(uint32_t)(y+46),"This PC   >   VexOS Storage",0xDCE8F4u);
   if(w>620){draw_rect((uint32_t)(x+w-144),(uint32_t)(y+43),1u,14u,0x344A60);draw_string_8x8((uint32_t)(x+w-128),(uint32_t)(y+46),"Search files",0x71879Du);}
   uint32_t by=(uint32_t)y+70u,bh=h>84?(uint32_t)h-84u:1u;blend_round_rect((uint32_t)(x+10),by,140u,bh,5u,0x131F2E,255);draw_string_8x8((uint32_t)(x+22),by+14u,"LOCATIONS",0x7891AAu);blend_round_rect((uint32_t)(x+16),by+32u,128u,26u,5u,0x23415F,255);draw_rect((uint32_t)(x+20),by+40u,8u,10u,0x70B7F2u);draw_string_8x8((uint32_t)(x+36),by+41u,"Storage",0xF1F6FCu);draw_string_8x8((uint32_t)(x+22),by+76u,"VOLUME",0x7891AAu);draw_string_8x8((uint32_t)(x+22),by+94u,"SimpleFS",0xC8D7E6u);draw_string_8x8((uint32_t)(x+22),by+112u,"Local disk",0x849BB2u);
@@ -806,7 +918,7 @@ static void draw_viewer_window(const wm_window_t *win) {
   int32_t w = win->w;
   int32_t h = win->h;
   draw_window_chrome(win, "Viewer", g_viewer_name[0] ? g_viewer_name : "Preview",
-                     (uint8_t)(g_app_focus == APP_VIEWER), 1, 0);
+                     (uint8_t)(wm_is_focused(APP_VIEWER)), 1, 0);
 
   draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
             (uint32_t)(w - 2), 30u, 0x17263A);
@@ -846,11 +958,28 @@ static void draw_viewer_window(const wm_window_t *win) {
     uint32_t image_x = px + (pw - draw_w) / 2u;
     uint32_t image_y = py + (ph - draw_h) / 2u;
 
-    for (uint32_t iy = 0; iy < draw_h; iy++) {
+    uint32_t clip_x = 0u, clip_y = 0u, clip_w = 0u, clip_h = 0u;
+    gfx_get_clip_rect(g_bi, &clip_x, &clip_y, &clip_w, &clip_h);
+    uint64_t clip_right = (uint64_t)clip_x + clip_w;
+    uint64_t clip_bottom = (uint64_t)clip_y + clip_h;
+    uint32_t draw_x_begin = clip_x > image_x ? clip_x - image_x : 0u;
+    uint32_t draw_y_begin = clip_y > image_y ? clip_y - image_y : 0u;
+    uint32_t draw_x_end = clip_right > image_x
+                              ? (uint32_t)(clip_right - image_x)
+                              : 0u;
+    uint32_t draw_y_end = clip_bottom > image_y
+                              ? (uint32_t)(clip_bottom - image_y)
+                              : 0u;
+    if (draw_x_end > draw_w) draw_x_end = draw_w;
+    if (draw_y_end > draw_h) draw_y_end = draw_h;
+
+    /* Avoid scaling every source pixel when a dirty redraw exposes only part
+       of an image window. */
+    for (uint32_t iy = draw_y_begin; iy < draw_y_end; iy++) {
       uint32_t src_y = (uint32_t)(((uint64_t)iy * g_viewer_image_height) / draw_h);
       if (src_y >= g_viewer_image_height)
         src_y = g_viewer_image_height - 1u;
-      for (uint32_t ix = 0; ix < draw_w; ix++) {
+      for (uint32_t ix = draw_x_begin; ix < draw_x_end; ix++) {
         uint32_t src_x = (uint32_t)(((uint64_t)ix * g_viewer_image_width) / draw_w);
         if (src_x >= g_viewer_image_width)
           src_x = g_viewer_image_width - 1u;
@@ -937,53 +1066,23 @@ static void draw_window_chrome(const wm_window_t *win, const char *title, const 
 static void draw_desktop_icons(void);
 static void draw_widgets(void);
 
-static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y,
-                      uint32_t w, uint32_t h) {
-  if (!g_bi || !dst || !src)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  if (x + w > g_bi->width)
-    w = g_bi->width - x;
-  if (y + h > g_bi->height)
-    h = g_bi->height - y;
-
-  for (uint32_t yy = 0; yy < h; yy++) {
-    uint32_t *drow = &dst[(y + yy) * g_bi->pitch + x];
-    const uint32_t *srow = &src[(y + yy) * g_bi->pitch + x];
-    for (uint32_t xx = 0; xx < w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
+static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x,
+                      uint32_t y, uint32_t w, uint32_t h) {
+  gfx_blit_rect(g_bi, dst, src, x, y, w, h);
 }
 
-void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
-  if (!g_bi || !src) return;
-  // A userspace framebuffer client owns the display after its first frame.
-  // Otherwise the desktop compositor would overwrite every game frame.
-  uint32_t* dst = g_bi->framebuffer;
-  uint32_t copy_w = (w > g_bi->width) ? g_bi->width : w;
-  uint32_t copy_h = (h > g_bi->height) ? g_bi->height : h;
-  for (uint32_t yy = 0; yy < copy_h; yy++) {
-    uint32_t *drow = &dst[yy * g_bi->pitch];
-    const uint32_t *srow = &src[yy * w];
-    for (uint32_t xx = 0; xx < copy_w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
+void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
+  if (!g_bi || !src)
+    return;
+  gfx_blit_frame(g_bi, src, w, w, h);
 }
 
 static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
-  if (!g_bi)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  dst[y * g_bi->pitch + x] = c;
+  gfx_put_pixel(g_bi, g_back, x, y, c);
 }
 
 static void draw_shell_window(const wm_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(g_app_focus==APP_SHELL);draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
+  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;uint8_t focused=(wm_is_focused(APP_SHELL));draw_window_chrome(win,"Terminal","VexOS Shell",focused,1,0);draw_string_8x8((uint32_t)(x+14),(uint32_t)(y+40),"VEXOS TERMINAL  /  LOCAL SESSION",0x7FA4C7u);
   uint32_t px=(uint32_t)x+10u,py=(uint32_t)y+56u,pw=w>20?(uint32_t)w-20u:1u,ph=h>94?(uint32_t)h-94u:1u;blend_round_rect(px,py,pw,ph,5u,0x091321u,255);draw_rect(px+1u,py+1u,pw-2u,1u,0x1C344Du);uint32_t tx=px+12u,ty=py+12u,cols=pw>24u?(pw-24u)/8u:0u,rows=ph>20u?(ph-20u)/10u:0u;
   if(cols&&rows){uint32_t cap=cols*rows,start=g_shell_out_len>cap?g_shell_out_len-cap:0u,cx=0,cy=0;for(uint32_t i=start;i<g_shell_out_len&&cy<rows;i++){char c=g_shell_out[i];if(c=='\n'){cx=0;cy++;continue;}if(cx<cols&&c>=32&&c<=126)draw_glyph_8x8(tx+cx*8u,ty+cy*10u,(uint8_t)c,0xD7E7F7u);cx++;if(cx>=cols){cx=0;cy++;}}}
   uint32_t iy=(uint32_t)(y+h-30);blend_round_rect((uint32_t)(x+10),iy,(uint32_t)(w-20),24u,5u,0x1A2C40u,255);draw_rect((uint32_t)(x+18),iy+1u,(uint32_t)(w-36),1u,0x35516Du);draw_string_8x8((uint32_t)(x+22),iy+8u,">",0x79E0B0u);draw_string_8x8((uint32_t)(x+38),iy+8u,g_shell_line,0xF1F6FCu);uint32_t len=0;while(g_shell_line[len])len++;if(focused&&((g_tick/30u)%2u==0u))draw_rect((uint32_t)(x+38)+len*8u,iy+8u,7u,8u,0x79E0B0u);
@@ -997,11 +1096,95 @@ static void draw_taskbar(void){
   uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);draw_string_8x8(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);draw_string_8x8(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
 }
 
-static void draw_start_menu(void){
-  if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
-  draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);draw_string_8x8(x+16u,y+9u,"VEXOS",0xF0F6FCu);draw_string_8x8(x+208u,y+9u,"APPS",0x7FA0BEu);draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
-  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};const char *labels[6]={"Terminal","Files","Notepad","Viewer","Setup","Help"};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);draw_string_8x8(x+23u,ry+6u,"?",0xEAF3FCu);}draw_string_8x8(x+46u,ry+7u,labels[i],0xDCE8F4u);if(i==0u)draw_string_8x8(x+232u,ry+7u,">",0x75A8D4u);}
+typedef struct {
+  uint32_t x;
+  uint32_t y;
+  uint32_t width;
+  uint32_t height;
+  uint32_t row_top;
+  uint32_t row_height;
+} start_menu_layout_t;
+
+static start_menu_layout_t start_menu_layout(void) {
+  start_menu_layout_t layout = {0u, 0u, 0u, 0u, 36u, 1u};
+  if (!g_bi || !g_bi->width || !g_bi->height)
+    return layout;
+
+  layout.width = g_bi->width > 384u ? 360u :
+                 (g_bi->width > 24u ? g_bi->width - 24u : g_bi->width);
+  layout.x = g_bi->width > layout.width + 12u ? 12u : 0u;
+
+  uint32_t bar_height = g_bi->height < 56u ? g_bi->height : 56u;
+  uint32_t available_height =
+      g_bi->height > bar_height + 16u
+          ? g_bi->height - bar_height - 16u
+          : g_bi->height;
+  layout.height = available_height < 270u ? available_height : 270u;
+  uint32_t bar_y = g_bi->height - bar_height;
+  layout.y = bar_y > layout.height + 8u
+                 ? bar_y - layout.height - 8u
+                 : 0u;
+
+  uint32_t rows_area = layout.height > layout.row_top + 10u
+                           ? layout.height - layout.row_top - 10u
+                           : 6u;
+  layout.row_height = rows_area / 6u;
+  if (layout.row_height == 0u)
+    layout.row_height = 1u;
+  return layout;
+}
+
+static void draw_start_menu(void) {
+  if (!g_bi || !g_start_open)
+    return;
+
+  start_menu_layout_t menu = start_menu_layout();
+  if (menu.width < 120u || menu.height < 70u)
+    return;
+
+  uint32_t x = menu.x;
+  uint32_t y = menu.y;
+  uint32_t w = menu.width;
+  uint32_t h = menu.height;
+  blend_round_rect(x, y, w, h, 12u, 0x101B2Au, 250u);
+  draw_rect(x + 1u, y + 1u, w - 2u, 1u, 0x5A83A8u);
+  draw_rect(x + 1u, y + h - 1u, w - 2u, 1u, 0x26394Fu);
+  draw_rect(x + 1u, y + 1u, 1u, h - 2u, 0x354B63u);
+  draw_rect(x + w - 2u, y + 1u, 1u, h - 2u, 0x26394Fu);
+
+  draw_string_8x8(x + 18u, y + 12u, "VEXOS", 0xF0F6FCu);
+  draw_string_8x8(x + w - 104u, y + 12u, "APPLICATIONS", 0x7FA0BEu);
+  draw_rect(x + 14u, y + 28u, w - 28u, 1u, 0x2B4057u);
+
+  const app_id_t apps[5] = {
+      APP_SHELL, APP_EXPLORER, APP_NOTEPAD, APP_VIEWER, APP_SETUP};
+  const char *labels[6] = {
+      "Terminal", "Files", "Notepad", "Viewer", "Setup", "Help"};
+  const char *categories[6] = {
+      "SYSTEM", "STORAGE", "EDITOR", "IMAGES", "SYSTEM", "GUIDE"};
+
+  for (uint32_t i = 0; i < 6u; ++i) {
+    uint32_t row_y = y + menu.row_top + i * menu.row_height;
+    uint32_t row_h = menu.row_height > 2u ? menu.row_height - 2u : 1u;
+    uint32_t icon_size = row_h > 24u ? 22u : row_h - 2u;
+    if ((i & 1u) == 0u)
+      blend_round_rect(x + 10u, row_y, w - 20u, row_h, 5u,
+                       0x1A2D42u, 150u);
+    if (i < 5u) {
+      draw_app_icon(x + 18u, row_y + (row_h - icon_size) / 2u,
+                    icon_size, apps[i]);
+    } else {
+      blend_round_rect(x + 18u, row_y + (row_h - icon_size) / 2u,
+                       icon_size, icon_size, 5u, 0x334B65u, 255u);
+      draw_string_8x8(x + 25u, row_y + (row_h - 8u) / 2u,
+                      "?", 0xEAF3FCu);
+    }
+    draw_string_8x8(x + 52u, row_y + (row_h - 8u) / 2u,
+                    labels[i], 0xDCE8F4u);
+    if (w >= 300u)
+      draw_string_8x8(x + w - 76u, row_y + (row_h - 8u) / 2u,
+                      categories[i], 0x7FA0BEu);
+  }
 }
 
 static void draw_desktop_icons(void){
@@ -1020,167 +1203,64 @@ static void draw_widgets(void){
 }
 
 
-// Paint windows from back to front. app_raise() moves the focused app to the
-// end of this list, ensuring it is always rendered above overlapping windows.
+// Paint windows from back to front. The window manager keeps the focused app
+// at the end of the z-order list so it is rendered above overlapping windows.
 static void draw_open_windows(void) {
-  for (uint32_t i = 0; i < g_app_z_len; i++) {
-    app_id_t app = g_app_z[i];
-    if ((uint32_t)app >= APP_COUNT || !g_app_open[app])
+  for (uint32_t i = 0; i < wm_z_count(); i++) {
+    app_id_t app = (app_id_t)wm_z_at(i);
+    if ((uint32_t)app >= APP_COUNT || !wm_is_open((uint32_t)app))
       continue;
 
     switch (app) {
       case APP_SHELL:
-        if (g_show_shell) draw_shell_window(&g_shell_win);
+        if (wm_is_visible(APP_SHELL))
+          draw_shell_window(&g_shell_win);
         break;
       case APP_EXPLORER:
-        if (g_explorer_open) draw_explorer_window(&g_explorer_win);
+        if (wm_is_visible(APP_EXPLORER))
+          draw_explorer_window(&g_explorer_win);
         break;
       case APP_VIEWER:
-        if (g_viewer_open) draw_viewer_window(&g_viewer_win);
+        if (wm_is_visible(APP_VIEWER))
+          draw_viewer_window(&g_viewer_win);
         break;
       case APP_NOTEPAD:
-        draw_notepad_window(&g_notepad_win);
+        if (wm_is_visible(APP_NOTEPAD))
+          draw_notepad_window(&g_notepad_win);
         break;
       case APP_SETUP:
-        if (g_setup_open) draw_setup_window(&g_setup_win);
+        if (wm_is_visible(APP_SETUP))
+          draw_setup_window(&g_setup_win);
         break;
       default:
         break;
     }
+    if (wm_is_visible((uint32_t)app))
+      draw_resize_grip(window_for_app(app),
+                       (uint8_t)wm_is_focused((uint32_t)app));
   }
 }
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                       uint32_t c) {
-  if (!g_bi)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = c;
-    }
-  }
+  gfx_fill_rect(g_bi, g_back, x, y, w, h, c);
 }
 
-static inline uint32_t blend_rgb(uint32_t dst, uint32_t src, uint8_t a) {
-  uint32_t inv = (uint32_t)(255u - (uint32_t)a);
-  uint32_t dr = (dst >> 16) & 0xFFu;
-  uint32_t dg = (dst >> 8) & 0xFFu;
-  uint32_t db = dst & 0xFFu;
-  uint32_t sr = (src >> 16) & 0xFFu;
-  uint32_t sg = (src >> 8) & 0xFFu;
-  uint32_t sb = src & 0xFFu;
 
-  uint32_t r = (dr * inv + sr * (uint32_t)a) / 255u;
-  uint32_t g = (dg * inv + sg * (uint32_t)a) / 255u;
-  uint32_t b = (db * inv + sb * (uint32_t)a) / 255u;
-  return (r << 16) | (g << 8) | b;
-}
 
 static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                        uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      row[xx] = blend_rgb(row[xx], c, a);
-    }
-  }
+  gfx_blend_rect(g_bi, g_back, x, y, w, h, c, a);
 }
 
 static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                              uint32_t radius, uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (radius == 0) {
-    blend_rect(x, y, w, h, c, a);
-    return;
-  }
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t rr = radius * radius;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      uint32_t inside = 1;
-
-      if (xx < x + radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx < x + radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      }
-
-      if (inside) {
-        row[xx] = blend_rgb(row[xx], c, a);
-      }
-    }
-  }
+  gfx_blend_round_rect(g_bi, g_back, x, y, w, h, radius, c, a);
 }
 
 static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
                             uint32_t fg) {
-  uint32_t cx = x;
-  while (s && *s) {
-    char c = *s++;
-    if (c == '\n') {
-      y += 8;
-      cx = x;
-      continue;
-    }
-    if (c == '\t') {
-      cx += 32;
-      continue;
-    }
-    draw_glyph_8x8(cx, y, (uint8_t)c, fg);
-    cx += 8;
-  }
+  gfx_draw_text8(g_bi, g_back, x, y, s, fg);
 }
 
 static int hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
@@ -1380,8 +1460,8 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 8 && streq_n(g_shell_line, "explorer", 8)) {
     shell_append("opening explorer...\n");
     if (simplefs_init()) {
-      g_explorer_open = 1;
-      g_app_open[APP_EXPLORER] = 1;
+      wm_open(APP_EXPLORER);
+      wm_show(APP_EXPLORER);
       app_raise(APP_EXPLORER);
     } else {
       shell_append("fs init failed\n");
@@ -1408,15 +1488,16 @@ static void shell_run_line(void) {
     }
   } else if (g_shell_line_len == 7 && streq_n(g_shell_line, "notepad", 7)) {
     shell_append("opening notepad...\n");
-    g_app_open[APP_NOTEPAD] = 1;
+    wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);
     app_raise(APP_NOTEPAD);
 #ifdef VEXOS_CI_INPUT_TEST
     serial_print("[CI] Notepad opened by shell command\n");
 #endif
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
-    g_setup_open = 1;
-    g_app_open[APP_SETUP] = 1;
+    wm_open(APP_SETUP);
+      wm_show(APP_SETUP);
     app_raise(APP_SETUP);
     g_setup_step = 0;
   } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "wall", 4)) {
@@ -1511,86 +1592,170 @@ static void shell_run_line(void) {
 }
 
 static void draw_background(void) {
-  if (!g_bi)
+  if (!g_bi || !g_bi->framebuffer || !g_bi->width || !g_bi->height ||
+      g_bi->pitch < g_bi->width) {
     return;
+  }
 
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  uint32_t h = g_bi->height ? g_bi->height : 1;
   uint32_t w = g_bi->width;
-  uint32_t horizon = (h * 52u) / 100u;
+  uint32_t h = g_bi->height;
+  uint32_t horizon = (h * 54u) / 100u;
   if (horizon >= h)
-    horizon = h - 1;
+    horizon = h - 1u;
 
-  for (uint32_t y = 0; y < h; y++) {
-    uint32_t *row = &dst[y * g_bi->pitch];
-    uint32_t r, g, b;
+  /* Deep-space to ocean-blue gradient, with a softer lower horizon. */
+  for (uint32_t y = 0; y < h; ++y) {
+    uint32_t t = (y * 255u) / (h ? h : 1u);
+    uint32_t red;
+    uint32_t green;
+    uint32_t blue;
     if (y < horizon) {
-      uint32_t t = (y * 255u) / (horizon ? horizon : 1);
-      r = 10 + (t * 18u) / 255u;
-      g = 14 + (t * 26u) / 255u;
-      b = 24 + (t * 60u) / 255u;
+      uint32_t upper = (y * 255u) / (horizon ? horizon : 1u);
+      red = 7u + (upper * 18u) / 255u;
+      green = 11u + (upper * 24u) / 255u;
+      blue = 23u + (upper * 58u) / 255u;
     } else {
-      uint32_t t = ((y - horizon) * 255u) / ((h - horizon) ? (h - horizon) : 1);
-      r = 10 + (t * 10u) / 255u;
-      g = 30 + (t * 60u) / 255u;
-      b = 50 + (t * 80u) / 255u;
+      uint32_t lower = ((y - horizon) * 255u) /
+                       ((h - horizon) ? (h - horizon) : 1u);
+      red = 8u + (lower * 8u) / 255u;
+      green = 25u + (lower * 38u) / 255u;
+      blue = 46u + (lower * 64u) / 255u;
     }
-    uint32_t base = (r << 16) | (g << 8) | b;
-    for (uint32_t x = 0; x < w; x++) {
-      row[x] = base;
+    uint32_t base = (red << 16) | (green << 8) | blue;
+    uint32_t *row = &dst[(uint64_t)y * g_bi->pitch];
+    for (uint32_t x = 0; x < w; ++x) {
+      /* Very faint horizontal variation keeps large fills from looking flat. */
+      uint32_t lift = ((x + t) & 31u) == 0u ? 1u : 0u;
+      uint32_t rr = red + lift;
+      uint32_t gg = green + lift;
+      row[x] = (rr << 16) | (gg << 8) | blue;
+    }
+    (void)base;
+  }
+
+  /* Deterministic stars with restrained brightness and size. */
+  uint32_t star_count = (w * h) / 5000u;
+  if (star_count > 190u)
+    star_count = 190u;
+  if (star_count < 40u)
+    star_count = 40u;
+  for (uint32_t i = 0; i < star_count; ++i) {
+    uint32_t seed = shell_next_rand();
+    uint32_t sx = seed % w;
+    uint32_t sy = shell_next_rand() % (horizon ? horizon : 1u);
+    uint32_t color = (seed & 15u) == 0u ? 0x00FFFFFFu
+                     : (seed & 3u) == 0u ? 0x00AFC8E8u
+                                         : 0x007F9BBCu;
+    dst[(uint64_t)sy * g_bi->pitch + sx] = color;
+    if ((seed & 31u) == 0u && sx + 1u < w)
+      dst[(uint64_t)sy * g_bi->pitch + sx + 1u] = 0x00B7CDE8u;
+  }
+
+  /* A single shaded planet with a thin orbital ring replaces the old
+     overlapping flat circles. Keep all arithmetic bounded by screen size. */
+  uint32_t radius = (w < h ? w : h) * 13u / 100u;
+  if (radius < 20u)
+    radius = 20u;
+  if (radius > 148u)
+    radius = 148u;
+  if (horizon < radius * 2u + 12u)
+    return;
+
+  uint32_t cx = (w * 76u) / 100u;
+  uint32_t cy = (horizon * 43u) / 100u;
+  uint32_t ring_rx = radius * 17u / 10u;
+  uint32_t ring_ry = radius * 48u / 100u;
+  if (!ring_ry)
+    ring_ry = 1u;
+
+  /* Back half of the orbit. */
+  int32_t left = (int32_t)cx - (int32_t)ring_rx;
+  int32_t right = (int32_t)cx + (int32_t)ring_rx;
+  int32_t top = (int32_t)cy - (int32_t)ring_ry;
+  int32_t bottom = (int32_t)cy + (int32_t)ring_ry;
+  for (int32_t py = top; py <= (int32_t)cy; ++py) {
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t px = left; px <= right; ++px) {
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
+      int64_t dx = (int64_t)px - (int64_t)cx;
+      int64_t dy = (int64_t)py - (int64_t)cy;
+      uint64_t ex = (uint64_t)(dx * dx) * 1000000ull /
+                    ((uint64_t)ring_rx * ring_rx);
+      uint64_t ey = (uint64_t)(dy * dy) * 1000000ull /
+                    ((uint64_t)ring_ry * ring_ry);
+      uint64_t ellipse = ex + ey;
+      if (ellipse >= 780000ull && ellipse <= 1160000ull)
+        dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] =
+            0x006B91B5u;
     }
   }
 
-  for (uint32_t x = 0; x < w; x++) {
-    uint32_t y0 = horizon;
-    dst[y0 * g_bi->pitch + x] = 0xB0C8FF;
-  }
+  /* Spherical body, lit from the upper-left. */
+  int32_t pr = (int32_t)radius;
+  uint64_t radius_squared = (uint64_t)radius * radius;
+  for (int32_t dy = -pr; dy <= pr; ++dy) {
+    int32_t py = (int32_t)cy + dy;
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t dx = -pr; dx <= pr; ++dx) {
+      uint64_t distance_squared =
+          (uint64_t)((int64_t)dx * dx + (int64_t)dy * dy);
+      if (distance_squared > radius_squared)
+        continue;
+      int32_t px = (int32_t)cx + dx;
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
 
-  uint32_t star_count = 220;
-  for (uint32_t i = 0; i < star_count; i++) {
-    uint32_t r0 = shell_next_rand();
-    uint32_t sx = r0 % (w ? w : 1);
-    uint32_t sy = (shell_next_rand() % (horizon ? horizon : 1));
-    uint32_t c = 0xE8F0FF;
-    if ((r0 & 7u) == 0)
-      c = 0xFFFFFF;
-    put_px(sx, sy, c);
-  }
+      int32_t light = 155 - ((dx + dy / 2) * 72) / pr;
+      if (light < 45)
+        light = 45;
+      if (light > 255)
+        light = 255;
+      uint32_t red = 18u + (uint32_t)light / 4u;
+      uint32_t green = 43u + (uint32_t)light / 2u;
+      uint32_t blue = 78u + ((uint32_t)light * 3u) / 5u;
+      uint32_t color = (red << 16) | (green << 8) | blue;
 
-  for (uint32_t i = 0; i < 3; i++) {
-    uint32_t cx = (w * (55u + i * 7u)) / 100u;
-    uint32_t cy = (h * (22u + i * 3u)) / 100u;
-    uint32_t rr = 140 - i * 30;
-    for (int32_t dy = -(int32_t)rr; dy <= (int32_t)rr; dy++) {
-      for (int32_t dx = -(int32_t)rr; dx <= (int32_t)rr; dx++) {
-        uint32_t dd = (uint32_t)(dx * dx + dy * dy);
-        if (dd <= (rr * rr)) {
-          uint32_t px = (uint32_t)((int32_t)cx + dx);
-          uint32_t py = (uint32_t)((int32_t)cy + dy);
-          if (px < w && py < horizon) {
-            uint32_t shade = 0xB0C8FF;
-            if (dd > (uint32_t)((rr * rr) * 7u / 10u))
-              shade = 0x6A88C8;
-            put_px(px, py, shade);
-          }
-        }
+      /* A thin highlight around the bright limb gives the sphere depth. */
+      if (distance_squared > (uint64_t)(radius - 2u) * (radius - 2u) &&
+          light > 125) {
+        color = 0x0099B7D9u;
       }
+      dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] = color;
     }
   }
+
+  /* Front half of the orbit is drawn over the planet. */
+  for (int32_t py = (int32_t)cy; py <= bottom; ++py) {
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t px = left; px <= right; ++px) {
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
+      int64_t dx = (int64_t)px - (int64_t)cx;
+      int64_t dy = (int64_t)py - (int64_t)cy;
+      uint64_t ex = (uint64_t)(dx * dx) * 1000000ull /
+                    ((uint64_t)ring_rx * ring_rx);
+      uint64_t ey = (uint64_t)(dy * dy) * 1000000ull /
+                    ((uint64_t)ring_ry * ring_ry);
+      uint64_t ellipse = ex + ey;
+      if (ellipse >= 780000ull && ellipse <= 1160000ull)
+        dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] =
+            0x0086A8C6u;
+    }
+  }
+
+  /* Keep the horizon distinct without the old white divider line. */
+  uint32_t horizon_y = horizon;
+  for (uint32_t x = 0; x < w; ++x)
+    dst[(uint64_t)horizon_y * g_bi->pitch + x] = 0x00354F6Cu;
 }
 
 static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg) {
-  uint8_t *font = _binary_CGA_F08_start;
-  uint8_t *glyph = &font[((uint32_t)ch) * 8u];
-  for (uint32_t gy = 0; gy < 8; gy++) {
-    uint8_t row = glyph[gy];
-    for (uint32_t gx = 0; gx < 8; gx++) {
-      if (row & (uint8_t)(1u << (7u - gx))) {
-        put_px(x + gx, y + gy, fg);
-      }
-    }
-  }
+  gfx_draw_glyph8(g_bi, g_back, x, y, ch, fg);
 }
 
 static void draw_text_panel(void) {
@@ -1706,7 +1871,10 @@ void desktop_init(BootInfo *bootInfo) {
   g_bg = 0;
   g_text_len = 0;
   g_start_open = 0;
-  g_show_shell = 0;
+  wm_hide(APP_SHELL);
+  wm_hide(APP_EXPLORER);
+  wm_hide(APP_VIEWER);
+  wm_hide(APP_SETUP);
   g_shell_out_len = 0;
   g_shell_line_len = 0;
   g_rand_state = 0xC001D00Du;
@@ -1719,8 +1887,6 @@ void desktop_init(BootInfo *bootInfo) {
   g_shell_dragging = 0;
   g_shell_drag_off_x = 0;
   g_shell_drag_off_y = 0;
-  g_explorer_open = 0;
-  g_viewer_open = 0;
   g_explorer_dragging = 0;
   g_viewer_dragging = 0;
   g_viewer_name[0] = 0;
@@ -1736,11 +1902,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_explorer_last_click_tick = 0;
   g_explorer_last_click_index = 0xFFFFFFFFu;
 
-  for (uint32_t i = 0; i < APP_COUNT; i++) {
-    g_app_open[i] = 0;
-    g_app_z[i] = (app_id_t)i;
-  }
-  g_app_z_len = APP_COUNT;
+  wm_init(APP_COUNT);
   app_raise(APP_SHELL);
 
   g_notepad_dragging = 0;
@@ -1826,9 +1988,12 @@ void desktop_init(BootInfo *bootInfo) {
   g_setup_win.h = 320;
   g_setup_win.x = (int32_t)((g_bi->width - (uint32_t)g_setup_win.w) / 2u);
   g_setup_win.y = (int32_t)((g_bi->height - (uint32_t)g_setup_win.h) / 2u);
-  if (g_setup_win.x < 16) g_setup_win.x = 16;
-  if (g_setup_win.y < 16) g_setup_win.y = 16;
-  g_setup_open = 0; // Closed by default, user opens via shell or start menu
+  constrain_desktop_window(&g_shell_win, 320u, 220u);
+  constrain_desktop_window(&g_explorer_win, 420u, 280u);
+  constrain_desktop_window(&g_viewer_win, 360u, 220u);
+  constrain_desktop_window(&g_notepad_win, 420u, 280u);
+  constrain_desktop_window(&g_setup_win, 420u, 280u);
+  wm_hide(APP_SETUP); // Closed by default, user opens via shell or start menu
   g_setup_step = 0;
   g_setup_disk_ready = 0;
   g_setup_partition_done = 0;
@@ -1889,6 +2054,9 @@ void desktop_tick(void) {
   prev_buttons = buttons;
 
   uint8_t ui_changed = 0;
+  wm_rect_t motion_dirty = {0, 0, 0, 0};
+  uint8_t motion_dirty_valid = 0u;
+  uint8_t motion_geometry_changed = 0u;
 
   uint32_t kbd_budget = 32;
   while (kbd_budget--) {
@@ -1904,7 +2072,7 @@ void desktop_tick(void) {
 #endif
 
     // Route keyboard input to focused app.
-    if (g_app_focus == APP_NOTEPAD && g_app_open[APP_NOTEPAD]) {
+    if (wm_is_focused(APP_NOTEPAD) && wm_is_visible(APP_NOTEPAD)) {
       if (c == '\b') {
         if (g_notepad_text_len) {
           g_notepad_text_len--;
@@ -1934,7 +2102,7 @@ void desktop_tick(void) {
           ui_changed = 1;
         }
       }
-    } else if (g_app_focus == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
+    } else if (wm_is_focused(APP_SHELL) && wm_is_visible(APP_SHELL) && wm_is_open(APP_SHELL)) {
       if (c == '\b') {
         if (g_shell_line_len) {
           g_shell_line_len--;
@@ -1985,25 +2153,75 @@ void desktop_tick(void) {
       ui_changed = 1;
       g_shell_dragging = 0;
     } else if (g_start_open) {
-      int32_t mx=10,mw=280,mh=168,my=tb_y-176;
-      if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
-        if(ry>=28&&ry<50){g_show_shell=1;g_app_open[APP_SHELL]=1;app_raise(APP_SHELL);
+      start_menu_layout_t menu = start_menu_layout();
+      if (hit_test(p0.x, p0.y, (int32_t)menu.x, (int32_t)menu.y,
+                   (int32_t)menu.width, (int32_t)menu.height)) {
+        int32_t relative_y = p0.y - (int32_t)menu.y;
+        if (relative_y >= (int32_t)menu.row_top &&
+            menu.row_height != 0u) {
+          uint32_t selected =
+              (uint32_t)(relative_y - (int32_t)menu.row_top) /
+              menu.row_height;
+          if (selected < 6u) {
+            switch (selected) {
+              case 0u:
+                wm_open(APP_SHELL);
+                wm_show(APP_SHELL);
+                app_raise(APP_SHELL);
 #ifdef VEXOS_CI_INPUT_TEST
-          serial_print("[CI] Shell opened from Start menu mouse click\n");
+                serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
-          g_start_open=0;ui_changed=1;
-        }else if(ry>=50&&ry<72){if(simplefs_init()){g_explorer_open=1;g_app_open[APP_EXPLORER]=1;app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
-        }else if(ry>=72&&ry<94){g_app_open[APP_NOTEPAD]=1;app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
-        }else if(ry>=94&&ry<116){g_viewer_open=1;g_app_open[APP_VIEWER]=1;app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
-        }else if(ry>=116&&ry<138){g_setup_open=1;g_app_open[APP_SETUP]=1;g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){g_show_shell=1;g_app_open[APP_SHELL]=1;app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
-      }else{g_start_open=0;ui_changed=1;}
+                break;
+              case 1u:
+                if (simplefs_init()) {
+                  wm_open(APP_EXPLORER);
+                  wm_show(APP_EXPLORER);
+                  app_raise(APP_EXPLORER);
+                } else {
+                  shell_append("fs init failed\n> ");
+                }
+                break;
+              case 2u:
+                wm_open(APP_NOTEPAD);
+                wm_show(APP_NOTEPAD);
+                app_raise(APP_NOTEPAD);
+                break;
+              case 3u:
+                wm_open(APP_VIEWER);
+                wm_show(APP_VIEWER);
+                app_raise(APP_VIEWER);
+                break;
+              case 4u:
+                wm_open(APP_SETUP);
+                wm_show(APP_SETUP);
+                g_setup_step = 0;
+                app_raise(APP_SETUP);
+                break;
+              case 5u:
+                wm_open(APP_SHELL);
+                wm_show(APP_SHELL);
+                app_raise(APP_SHELL);
+                shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");
+                break;
+            }
+            g_start_open = 0;
+            ui_changed = 1;
+          }
+        }
+      } else {
+        g_start_open = 0;
+        ui_changed = 1;
+      }
     }
 
     // Desktop shortcuts launch their matching applications.
     if(!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
-      if(i==0u){if(simplefs_init()){g_explorer_open=1;g_app_open[APP_EXPLORER]=1;app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
-      else if(i==1u){g_show_shell=1;g_app_open[APP_SHELL]=1;app_raise(APP_SHELL);}else if(i==2u){g_app_open[APP_NOTEPAD]=1;app_raise(APP_NOTEPAD);}else{g_viewer_open=1;g_app_open[APP_VIEWER]=1;app_raise(APP_VIEWER);}ui_changed=1;break;}}}
+      if(i==0u){if(simplefs_init()){wm_open(APP_EXPLORER);
+      wm_show(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
+      else if(i==1u){wm_open(APP_SHELL);
+      wm_show(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);
+      wm_show(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
 
@@ -2026,23 +2244,24 @@ void desktop_tick(void) {
         if (hit_test(p0.x, p0.y, (int32_t)ix, (int32_t)iy, (int32_t)icon,
                      (int32_t)icon)) {
           if (i == 0) {
-            g_show_shell = 1;
-            g_app_open[APP_SHELL] = 1;
+            wm_open(APP_SHELL);
+      wm_show(APP_SHELL);
             app_raise(APP_SHELL);
           } else if (i == 1) {
             if (simplefs_init()) {
-              g_explorer_open = 1;
-              g_app_open[APP_EXPLORER] = 1;
+              wm_open(APP_EXPLORER);
+      wm_show(APP_EXPLORER);
               app_raise(APP_EXPLORER);
             } else {
               shell_append("fs init failed\n> ");
             }
           } else if (i == 2) {
-            g_viewer_open = 1;
-            g_app_open[APP_VIEWER] = 1;
+            wm_open(APP_VIEWER);
+      wm_show(APP_VIEWER);
             app_raise(APP_VIEWER);
           } else if (i == 3) {
-            g_app_open[APP_NOTEPAD] = 1;
+            wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);
             app_raise(APP_NOTEPAD);
           }
           ui_changed = 1;
@@ -2055,7 +2274,7 @@ void desktop_tick(void) {
     }
 
     // Explorer window interactions
-    if (g_explorer_open) {
+    if (wm_is_visible(APP_EXPLORER) && wm_is_open(APP_EXPLORER)) {
       int32_t wx = g_explorer_win.x;
       int32_t wy = g_explorer_win.y;
       int32_t ww = g_explorer_win.w;
@@ -2063,8 +2282,11 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_explorer_open = 0;
+        wm_hide(APP_EXPLORER);
         g_explorer_dragging = 0;
+        ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_EXPLORER, p0.x, p0.y);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         // scroll up
@@ -2079,7 +2301,8 @@ void desktop_tick(void) {
         g_explorer_dragging = 1;
         g_explorer_drag_off_x = p0.x - wx;
         g_explorer_drag_off_y = p0.y - wy;
-        g_app_open[APP_EXPLORER] = 1;
+        wm_open(APP_EXPLORER);
+      wm_show(APP_EXPLORER);
         app_raise(APP_EXPLORER);
         ui_changed = 1;
       } else {
@@ -2117,15 +2340,19 @@ void desktop_tick(void) {
       }
     }
 
-    if (g_viewer_open) {
+    if (wm_is_visible(APP_VIEWER) && wm_is_open(APP_VIEWER)) {
       int32_t wx = g_viewer_win.x;
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
+      int32_t wh = g_viewer_win.h;
       // Close
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_viewer_open = 0;
+        wm_hide(APP_VIEWER);
         g_viewer_dragging = 0;
         viewer_clear_content();
+        ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_VIEWER, p0.x, p0.y);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
         if (g_viewer_scroll)
@@ -2138,7 +2365,8 @@ void desktop_tick(void) {
         g_viewer_dragging = 1;
         g_viewer_drag_off_x = p0.x - wx;
         g_viewer_drag_off_y = p0.y - wy;
-        g_app_open[APP_VIEWER] = 1;
+        wm_open(APP_VIEWER);
+      wm_show(APP_VIEWER);
         app_raise(APP_VIEWER);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx, wy, ww, g_viewer_win.h)) {
@@ -2148,15 +2376,18 @@ void desktop_tick(void) {
     }
 
     // Notepad interactions
-    if (g_app_open[APP_NOTEPAD]) {
+    if (wm_is_visible(APP_NOTEPAD)) {
       int32_t wx = g_notepad_win.x;
       int32_t wy = g_notepad_win.y;
       int32_t ww = g_notepad_win.w;
       int32_t wh = g_notepad_win.h;
 
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_app_open[APP_NOTEPAD] = 0;
+        wm_close(APP_NOTEPAD);
         g_notepad_dragging = 0;
+        ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_NOTEPAD, p0.x, p0.y);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 86, wy + 5, 20, 20)) {
         // Save
@@ -2191,7 +2422,7 @@ void desktop_tick(void) {
     }
 
     // Setup Wizard interactions
-    if (g_setup_open) {
+    if (wm_is_visible(APP_SETUP) && wm_is_open(APP_SETUP)) {
       int32_t wx = g_setup_win.x;
       int32_t wy = g_setup_win.y;
       int32_t ww = g_setup_win.w;
@@ -2204,8 +2435,13 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_setup_open = 0;
+        wm_hide(APP_SETUP);
         g_setup_dragging = 0;
+        ui_changed = 1;
+      }
+      // Resize grip
+      else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_SETUP, p0.x, p0.y);
         ui_changed = 1;
       }
       // Title bar drag
@@ -2226,7 +2462,7 @@ void desktop_tick(void) {
       else if (hit_test(p0.x, p0.y, wx + ww - 76, wy + wh - 28, 60, 18)) {
         if (g_setup_step == 5) {
           // Finish - close wizard
-          g_setup_open = 0;
+          wm_hide(APP_SETUP);
           shell_append("setup: complete\n> ");
         } else {
           // Advance to next step and execute action
@@ -2256,7 +2492,7 @@ void desktop_tick(void) {
 
   // Window manager interactions (shell window)
   if (pressed & 1u) {
-    if (g_show_shell) {
+    if (wm_is_visible(APP_SHELL) && wm_is_open(APP_SHELL)) {
       int32_t wx = g_shell_win.x;
       int32_t wy = g_shell_win.y;
       int32_t ww = g_shell_win.w;
@@ -2264,8 +2500,11 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_show_shell = 0;
+        wm_hide(APP_SHELL);
         g_shell_dragging = 0;
+        ui_changed = 1;
+      } else if (hit_test(p0.x, p0.y, wx + ww - 16, wy + wh - 16, 16, 16)) {
+        window_resize_begin(APP_SHELL, p0.x, p0.y);
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
         g_shell_dragging = 1;
@@ -2280,42 +2519,103 @@ void desktop_tick(void) {
     }
   }
 
+  uint8_t ui_changed_before_motion = ui_changed;
+
   if (!(buttons & 1u)) {
     g_shell_dragging = 0;
     g_explorer_dragging = 0;
     g_viewer_dragging = 0;
     g_notepad_dragging = 0;
     g_setup_dragging = 0;
+    g_window_resize_active = 0u;
+    g_window_resize_app = APP_COUNT;
   }
 
-  if (g_shell_dragging && (p0.dx || p0.dy)) {
+  if (g_shell_dragging) {
+    wm_window_t old_win = g_shell_win;
     g_shell_win.x = p0.x - g_shell_drag_off_x;
     g_shell_win.y = p0.y - g_shell_drag_off_y;
-    ui_changed = 1;
+    constrain_desktop_window(&g_shell_win, 320u, 220u);
+    if (old_win.x != g_shell_win.x || old_win.y != g_shell_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_shell_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
-  if (g_explorer_dragging && (p0.dx || p0.dy)) {
+  if (g_explorer_dragging) {
+    wm_window_t old_win = g_explorer_win;
     g_explorer_win.x = p0.x - g_explorer_drag_off_x;
     g_explorer_win.y = p0.y - g_explorer_drag_off_y;
-    ui_changed = 1;
+    constrain_desktop_window(&g_explorer_win, 420u, 280u);
+    if (old_win.x != g_explorer_win.x || old_win.y != g_explorer_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_explorer_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
-  if (g_viewer_dragging && (p0.dx || p0.dy)) {
+  if (g_viewer_dragging) {
+    wm_window_t old_win = g_viewer_win;
     g_viewer_win.x = p0.x - g_viewer_drag_off_x;
     g_viewer_win.y = p0.y - g_viewer_drag_off_y;
-    ui_changed = 1;
+    constrain_desktop_window(&g_viewer_win, 360u, 220u);
+    if (old_win.x != g_viewer_win.x || old_win.y != g_viewer_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_viewer_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
-  if (g_notepad_dragging && (p0.dx || p0.dy)) {
+  if (g_notepad_dragging) {
+    wm_window_t old_win = g_notepad_win;
     g_notepad_win.x = p0.x - g_notepad_drag_off_x;
     g_notepad_win.y = p0.y - g_notepad_drag_off_y;
-    ui_changed = 1;
+    constrain_desktop_window(&g_notepad_win, 420u, 280u);
+    if (old_win.x != g_notepad_win.x || old_win.y != g_notepad_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_notepad_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
-  if (g_setup_dragging && (p0.dx || p0.dy)) {
+  if (g_setup_dragging) {
+    wm_window_t old_win = g_setup_win;
     g_setup_win.x = p0.x - g_setup_drag_off_x;
     g_setup_win.y = p0.y - g_setup_drag_off_y;
-    ui_changed = 1;
+    constrain_desktop_window(&g_setup_win, 420u, 280u);
+    if (old_win.x != g_setup_win.x || old_win.y != g_setup_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_setup_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
+  }
+
+  if (g_window_resize_active &&
+      (p0.x != g_window_resize_pointer_x ||
+       p0.y != g_window_resize_pointer_y)) {
+    wm_window_t *resize_win = window_for_app(g_window_resize_app);
+    wm_window_t old_win = resize_win ? *resize_win : (wm_window_t){0, 0, 0, 0};
+    if (window_resize_update(p0.x, p0.y)) {
+      if (resize_win) {
+        desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+        desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, resize_win);
+      }
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+#ifdef VEXOS_CI_INPUT_TEST
+      static uint8_t resize_ci_seen;
+      if (!resize_ci_seen) {
+        resize_ci_seen = 1u;
+        serial_print("[CI] Window resize drag updated geometry\n");
+      }
+#endif
+    }
   }
 
   if (!g_back || !g_bg) {
@@ -2351,9 +2651,14 @@ void desktop_tick(void) {
     g_last_cursor_buttons = p.buttons;
   } else {
     static uint8_t g_desktop_dirty = 1;
-    uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
+    uint8_t partial_scene_changed =
+        (uint8_t)(motion_geometry_changed && !ui_changed_before_motion);
+    uint8_t scene_changed =
+        (uint8_t)(g_desktop_dirty ||
+                  (ui_changed && !partial_scene_changed) || g_tick < 2u);
 
     if (scene_changed) {
+      gfx_reset_clip_rect();
       blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
@@ -2361,6 +2666,35 @@ void desktop_tick(void) {
       draw_taskbar();
       draw_start_menu();
       g_desktop_dirty = 0;
+    } else if (partial_scene_changed && motion_dirty_valid) {
+      /* A drag only invalidates the old/new window bounds, not the desktop. */
+      int32_t old_cursor_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
+      int32_t old_cursor_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
+      desktop_dirty_add_rect(&motion_dirty, &motion_dirty_valid,
+                             old_cursor_x, old_cursor_y, 26, 26);
+
+      gfx_set_clip_rect((uint32_t)motion_dirty.x, (uint32_t)motion_dirty.y,
+                        (uint32_t)motion_dirty.w, (uint32_t)motion_dirty.h);
+      blit_rect(g_back, g_bg, (uint32_t)motion_dirty.x,
+                (uint32_t)motion_dirty.y, (uint32_t)motion_dirty.w,
+                (uint32_t)motion_dirty.h);
+      draw_desktop_icons();
+      draw_widgets();
+      draw_open_windows();
+      draw_taskbar();
+      draw_start_menu();
+      gfx_reset_clip_rect();
+
+      blit_rect(g_bi->framebuffer, g_back, (uint32_t)motion_dirty.x,
+                (uint32_t)motion_dirty.y, (uint32_t)motion_dirty.w,
+                (uint32_t)motion_dirty.h);
+#ifdef VEXOS_CI_INPUT_TEST
+      static uint8_t move_ci_seen;
+      if (!move_ci_seen) {
+        move_ci_seen = 1u;
+        serial_print("[CI] Window move used clipped dirty-region redraw\n");
+      }
+#endif
     }
 
     input_pointer_state_t p = input_pointer_get();
@@ -2373,8 +2707,7 @@ void desktop_tick(void) {
         // Scene changes still need a complete presentation.
         blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
       } else {
-        // Mouse-only updates restore just the old cursor footprint, not the
-        // entire screen. The 26px region includes the cursor outline/drag marker.
+        // Mouse-only updates restore just the old cursor footprint.
         int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
         int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
         blit_rect(g_bi->framebuffer, g_back, (uint32_t)restore_x,

@@ -32,6 +32,9 @@ int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff,
 
 static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
                                              const uint8_t *d, uint32_t len) {
+  if (!dev || !d || len == 0u || len > 4096u)
+    return;
+
   uint32_t usage_page = 0;
   uint32_t report_size = 0;
   uint32_t report_count = 0;
@@ -123,7 +126,12 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
         if (usage_n) {
           u = usages[0];
         }
-        if (usage_page == 0x01 && u == 0x02) {
+        /*
+         * QEMU's usb-tablet identifies its top-level collection as
+         * Generic Desktop / Pointer (usage 0x01), while conventional
+         * mice commonly use Mouse (usage 0x02). Both carry pointer axes.
+         */
+        if (usage_page == 0x01 && (u == 0x01 || u == 0x02)) {
           seen_mouse_usage = 1;
         }
         if (seen_mouse_usage) {
@@ -153,6 +161,14 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
           continue;
         }
 
+        /* Keep descriptor arithmetic bounded before storing bit offsets. */
+        uint64_t advance_bits = (uint64_t)count * (uint64_t)size_bits;
+        if (advance_bits > 0xFFFFu ||
+            (uint64_t)bitpos + advance_bits > 0xFFFFu) {
+          dev->hid_mouse_valid = 0;
+          return;
+        }
+
         uint8_t in_mouse = (in_mouse_app || in_mouse_phys) ? 1u : 0u;
         if (in_mouse) {
           for (uint32_t f = 0; f < count; f++) {
@@ -168,13 +184,16 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
 
             if (usage_page == 0x09) {
               if (dev->hid_buttons_bits == 0) {
-                dev->hid_buttons_bitoff = (uint16_t)(bitpos);
-                dev->hid_buttons_bits = (uint16_t)(count * size_bits);
+                uint32_t button_bits = count * size_bits;
+                if (button_bits > 32u)
+                  button_bits = 32u;
+                dev->hid_buttons_bitoff = (uint16_t)bitpos;
+                dev->hid_buttons_bits = (uint16_t)button_bits;
               }
               break;
             }
 
-            if (usage_page == 0x01) {
+            if (usage_page == 0x01 && size_bits <= 32u) {
               if (u == 0x30 && dev->hid_x_bits == 0) {
                 dev->hid_x_bitoff = (uint16_t)(bitpos + (f * size_bits));
                 dev->hid_x_bits = (uint8_t)size_bits;
@@ -199,15 +218,65 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
     }
   }
 
-  if (dev->hid_x_bits && dev->hid_y_bits) {
+  uint32_t report_bits = (uint32_t)dev->intr_mps * 8u;
+  uint32_t report_base = has_report_id ? 8u : 0u;
+  uint32_t x_end = (uint32_t)dev->hid_x_bitoff +
+                   (uint32_t)dev->hid_x_bits + report_base;
+  uint32_t y_end = (uint32_t)dev->hid_y_bitoff +
+                   (uint32_t)dev->hid_y_bits + report_base;
+  uint32_t button_end = (uint32_t)dev->hid_buttons_bitoff +
+                        (uint32_t)dev->hid_buttons_bits + report_base;
+  uint32_t wheel_end = (uint32_t)dev->hid_wheel_bitoff +
+                       (uint32_t)dev->hid_wheel_bits + report_base;
+
+  if (dev->hid_x_bits > 0u && dev->hid_x_bits <= 32u &&
+      dev->hid_y_bits > 0u && dev->hid_y_bits <= 32u &&
+      report_bits != 0u && report_id <= 0xFFu &&
+      x_end <= report_bits && y_end <= report_bits &&
+      (!dev->hid_buttons_bits || button_end <= report_bits) &&
+      (!dev->hid_wheel_bits || (dev->hid_wheel_bits <= 32u &&
+                                wheel_end <= report_bits))) {
     dev->hid_has_report_id = has_report_id ? 1u : 0u;
     dev->hid_mouse_report_id = (uint8_t)report_id;
     dev->hid_mouse_valid = 1;
   }
 }
 
+#ifdef VEXOS_CI_INPUT_TEST
+/*
+ * Regression fixture copied from QEMU's 74-byte usb-tablet HID report
+ * descriptor. In particular, its Application collection usage is 0x01
+ * (Pointer), not 0x02 (Mouse).
+ */
+int xhci_hid_ci_qemu_tablet_descriptor_test(void) {
+  static const uint8_t qemu_tablet_report[] = {
+      0x05, 0x01, 0x09, 0x01, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00,
+      0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25, 0x01,
+      0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x05,
+      0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x00,
+      0x26, 0xFF, 0x7F, 0x35, 0x00, 0x46, 0xFE, 0x7F, 0x75, 0x10,
+      0x95, 0x02, 0x81, 0x02, 0x05, 0x01, 0x09, 0x38, 0x15, 0x81,
+      0x25, 0x7F, 0x35, 0x00, 0x45, 0x00, 0x75, 0x08, 0x95, 0x01,
+      0x81, 0x02, 0xC0, 0xC0
+  };
+  xhci_device_state_t dev = {0};
+  dev.intr_mps = 8u;
+  xhci_hid_parse_report_desc_mouse(&dev, qemu_tablet_report,
+                                   sizeof(qemu_tablet_report));
+  return dev.hid_mouse_valid &&
+         !dev.hid_has_report_id &&
+         dev.hid_buttons_bitoff == 0u && dev.hid_buttons_bits == 3u &&
+         dev.hid_x_bitoff == 8u && dev.hid_x_bits == 16u &&
+         !dev.hid_x_is_relative &&
+         dev.hid_y_bitoff == 24u && dev.hid_y_bits == 16u &&
+         !dev.hid_y_is_relative &&
+         dev.hid_wheel_bitoff == 40u && dev.hid_wheel_bits == 8u &&
+         !dev.hid_wheel_is_relative;
+}
+#endif
+
 void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
-  if (dev->hid_ifnum == 0xFF) {
+  if (!dev || dev->hid_ifnum == 0xFF) {
     return;
   }
 
@@ -216,6 +285,10 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   }
 
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[HID] Could not allocate report descriptor buffer\n");
+    return;
+  }
   for (uint32_t i = 0; i < 4096; i++) {
     buf[i] = 0;
   }
@@ -249,23 +322,34 @@ static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb)
 }
 
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
-  if (dev->intr_epaddr == 0 || dev->intr_mps == 0) {
+  if (!dev || dev->slot_id == 0 || dev->slot_id >= 256u ||
+      dev->intr_epaddr == 0 || dev->intr_mps == 0) {
     serial_print("[xHCI] No interrupt IN endpoint found; skipping HID polling\n");
     return 0;
   }
 
   const uint32_t dci = (uint32_t)dev->intr_dci;
-  if (dci == 0) {
-    serial_print("[xHCI] Interrupt IN endpoint DCI is 0; skipping HID polling\n");
+  if (dci == 0 || dci > 31u || dev->intr_mps > 4096u) {
+    serial_print("[xHCI] Invalid interrupt IN endpoint parameters; skipping HID polling\n");
     return 0;
   }
   const uint32_t ctx_index = dci + 1;
 
   dev->intr_ring = xhci_alloc_tr_ring();
+  if (!dev->intr_ring) {
+    serial_print("[xHCI] Could not allocate HID transfer ring\n");
+    return 0;
+  }
   dev->intr_index = 0;
   dev->intr_cycle = 1;
 
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    serial_print("[xHCI] Could not allocate HID input context\n");
+    PMM_FreePage(dev->intr_ring);
+    dev->intr_ring = NULL;
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++) {
     input_ctx[i] = 0;
   }
@@ -352,7 +436,14 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   xhci_print_u32_dec(evt_slot);
   serial_print("\n");
 
-  return (cc == 1);
+  /* The command completed, so the controller no longer needs input_ctx. */
+  PMM_FreePage(input_ctx);
+  if (cc != 1) {
+    PMM_FreePage(dev->intr_ring);
+    dev->intr_ring = NULL;
+    return 0;
+  }
+  return 1;
 }
 
 int xhci_hid_set_protocol_boot(xhci_device_state_t *dev) {
@@ -383,21 +474,25 @@ int xhci_hid_set_idle(xhci_device_state_t *dev) {
 }
 
 void xhci_hid_start_polling(xhci_device_state_t *dev) {
-  if (!dev->intr_ring) {
+  if (!dev || !dev->intr_ring || dev->intr_mps == 0 ||
+      dev->intr_mps > 4096u || dev->slot_id == 0 ||
+      dev->slot_id >= 256u || dev->intr_dci == 0 ||
+      dev->intr_dci > 31u) {
     return;
   }
 
   if (!dev->intr_buf) {
     dev->intr_buf = (uint8_t *)PMM_AllocatePage();
+    if (!dev->intr_buf) {
+      serial_print("[HID] Could not allocate interrupt report buffer; polling stopped\n");
+      return;
+    }
     for (uint32_t i = 0; i < 4096; i++) {
       dev->intr_buf[i] = 0;
     }
   }
 
   const uint32_t dci = (uint32_t)dev->intr_dci;
-  if (dci == 0) {
-    return;
-  }
   xhci_trb_t trb;
   trb.data = (uint64_t)(uintptr_t)dev->intr_buf;
   trb.status = (uint32_t)(dev->intr_mps & 0xFFFFu);

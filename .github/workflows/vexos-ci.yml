@@ -20,6 +20,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Validate developer launcher shell syntax
+        run: bash -n run.sh
+
       - name: Install toolchain and VM dependencies
         run: |
           sudo apt-get update
@@ -132,7 +135,7 @@ jobs:
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
-            if grep -Fq "[KERNEL] Starting main loop" serial.log 2>/dev/null; then
+            if grep -Fq "[KERNEL] sti" serial.log 2>/dev/null; then
               break
             fi
             if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -146,6 +149,8 @@ jobs:
 
           for marker in \
             "[KERNEL] Entered kernel_main" \
+            "[CI] Framebuffer clipping/blending/blitting passed" \
+            "[CI] JPEG baseline decode and unsupported/truncated rejection passed" \
             "[KERNEL] Heap Initialized Successfully." \
             "[CI] Heap allocator alignment/free/coalesce passed" \
             "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
@@ -159,7 +164,9 @@ jobs:
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
             "[KERNEL] Desktop initialized" \
-            "[KERNEL] Starting main loop"; do
+            "[CI] Pointer scaling/clamping and keyboard queues passed" \
+            "[CI] Window manager visibility/focus/z-order/geometry passed" \
+            "[KERNEL] sti"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
               cat serial.log || true
@@ -242,6 +249,7 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
+          time.sleep(0.4)
           # Capture the opened Start menu before selecting Shell.
           command({"execute": "screendump", "arguments": {"filename": "artifacts/02-start-menu.png"}})
           # Select the first Start-menu item (Shell).
@@ -250,7 +258,7 @@ jobs:
               "execute": "input-send-event",
               "arguments": {"events": [
                   {"type": "abs", "data": {"axis": "x", "value": 1200}},
-                  {"type": "abs", "data": {"axis": "y", "value": 25000}}
+                  {"type": "abs", "data": {"axis": "y", "value": 21300}}
               ]}
           })
           time.sleep(0.1)
@@ -267,8 +275,94 @@ jobs:
                   {"type": "btn", "data": {"button": "left", "down": False}}
               ]}
           })
-          # Capture Shell before exercising its commands.
+          time.sleep(0.4)
+          # Drag Terminal by its title bar. This must take the clipped,
+          # dirty-region redraw path rather than repainting the whole desktop.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 6407}},
+                  {"type": "abs", "data": {"axis": "y", "value": 2543}}
+              ]}
+          })
+          time.sleep(0.15)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 8710}},
+                  {"type": "abs", "data": {"axis": "y", "value": 4595}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 9606}},
+                  {"type": "abs", "data": {"axis": "y", "value": 5085}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.25)
+
+          # Resize Terminal by dragging the lower-right grip with the USB tablet.
+          # CI runs the guest framebuffer at 1280x800.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 25250}},
+                  {"type": "abs", "data": {"axis": "y", "value": 20680}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": True}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 26020}},
+                  {"type": "abs", "data": {"axis": "y", "value": 21900}}
+              ]}
+          })
+          time.sleep(0.1)
+          # Send a second movement without releasing the button. This checks
+          # that the interrupt endpoint keeps delivering reports throughout
+          # a drag rather than only on the first movement.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 26531}},
+                  {"type": "abs", "data": {"axis": "y", "value": 22700}}
+              ]}
+          })
+          time.sleep(0.1)
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "btn", "data": {"button": "left", "down": False}}
+              ]}
+          })
+          time.sleep(0.25)
+          # Capture the resized Terminal.
           command({"execute": "screendump", "arguments": {"filename": "artifacts/03-shell.png"}})
+          time.sleep(0.5)
           # Exercise shell commands, then open Notepad and type into it.
           sequences = [
               ["h", "e", "l", "p", "ret"],
@@ -287,9 +381,15 @@ jobs:
                           "hold-time": 100
                       }
                   })
-                  time.sleep(0.25)
+                  # The text-entry check is also a focus/input latency check:
+                  # allow a little more time per character to avoid racing the
+                  # timer-driven desktop loop on busy CI hosts.
+                  time.sleep(0.4 if sequence == ["v", "e", "x"] else 0.25)
+              if sequence == ["n", "o", "t", "e", "p", "a", "d", "ret"]:
+                  # Wait for the title/focus transition before sending editor text.
+                  time.sleep(1.0)
           # Let the desktop process the final key and redraw Notepad before capture.
-          time.sleep(0.5)
+          time.sleep(1.5)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
 
           # Open Files from the centered taskbar dock and capture the redesigned file manager.
@@ -325,9 +425,13 @@ jobs:
           markers=(
             "[CI] Keyboard character reached desktop input queue"
             "[CI] IRQ0 preempted and executed both runtime tasks"
+            "[CI] QEMU USB tablet Pointer collection and absolute axes parsed"
             "[CI] Mouse pointer movement reached desktop_tick"
             "[CI] Start menu opened by USB mouse click"
             "[CI] Shell opened from Start menu mouse click"
+            "[CI] Window move used clipped dirty-region redraw"
+            "[CI] Window resize drag updated geometry"
+            "[CI] USB tablet delivered motion while left button held"
             "[CI] Shell received printable keyboard input"
             "[CI] Shell command submitted through keyboard"
             "[CI] Shell help command executed"
