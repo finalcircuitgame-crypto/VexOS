@@ -595,13 +595,17 @@ static void draw_window_chrome(const desktop_window_t *win,const char *title,con
   if(has_save){gfx_blend_round_rect((uint32_t)(x+w-85),(uint32_t)(y+6),17u,17u,5u,0x236B59u,255);gfx_draw_string((uint32_t)(x+w-80),(uint32_t)(y+10),"S",0xF0FFF8u);}
 }
 
-static void draw_notepad_window(const desktop_window_t *win){
-  if(!g_bi||!win)return;int32_t x=win->x,y=win->y,w=win->w,h=win->h;draw_window_chrome(win,"Notepad",g_notepad_name[0]?g_notepad_name:"note.txt",(uint8_t)(wm_get_focus()==APP_NOTEPAD),1,1);
-  gfx_draw_rect((uint32_t)(x+1),(uint32_t)(y+31),(uint32_t)(w-2),30u,0x17263A);gfx_draw_string((uint32_t)(x+14),(uint32_t)(y+42),"FILE   EDIT   VIEW",0xB9C9DAu);gfx_draw_string((uint32_t)(x+w-142),(uint32_t)(y+42),"PLAIN TEXT",0x7FA5C8u);
-  uint32_t cx=(uint32_t)x+12u,cy=(uint32_t)y+66u,cw=w>24?(uint32_t)w-24u:1u,ch=h>78?(uint32_t)h-78u:1u;gfx_blend_round_rect(cx,cy,cw,ch,5u,0xF4F7FBu,255);gfx_draw_rect(cx+1u,cy+1u,cw-2u,1u,0xFFFFFFu);gfx_draw_rect(cx+34u,cy+1u,1u,ch-2u,0xDCE5EFu);
-  uint32_t tx=cx+46u,ty=cy+12u,cols=w>72?(uint32_t)(w-72)/8u:0u,rows=h>100?(uint32_t)(h-100)/16u:0u,start=0,skip=g_notepad_scroll;for(uint32_t i=0;i<g_notepad_text_len&&skip;i++)if(g_notepad_text[i]=='\n'){skip--;start=i+1u;}
-  uint32_t col=0,row=0,line=g_notepad_scroll+1u;char num[12];if(rows){shell_u32_to_dec(num,line);gfx_draw_string(cx+10u,ty,num,0x8EA0B4u);}
-  for(uint32_t i=start;i<g_notepad_text_len&&row<rows;i++){char c=g_notepad_text[i];if(c=='\n'){col=0;row++;line++;if(row<rows){shell_u32_to_dec(num,line);gfx_draw_string(cx+10u,ty+row*16u,num,0x8EA0B4u);}continue;}if(c=='\t'){col=(col+4u)&~3u;continue;}if(c<32||c>126)c='.';if(col<cols){char t[2]={c,0};gfx_draw_string(tx+col*8u,ty+row*16u,t,0x24364Bu);}col++;}
+static void draw_notepad_window(const desktop_window_t *win) {
+  notepad_render_context_t context = {
+    .window = win,
+    .filename = g_notepad_name,
+    .text = g_notepad_text,
+    .text_length = g_notepad_text_len,
+    .scroll = g_notepad_scroll,
+    .focused = (uint8_t)(wm_get_focus() == APP_NOTEPAD),
+    .draw_chrome = draw_window_chrome
+  };
+  notepad_draw(&context);
 }
 
 static void draw_setup_window(const desktop_window_t *win) {
