@@ -986,7 +986,8 @@ static void draw_open_windows(void) {
           draw_viewer_window(&g_viewer_win);
         break;
       case APP_NOTEPAD:
-        draw_notepad_window(&g_notepad_win);
+        if (wm_is_visible(APP_NOTEPAD))
+          draw_notepad_window(&g_notepad_win);
         break;
       case APP_SETUP:
         if (wm_is_visible(APP_SETUP))
@@ -1246,6 +1247,7 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 7 && streq_n(g_shell_line, "notepad", 7)) {
     shell_append("opening notepad...\n");
     wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);
     app_raise(APP_NOTEPAD);
 #ifdef VEXOS_CI_INPUT_TEST
     serial_print("[CI] Notepad opened by shell command\n");
@@ -1729,7 +1731,7 @@ void desktop_tick(void) {
 #endif
 
     // Route keyboard input to focused app.
-    if (wm_is_focused(APP_NOTEPAD) && wm_is_open(APP_NOTEPAD)) {
+    if (wm_is_focused(APP_NOTEPAD) && wm_is_visible(APP_NOTEPAD)) {
       if (c == '\b') {
         if (g_notepad_text_len) {
           g_notepad_text_len--;
@@ -1820,7 +1822,8 @@ void desktop_tick(void) {
           g_start_open=0;ui_changed=1;
         }else if(ry>=50&&ry<72){if(simplefs_init()){wm_open(APP_EXPLORER);
       wm_show(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
-        }else if(ry>=72&&ry<94){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
+        }else if(ry>=72&&ry<94){wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
         }else if(ry>=94&&ry<116){wm_open(APP_VIEWER);
       wm_show(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
         }else if(ry>=116&&ry<138){wm_open(APP_SETUP);
@@ -1835,7 +1838,8 @@ void desktop_tick(void) {
       if(i==0u){if(simplefs_init()){wm_open(APP_EXPLORER);
       wm_show(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
       else if(i==1u){wm_open(APP_SHELL);
-      wm_show(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);
+      wm_show(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);
       wm_show(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
@@ -1876,6 +1880,7 @@ void desktop_tick(void) {
             app_raise(APP_VIEWER);
           } else if (i == 3) {
             wm_open(APP_NOTEPAD);
+            wm_show(APP_NOTEPAD);
             app_raise(APP_NOTEPAD);
           }
           ui_changed = 1;
@@ -1983,7 +1988,7 @@ void desktop_tick(void) {
     }
 
     // Notepad interactions
-    if (wm_is_open(APP_NOTEPAD)) {
+    if (wm_is_visible(APP_NOTEPAD)) {
       int32_t wx = g_notepad_win.x;
       int32_t wy = g_notepad_win.y;
       int32_t ww = g_notepad_win.w;
