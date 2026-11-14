@@ -161,6 +161,7 @@ jobs:
             "[CI] Setup wizard skipped for automated desktop test" \
             "[KERNEL] Desktop initialized" \
             "[CI] Pointer scaling/clamping and keyboard queues passed" \
+            "[CI] Window manager focus/open/close/z-order passed" \
             "[KERNEL] Starting main loop"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
