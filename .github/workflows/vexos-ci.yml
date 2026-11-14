@@ -301,6 +301,17 @@ jobs:
               ]}
           })
           time.sleep(0.1)
+          # Send a second movement without releasing the button. This checks
+          # that the interrupt endpoint keeps delivering reports throughout
+          # a drag rather than only on the first movement.
+          command({
+              "execute": "input-send-event",
+              "arguments": {"events": [
+                  {"type": "abs", "data": {"axis": "x", "value": 22950}},
+                  {"type": "abs", "data": {"axis": "y", "value": 19300}}
+              ]}
+          })
+          time.sleep(0.1)
           command({
               "execute": "input-send-event",
               "arguments": {"events": [
