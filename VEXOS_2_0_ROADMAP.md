@@ -30,9 +30,9 @@ Acceptance: normal and CI kernel builds pass; all existing QEMU markers and the 
 
 ## Phase 1 — kernel and device stability
 
-Status: initial xHCI/HID allocation and report-length hardening is implemented; repeated-device stress, disconnect/reconnect recovery, and block-device work remain.
+Status: xHCI controller initialization now checks DCBAA, scratchpad array/buffer, command-ring, event-ring, and ERST allocations; HID configuration/interrupt buffers and report lengths are also checked. Repeated-device stress, controller timeouts, disconnect/reconnect recovery, and block-device work remain.
 
-- Audit every page allocation in xHCI, AHCI, ATA, and the kernel core; failed allocations must fail cleanly rather than dereference null.
+- Audit every page allocation in xHCI, AHCI, ATA, and the kernel core; failed allocations must fail cleanly rather than dereference null. Initial xHCI controller/ring/scratchpad allocation paths now fail with diagnostics and release the pages allocated earlier in initialization.
 - Validate USB configuration and HID report descriptors before using offsets, lengths, report IDs, or endpoint parameters. Initial work now guards xHCI page allocations, validates endpoint parameters, bounds parsed HID fields to report packets, and discards truncated reports.
 - Make transfer submission, completion, timeout, and re-arm paths explicit; log recoverable device errors without flooding the serial console.
 - Add deterministic tests for HID report parsing, pointer scaling, keyboard transitions, queue overflow, and device disconnect/reconnect behavior.
