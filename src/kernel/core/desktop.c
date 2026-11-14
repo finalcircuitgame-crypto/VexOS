@@ -1,4 +1,5 @@
 #include "../../include/desktop.h"
+#include "../../include/gfx.h"
 #include "../../include/input.h"
 #include "../../include/heap.h"
 #include "../../include/hw_profile.h"
@@ -340,27 +341,8 @@ void desktop_set_fullscreen_app_active(int active) {
 }
 
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                      uint32_t c);
-static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
-                            uint32_t fg);
-static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a);
-static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint32_t radius, uint32_t c, uint8_t a);
-static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
-static int streq_n(const char *a, const char *b, uint32_t n);
-
-static inline void put_px(uint32_t x, uint32_t y, uint32_t c);
-
-static void draw_icon_20(uint32_t x, uint32_t y, const uint32_t *pix) {
-  for (uint32_t yy = 0; yy < 20u; yy++) {
-    for (uint32_t xx = 0; xx < 20u; xx++) {
-      uint32_t c = pix[yy * 20u + xx];
-      if (c & 0xFF000000u) {
-        put_px(x + xx, y + yy, c & 0x00FFFFFFu);
-      }
-    }
-  }
+                      uint32_t c) {
+  gfx_fill_rect(g_bi, g_back, x, y, w, h, c);
 }
 
 static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
@@ -918,59 +900,14 @@ static uint32_t g_last_cursor_buttons;
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                       uint32_t c);
 static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                       uint32_t c, uint8_t a);
-static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint32_t radius, uint32_t c, uint8_t a);
-static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg);
-static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
-                            uint32_t fg);
-static void draw_background(void);
-static void draw_text_panel(void);
-static void draw_taskbar(void);
-static void draw_start_menu(void);
-static void draw_shell_window(const wm_window_t *win);
-static void draw_explorer_window(const wm_window_t *win);
-static void draw_viewer_window(const wm_window_t *win);
-static void draw_notepad_window(const wm_window_t *win);
-static void draw_setup_window(const wm_window_t *win);
-static void draw_window_chrome(const wm_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save);
-static void draw_desktop_icons(void);
-static void draw_widgets(void);
-
-static void blit_rect(uint32_t *dst, const uint32_t *src, uint32_t x, uint32_t y,
-                      uint32_t w, uint32_t h) {
-  if (!g_bi || !dst || !src)
-    return;
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-  if (x + w > g_bi->width)
-    w = g_bi->width - x;
-  if (y + h > g_bi->height)
-    h = g_bi->height - y;
-
-  for (uint32_t yy = 0; yy < h; yy++) {
-    uint32_t *drow = &dst[(y + yy) * g_bi->pitch + x];
-    const uint32_t *srow = &src[(y + yy) * g_bi->pitch + x];
-    for (uint32_t xx = 0; xx < w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
+                       uint32_t c, uint8_t a) {
+  gfx_blend_rect(g_bi, g_back, x, y, w, h, c, a);
 }
 
-void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
-  if (!g_bi || !src) return;
-  // A userspace framebuffer client owns the display after its first frame.
-  // Otherwise the desktop compositor would overwrite every game frame.
-  uint32_t* dst = g_bi->framebuffer;
-  uint32_t copy_w = (w > g_bi->width) ? g_bi->width : w;
-  uint32_t copy_h = (h > g_bi->height) ? g_bi->height : h;
-  for (uint32_t yy = 0; yy < copy_h; yy++) {
-    uint32_t *drow = &dst[yy * g_bi->pitch];
-    const uint32_t *srow = &src[yy * w];
-    for (uint32_t xx = 0; xx < copy_w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
+void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
+  if (!g_bi || !src)
+    return;
+  gfx_blit_frame(g_bi, src, w, w, h);
 }
 
 static inline void put_px(uint32_t x, uint32_t y, uint32_t c) {
@@ -1073,20 +1010,7 @@ static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
   }
 }
 
-static inline uint32_t blend_rgb(uint32_t dst, uint32_t src, uint8_t a) {
-  uint32_t inv = (uint32_t)(255u - (uint32_t)a);
-  uint32_t dr = (dst >> 16) & 0xFFu;
-  uint32_t dg = (dst >> 8) & 0xFFu;
-  uint32_t db = dst & 0xFFu;
-  uint32_t sr = (src >> 16) & 0xFFu;
-  uint32_t sg = (src >> 8) & 0xFFu;
-  uint32_t sb = src & 0xFFu;
 
-  uint32_t r = (dr * inv + sr * (uint32_t)a) / 255u;
-  uint32_t g = (dg * inv + sg * (uint32_t)a) / 255u;
-  uint32_t b = (db * inv + sb * (uint32_t)a) / 255u;
-  return (r << 16) | (g << 8) | b;
-}
 
 static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                        uint32_t c, uint8_t a) {
@@ -1114,73 +1038,12 @@ static void blend_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
 static void blend_round_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                              uint32_t radius, uint32_t c, uint8_t a) {
-  if (!g_bi)
-    return;
-  if (a == 0)
-    return;
-  if (radius == 0) {
-    blend_rect(x, y, w, h, c, a);
-    return;
-  }
-  if (x >= g_bi->width || y >= g_bi->height)
-    return;
-
-  uint32_t x2 = x + w;
-  uint32_t y2 = y + h;
-  if (x2 > g_bi->width)
-    x2 = g_bi->width;
-  if (y2 > g_bi->height)
-    y2 = g_bi->height;
-
-  uint32_t rr = radius * radius;
-  uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-  for (uint32_t yy = y; yy < y2; yy++) {
-    uint32_t *row = &dst[yy * g_bi->pitch];
-    for (uint32_t xx = x; xx < x2; xx++) {
-      uint32_t inside = 1;
-
-      if (xx < x + radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy < y + radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y + radius);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx < x + radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x + radius);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      } else if (xx >= x2 - radius && yy >= y2 - radius) {
-        int32_t dx = (int32_t)xx - (int32_t)(x2 - radius - 1);
-        int32_t dy = (int32_t)yy - (int32_t)(y2 - radius - 1);
-        inside = ((uint32_t)(dx * dx + dy * dy) <= rr);
-      }
-
-      if (inside) {
-        row[xx] = blend_rgb(row[xx], c, a);
-      }
-    }
-  }
+  gfx_blend_round_rect(g_bi, g_back, x, y, w, h, radius, c, a);
 }
 
 static void draw_string_8x8(uint32_t x, uint32_t y, const char *s,
                             uint32_t fg) {
-  uint32_t cx = x;
-  while (s && *s) {
-    char c = *s++;
-    if (c == '\n') {
-      y += 8;
-      cx = x;
-      continue;
-    }
-    if (c == '\t') {
-      cx += 32;
-      continue;
-    }
-    draw_glyph_8x8(cx, y, (uint8_t)c, fg);
-    cx += 8;
-  }
+  gfx_draw_text8(g_bi, g_back, x, y, s, fg);
 }
 
 static int hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
@@ -1581,16 +1444,7 @@ static void draw_background(void) {
 }
 
 static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg) {
-  uint8_t *font = _binary_CGA_F08_start;
-  uint8_t *glyph = &font[((uint32_t)ch) * 8u];
-  for (uint32_t gy = 0; gy < 8; gy++) {
-    uint8_t row = glyph[gy];
-    for (uint32_t gx = 0; gx < 8; gx++) {
-      if (row & (uint8_t)(1u << (7u - gx))) {
-        put_px(x + gx, y + gy, fg);
-      }
-    }
-  }
+  gfx_draw_glyph8(g_bi, g_back, x, y, ch, fg);
 }
 
 static void draw_text_panel(void) {
