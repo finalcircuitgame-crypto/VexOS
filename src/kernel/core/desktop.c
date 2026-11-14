@@ -7,6 +7,7 @@
 #include "../../include/simplefs.h"
 #include "../../include/ramfs.h"
 #include "../../include/png.h"
+#include "../../include/jpeg.h"
 #include "../../include/interrupts.h"
 #include <stdint.h>
 
@@ -198,8 +199,42 @@ static int viewer_load_file(const char *name) {
         }
       }
     } else if (header[0] == 0xFFu && header[1] == 0xD8u) {
-      viewer_set_message(VIEWER_CONTENT_JPEG,
-                         "JPEG image detected. This build does not decode JPEG yet.");
+      if (file_size > 8u * 1024u * 1024u) {
+        viewer_set_message(VIEWER_CONTENT_JPEG,
+                           "JPEG file is too large to preview.");
+      } else {
+        uint8_t *file_data = (uint8_t *)kmalloc(file_size);
+        if (!file_data) {
+          viewer_set_message(VIEWER_CONTENT_JPEG,
+                             "Not enough memory to open this JPEG.");
+        } else {
+          uint32_t bytes_read = 0;
+          uint32_t image_width = 0;
+          uint32_t image_height = 0;
+          uint8_t *image_pixels = NULL;
+          int read_ok = simplefs_read_file(name, file_data, file_size, &bytes_read) &&
+                        bytes_read == file_size;
+          int decode_ok = read_ok &&
+                          jpeg_decode_rgba(file_data, file_size, &image_width,
+                                           &image_height, &image_pixels);
+          kfree(file_data);
+
+          if (decode_ok && image_pixels && image_width && image_height) {
+            g_viewer_pixels = image_pixels;
+            g_viewer_image_width = image_width;
+            g_viewer_image_height = image_height;
+            g_viewer_kind = VIEWER_CONTENT_JPEG;
+            g_viewer_text[0] = 0;
+            g_viewer_text_len = 0;
+          } else {
+            if (image_pixels)
+              kfree(image_pixels);
+            viewer_set_message(VIEWER_CONTENT_JPEG,
+                               read_ok ? "JPEG format is unsupported or invalid. Baseline JPEG is supported."
+                                       : "Could not read the complete JPEG file.");
+          }
+        }
+      }
     } else {
       uint32_t text_len = 0;
       if (!simplefs_read_file(name, g_viewer_text,
@@ -777,7 +812,7 @@ static void draw_viewer_window(const wm_window_t *win) {
             (uint32_t)(w - 2), 30u, 0x17263A);
   const char *toolbar_label =
       g_viewer_kind == VIEWER_CONTENT_PNG ? "IMAGE PREVIEW / PNG" :
-      g_viewer_kind == VIEWER_CONTENT_JPEG ? "IMAGE DETECTED / JPEG" :
+      g_viewer_kind == VIEWER_CONTENT_JPEG ? "IMAGE PREVIEW / JPEG" :
       g_viewer_kind == VIEWER_CONTENT_BINARY ? "PREVIEW UNAVAILABLE" :
       "PREVIEW / TEXT CONTENT";
   draw_string_8x8((uint32_t)(x + 14), (uint32_t)(y + 42),
@@ -788,8 +823,9 @@ static void draw_viewer_window(const wm_window_t *win) {
   uint32_t pw = w > 24 ? (uint32_t)w - 24u : 1u;
   uint32_t ph = h > 80 ? (uint32_t)h - 80u : 1u;
 
-  if (g_viewer_kind == VIEWER_CONTENT_PNG && g_viewer_pixels &&
-      g_viewer_image_width && g_viewer_image_height) {
+  if ((g_viewer_kind == VIEWER_CONTENT_PNG ||
+       g_viewer_kind == VIEWER_CONTENT_JPEG) &&
+      g_viewer_pixels && g_viewer_image_width && g_viewer_image_height) {
     draw_rect(px, py, pw, ph, 0x182230);
 
     uint32_t max_w = pw > 16u ? pw - 16u : 1u;
