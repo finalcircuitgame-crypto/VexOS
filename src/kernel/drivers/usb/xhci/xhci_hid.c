@@ -207,7 +207,7 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
 }
 
 void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
-  if (dev->hid_ifnum == 0xFF) {
+  if (!dev || dev->hid_ifnum == 0xFF) {
     return;
   }
 
@@ -216,6 +216,10 @@ void xhci_hid_try_parse_mouse_report_desc(xhci_device_state_t *dev) {
   }
 
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[HID] Could not allocate report descriptor buffer\n");
+    return;
+  }
   for (uint32_t i = 0; i < 4096; i++) {
     buf[i] = 0;
   }
@@ -249,23 +253,32 @@ static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb)
 }
 
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
-  if (dev->intr_epaddr == 0 || dev->intr_mps == 0) {
+  if (!dev || dev->slot_id == 0 || dev->slot_id >= 256u ||
+      dev->intr_epaddr == 0 || dev->intr_mps == 0) {
     serial_print("[xHCI] No interrupt IN endpoint found; skipping HID polling\n");
     return 0;
   }
 
   const uint32_t dci = (uint32_t)dev->intr_dci;
-  if (dci == 0) {
-    serial_print("[xHCI] Interrupt IN endpoint DCI is 0; skipping HID polling\n");
+  if (dci == 0 || dci > 31u || dev->intr_mps > 4096u) {
+    serial_print("[xHCI] Invalid interrupt IN endpoint parameters; skipping HID polling\n");
     return 0;
   }
   const uint32_t ctx_index = dci + 1;
 
   dev->intr_ring = xhci_alloc_tr_ring();
+  if (!dev->intr_ring) {
+    serial_print("[xHCI] Could not allocate HID transfer ring\n");
+    return 0;
+  }
   dev->intr_index = 0;
   dev->intr_cycle = 1;
 
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    serial_print("[xHCI] Could not allocate HID input context\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++) {
     input_ctx[i] = 0;
   }
@@ -383,21 +396,25 @@ int xhci_hid_set_idle(xhci_device_state_t *dev) {
 }
 
 void xhci_hid_start_polling(xhci_device_state_t *dev) {
-  if (!dev->intr_ring) {
+  if (!dev || !dev->intr_ring || dev->intr_mps == 0 ||
+      dev->intr_mps > 4096u || dev->slot_id == 0 ||
+      dev->slot_id >= 256u || dev->intr_dci == 0 ||
+      dev->intr_dci > 31u) {
     return;
   }
 
   if (!dev->intr_buf) {
     dev->intr_buf = (uint8_t *)PMM_AllocatePage();
+    if (!dev->intr_buf) {
+      serial_print("[HID] Could not allocate interrupt report buffer; polling stopped\n");
+      return;
+    }
     for (uint32_t i = 0; i < 4096; i++) {
       dev->intr_buf[i] = 0;
     }
   }
 
   const uint32_t dci = (uint32_t)dev->intr_dci;
-  if (dci == 0) {
-    return;
-  }
   xhci_trb_t trb;
   trb.data = (uint64_t)(uintptr_t)dev->intr_buf;
   trb.status = (uint32_t)(dev->intr_mps & 0xFFFFu);
