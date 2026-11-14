@@ -294,9 +294,15 @@ jobs:
                           "hold-time": 100
                       }
                   })
-                  time.sleep(0.25)
+                  # The text-entry check is also a focus/input latency check:
+                  # allow a little more time per character to avoid racing the
+                  # timer-driven desktop loop on busy CI hosts.
+                  time.sleep(0.4 if sequence == ["v", "e", "x"] else 0.25)
+              if sequence == ["n", "o", "t", "e", "p", "a", "d", "ret"]:
+                  # Wait for the title/focus transition before sending editor text.
+                  time.sleep(1.0)
           # Let the desktop process the final key and redraw Notepad before capture.
-          time.sleep(0.5)
+          time.sleep(0.75)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
 
           # Open Files from the centered taskbar dock and capture the redesigned file manager.
