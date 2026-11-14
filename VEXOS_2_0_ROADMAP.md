@@ -55,10 +55,10 @@ Acceptance: renderer tests pass independently of desktop layout; the same render
 
 ## Phase 3 — desktop and window manager
 
-Status: window visibility, focus, z-order, and display-bound geometry clamping are in a standalone module; the Start menu is responsive. Event routing, actual resize/minimize/maximize/restore controls, and full app lifecycle are still coupled to desktop.c.
+Status: window visibility, focus, z-order, display-bound geometry clamping, and bounded resize calculations are in the standalone window manager; desktop windows now expose a bottom-right resize grip using one shared drag path. The QEMU workflow is being extended to drag Terminal's grip. Event routing, minimize/maximize/restore controls, and full app lifecycle are still coupled to desktop.c.
 
 - Separate the window manager from application implementations.
-- Give each window explicit bounds, state, z-order, focus, and event handling.
+- Give each window explicit bounds, state, z-order, focus, and event handling. Window records now share one rectangle type; drag movement is clamped and resizing respects minimum and display maximum sizes.
 - Route pointer and keyboard events through one event queue rather than mixing polling logic with app state changes.
 - Implement consistent title bars, minimize/maximize/close behavior, resizing, focus, keyboard shortcuts, and pointer capture.
 - Make layout adapt to framebuffer size instead of assuming one desktop geometry.
