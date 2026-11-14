@@ -17,5 +17,15 @@ typedef struct {
 } notepad_render_context_t;
 
 void notepad_draw(const notepad_render_context_t *context);
+void notepad_init(uint32_t screen_width, uint32_t screen_height);
+desktop_window_t *notepad_window(void);
+const char *notepad_filename(void);
+const char *notepad_text(void);
+uint32_t notepad_text_length(void);
+uint32_t notepad_scroll(void);
+uint8_t notepad_handle_char(char value);
+void notepad_scroll_up(void);
+void notepad_scroll_down(void);
+
 
 #endif
