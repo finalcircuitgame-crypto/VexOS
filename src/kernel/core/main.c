@@ -4,6 +4,7 @@
 #include "gdt.h"
 #include "heap.h"
 #include "hw_profile.h"
+#include "input.h"
 #include "idt.h"
 #include "pmm.h"
 #include "simplefs.h"
@@ -836,6 +837,9 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Desktop initialized\n");
 
 #ifdef VEXOS_CI_INPUT_TEST
+  if (!input_ci_self_test())
+    ci_memory_test_fail("pointer and keyboard input queues");
+  serial_print("[CI] Pointer scaling/clamping and keyboard queues passed\n");
   // Run only after desktop_init has installed the framebuffer target.
   ci_framebuffer_syscall_self_test(bootInfo);
 #endif
