@@ -158,15 +158,31 @@ void xhci_poll_events() {
     if ((cc == 1 || cc == 13) && dev->intr_buf) {
       if (dev->hid_mouse_valid) {
           const uint8_t *r = dev->intr_buf;
+          if (xfer_len == 0u || xfer_len > 4096u)
+            goto rearm;
+
           uint32_t base_bit = 0;
           if (dev->hid_has_report_id) {
-            if (xfer_len < 1) {
+            if (xfer_len < 1u || r[0] != dev->hid_mouse_report_id)
               goto rearm;
-            }
-            if (r[0] != dev->hid_mouse_report_id) {
-              goto rearm;
-            }
-            base_bit = 8;
+            base_bit = 8u;
+          }
+
+          /* Never interpret a short transfer as a complete HID report. */
+          uint32_t packet_bits = xfer_len * 8u;
+          if ((dev->hid_x_bits &&
+               (uint32_t)dev->hid_x_bitoff + base_bit +
+                       (uint32_t)dev->hid_x_bits > packet_bits) ||
+              (dev->hid_y_bits &&
+               (uint32_t)dev->hid_y_bitoff + base_bit +
+                       (uint32_t)dev->hid_y_bits > packet_bits) ||
+              (dev->hid_buttons_bits &&
+               (uint32_t)dev->hid_buttons_bitoff + base_bit +
+                       (uint32_t)dev->hid_buttons_bits > packet_bits) ||
+              (dev->hid_wheel_bits &&
+               (uint32_t)dev->hid_wheel_bitoff + base_bit +
+                       (uint32_t)dev->hid_wheel_bits > packet_bits)) {
+            goto rearm;
           }
 
           uint32_t buttons = 0;
@@ -215,11 +231,13 @@ void xhci_poll_events() {
             (void)ddy;
           }
       } else if (dev->hid_proto == 2) {
+          if (xfer_len < 3u || xfer_len > 4096u)
+            goto rearm;
           uint8_t buttons = dev->intr_buf[0];
           int8_t dx = (int8_t)dev->intr_buf[1];
           int8_t dy = (int8_t)dev->intr_buf[2];
           int8_t wheel = 0;
-          if (dev->intr_mps >= 4) {
+          if (xfer_len >= 4u) {
             wheel = (int8_t)dev->intr_buf[3];
           }
 
