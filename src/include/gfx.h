@@ -43,4 +43,8 @@ void gfx_blit_frame(const BootInfo *surface, const uint32_t *source,
                     uint32_t source_pitch_pixels, uint32_t source_width,
                     uint32_t source_height);
 
+#ifdef VEXOS_CI_INPUT_TEST
+int gfx_ci_self_test(void);
+#endif
+
 #endif
