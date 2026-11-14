@@ -64,7 +64,7 @@ Status: window visibility, focus, z-order, display-bound geometry clamping, and 
 - Make layout adapt to framebuffer size instead of assuming one desktop geometry.
 - Keep drawing declarative at the app level and use the shared graphics API for rendering.
 
-Acceptance: overlapping windows retain correct z-order and focus; resize, drag, minimize, restore, and close behavior are covered by repeatable input tests.
+Acceptance: overlapping windows retain correct z-order and focus; drag movement and live resize are covered by repeatable QEMU tablet tests. Minimize, maximize, restore, and close lifecycle tests remain outstanding.
 
 ## Phase 4 — applications and storage experience
 
