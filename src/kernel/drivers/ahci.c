@@ -312,12 +312,20 @@ static int ahci_identify_device(void) {
     return 0;
 
   const uint16_t *identify = (const uint16_t *)g_dma_buffer;
-  uint16_t command_set_82 = identify[82];
   uint16_t command_set_83 = identify[83];
+  uint16_t command_set_enabled = identify[86];
+  int supported_valid = (command_set_83 & 0xC000u) == 0x4000u;
+  int enabled_valid = (command_set_enabled & 0xC000u) == 0x4000u;
 
-  g_supports_lba48 = (command_set_83 & (1u << 10)) != 0;
-  g_supports_flush = (command_set_82 & (1u << 12)) != 0;
-  g_supports_flush_ext = (command_set_83 & (1u << 12)) != 0;
+  g_supports_lba48 = supported_valid && (command_set_83 & (1u << 10)) != 0;
+  g_supports_flush =
+      supported_valid && enabled_valid &&
+      (command_set_83 & (1u << 12)) != 0 &&
+      (command_set_enabled & (1u << 12)) != 0;
+  g_supports_flush_ext =
+      supported_valid && enabled_valid &&
+      (command_set_83 & (1u << 13)) != 0 &&
+      (command_set_enabled & (1u << 13)) != 0;
 
   if (g_supports_lba48) {
     g_sector_count = (uint64_t)identify[100] |
