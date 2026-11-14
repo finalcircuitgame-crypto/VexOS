@@ -11,7 +11,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 - GNU toolchain: gcc, ld, objcopy, make
 - mtools (mformat, mmd, mcopy) for writing the EFI image
 - qemu-system-x86_64 and OVMF (UEFI firmware) for running the VM
-- python3 (optional) used by run.sh to embed new.png into dist/storage.img
+- python3 (optional) used by run.sh to embed new.png, new.jpg, or new.jpeg into dist/storage.img
 
 ## Build
 Run:
@@ -29,7 +29,7 @@ when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a
 no-op placeholder, not a working port.
 
 ## Run (development)
-run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into the SimpleFS storage image if that file exists.
+run.sh builds then launches QEMU with OVMF. It will also embed the first available image named `new.png`, `new.jpeg`, or `new.jpg` into the SimpleFS storage image. The file extension is preserved; the viewer identifies the image format from its contents.
 
     ./run.sh
 
