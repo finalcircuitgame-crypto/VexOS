@@ -109,7 +109,7 @@ int input_kbd_pop_event(input_kbd_event_t *out) {
 
 
 #ifdef VEXOS_CI_INPUT_TEST
-int input_ci_self_test(void) {
+int input_ci_self_test(uint32_t screen_width, uint32_t screen_height) {
   input_kbd_event_t event;
   input_pointer_state_t pointer;
   char character = 0;
@@ -157,6 +157,8 @@ int input_ci_self_test(void) {
   if (input_kbd_pop_event(&event))
     return 0;
 
+  /* Restore the real desktop dimensions and leave empty, centered input state. */
+  input_init(screen_width, screen_height);
   return 1;
 }
 #endif
