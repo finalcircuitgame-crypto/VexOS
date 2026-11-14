@@ -3,6 +3,56 @@
 #define WM_MAX_APPS 16u
 #define WM_NO_FOCUS 0xFFFFFFFFu
 
+void wm_clamp_rect(wm_rect_t *rect, uint32_t screen_width,
+                   uint32_t screen_height, uint32_t min_width,
+                   uint32_t min_height) {
+  if (!rect || screen_width == 0u || screen_height == 0u)
+    return;
+
+  if (screen_width > 0x7FFFFFFFu)
+    screen_width = 0x7FFFFFFFu;
+  if (screen_height > 0x7FFFFFFFu)
+    screen_height = 0x7FFFFFFFu;
+
+  if (min_width == 0u)
+    min_width = 1u;
+  if (min_height == 0u)
+    min_height = 1u;
+  if (min_width > screen_width)
+    min_width = screen_width;
+  if (min_height > screen_height)
+    min_height = screen_height;
+
+  int64_t width = rect->w;
+  int64_t height = rect->h;
+  if (width < (int64_t)min_width)
+    width = min_width;
+  if (height < (int64_t)min_height)
+    height = min_height;
+  if (width > (int64_t)screen_width)
+    width = screen_width;
+  if (height > (int64_t)screen_height)
+    height = screen_height;
+
+  int64_t max_x = (int64_t)screen_width - width;
+  int64_t max_y = (int64_t)screen_height - height;
+  int64_t x = rect->x;
+  int64_t y = rect->y;
+  if (x < 0)
+    x = 0;
+  if (y < 0)
+    y = 0;
+  if (x > max_x)
+    x = max_x;
+  if (y > max_y)
+    y = max_y;
+
+  rect->x = (int32_t)x;
+  rect->y = (int32_t)y;
+  rect->w = (int32_t)width;
+  rect->h = (int32_t)height;
+}
+
 static uint8_t g_app_open[WM_MAX_APPS];
 static uint8_t g_app_visible[WM_MAX_APPS];
 static uint8_t g_z_order[WM_MAX_APPS];
@@ -165,6 +215,30 @@ int wm_ci_self_test(uint32_t restore_app_count) {
 
   wm_raise(1u);
   if (!wm_is_focused(1u) || wm_z_at(wm_z_count() - 1u) != 1u)
+    goto fail;
+
+  wm_init(restore_app_count);
+  wm_raise(0u);
+
+  wm_rect_t rect = {-120, -80, 500, 700};
+  wm_clamp_rect(&rect, 640u, 480u, 320u, 180u);
+  if (rect.x != 0 || rect.y != 0 || rect.w != 500 || rect.h != 480)
+    goto fail;
+
+  rect.x = 600;
+  rect.y = 450;
+  rect.w = 400;
+  rect.h = 300;
+  wm_clamp_rect(&rect, 640u, 480u, 320u, 180u);
+  if (rect.x != 240 || rect.y != 180 || rect.w != 400 || rect.h != 300)
+    goto fail;
+
+  rect.x = 0;
+  rect.y = 0;
+  rect.w = 0;
+  rect.h = 0;
+  wm_clamp_rect(&rect, 200u, 120u, 320u, 180u);
+  if (rect.x != 0 || rect.y != 0 || rect.w != 200 || rect.h != 120)
     goto fail;
 
   wm_init(restore_app_count);
