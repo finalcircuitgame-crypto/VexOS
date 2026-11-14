@@ -25,7 +25,6 @@ static char g_text[1024];
 static uint32_t g_text_len;
 
 static uint8_t g_start_open;
-static uint8_t g_show_shell;
 
 static char g_shell_out[4096];
 static uint32_t g_shell_out_len;
@@ -48,8 +47,6 @@ static wm_window_t g_viewer_win;
 static uint8_t g_shell_dragging;
 static int32_t g_shell_drag_off_x;
 static int32_t g_shell_drag_off_y;
-static uint8_t g_explorer_open;
-static uint8_t g_viewer_open;
 static uint8_t g_explorer_dragging;
 static int32_t g_explorer_drag_off_x;
 static int32_t g_explorer_drag_off_y;
@@ -269,7 +266,7 @@ static int viewer_load_file(const char *name) {
   }
 
   g_viewer_scroll = 0;
-  g_viewer_open = 1;
+  wm_open(APP_VIEWER);
   wm_open(APP_VIEWER);
   app_raise(APP_VIEWER);
   return 1;
@@ -290,7 +287,6 @@ static uint32_t g_notepad_scroll;
 
 // Setup Wizard state
 static wm_window_t g_setup_win;
-static uint8_t g_setup_open;
 static uint8_t g_setup_dragging;
 static int32_t g_setup_drag_off_x;
 static int32_t g_setup_drag_off_y;
@@ -654,7 +650,7 @@ static void draw_setup_window(const wm_window_t *win) {
   uint8_t is_focused = (wm_is_focused(APP_SETUP));
   draw_window_chrome(win, "Setup Wizard", NULL, is_focused, 0, 0);
 
-  if (!g_setup_open)
+  if (!wm_is_open(APP_SETUP))
     return;
 
   const char *step_titles[] = {
@@ -978,19 +974,19 @@ static void draw_open_windows(void) {
 
     switch (app) {
       case APP_SHELL:
-        if (g_show_shell) draw_shell_window(&g_shell_win);
+        if (wm_is_open(APP_SHELL)) draw_shell_window(&g_shell_win);
         break;
       case APP_EXPLORER:
-        if (g_explorer_open) draw_explorer_window(&g_explorer_win);
+        if (wm_is_open(APP_EXPLORER)) draw_explorer_window(&g_explorer_win);
         break;
       case APP_VIEWER:
-        if (g_viewer_open) draw_viewer_window(&g_viewer_win);
+        if (wm_is_open(APP_VIEWER)) draw_viewer_window(&g_viewer_win);
         break;
       case APP_NOTEPAD:
         draw_notepad_window(&g_notepad_win);
         break;
       case APP_SETUP:
-        if (g_setup_open) draw_setup_window(&g_setup_win);
+        if (wm_is_open(APP_SETUP)) draw_setup_window(&g_setup_win);
         break;
       default:
         break;
@@ -1217,7 +1213,7 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 8 && streq_n(g_shell_line, "explorer", 8)) {
     shell_append("opening explorer...\n");
     if (simplefs_init()) {
-      g_explorer_open = 1;
+      wm_open(APP_EXPLORER);
       wm_open(APP_EXPLORER);
       app_raise(APP_EXPLORER);
     } else {
@@ -1252,7 +1248,7 @@ static void shell_run_line(void) {
 #endif
   } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "setup", 5)) {
     shell_append("opening setup wizard...\n");
-    g_setup_open = 1;
+    wm_open(APP_SETUP);
     wm_open(APP_SETUP);
     app_raise(APP_SETUP);
     g_setup_step = 0;
@@ -1534,7 +1530,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_bg = 0;
   g_text_len = 0;
   g_start_open = 0;
-  g_show_shell = 0;
+  wm_close(APP_SHELL);
   g_shell_out_len = 0;
   g_shell_line_len = 0;
   g_rand_state = 0xC001D00Du;
@@ -1547,8 +1543,8 @@ void desktop_init(BootInfo *bootInfo) {
   g_shell_dragging = 0;
   g_shell_drag_off_x = 0;
   g_shell_drag_off_y = 0;
-  g_explorer_open = 0;
-  g_viewer_open = 0;
+  wm_close(APP_EXPLORER);
+  wm_close(APP_VIEWER);
   g_explorer_dragging = 0;
   g_viewer_dragging = 0;
   g_viewer_name[0] = 0;
@@ -1652,7 +1648,7 @@ void desktop_init(BootInfo *bootInfo) {
   g_setup_win.y = (int32_t)((g_bi->height - (uint32_t)g_setup_win.h) / 2u);
   if (g_setup_win.x < 16) g_setup_win.x = 16;
   if (g_setup_win.y < 16) g_setup_win.y = 16;
-  g_setup_open = 0; // Closed by default, user opens via shell or start menu
+  wm_close(APP_SETUP); // Closed by default, user opens via shell or start menu
   g_setup_step = 0;
   g_setup_disk_ready = 0;
   g_setup_partition_done = 0;
@@ -1758,7 +1754,7 @@ void desktop_tick(void) {
           ui_changed = 1;
         }
       }
-    } else if (wm_is_focused(APP_SHELL) && g_show_shell && wm_is_open(APP_SHELL)) {
+    } else if (wm_is_focused(APP_SHELL) && wm_is_open(APP_SHELL) && wm_is_open(APP_SHELL)) {
       if (c == '\b') {
         if (g_shell_line_len) {
           g_shell_line_len--;
@@ -1811,23 +1807,23 @@ void desktop_tick(void) {
     } else if (g_start_open) {
       int32_t mx=10,mw=280,mh=168,my=tb_y-176;
       if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
-        if(ry>=28&&ry<50){g_show_shell=1;wm_open(APP_SHELL);app_raise(APP_SHELL);
+        if(ry>=28&&ry<50){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);
 #ifdef VEXOS_CI_INPUT_TEST
           serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
           g_start_open=0;ui_changed=1;
-        }else if(ry>=50&&ry<72){if(simplefs_init()){g_explorer_open=1;wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
+        }else if(ry>=50&&ry<72){if(simplefs_init()){wm_open(APP_EXPLORER);wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
         }else if(ry>=72&&ry<94){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
-        }else if(ry>=94&&ry<116){g_viewer_open=1;wm_open(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
-        }else if(ry>=116&&ry<138){g_setup_open=1;wm_open(APP_SETUP);g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){g_show_shell=1;wm_open(APP_SHELL);app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
+        }else if(ry>=94&&ry<116){wm_open(APP_VIEWER);wm_open(APP_VIEWER);app_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
+        }else if(ry>=116&&ry<138){wm_open(APP_SETUP);wm_open(APP_SETUP);g_setup_step=0;app_raise(APP_SETUP);g_start_open=0;ui_changed=1;
+        }else if(ry>=138&&ry<162){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
       }else{g_start_open=0;ui_changed=1;}
     }
 
     // Desktop shortcuts launch their matching applications.
     if(!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
-      if(i==0u){if(simplefs_init()){g_explorer_open=1;wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
-      else if(i==1u){g_show_shell=1;wm_open(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{g_viewer_open=1;wm_open(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
+      if(i==0u){if(simplefs_init()){wm_open(APP_EXPLORER);wm_open(APP_EXPLORER);app_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
+      else if(i==1u){wm_open(APP_SHELL);wm_open(APP_SHELL);app_raise(APP_SHELL);}else if(i==2u){wm_open(APP_NOTEPAD);app_raise(APP_NOTEPAD);}else{wm_open(APP_VIEWER);wm_open(APP_VIEWER);app_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
 
@@ -1850,19 +1846,19 @@ void desktop_tick(void) {
         if (hit_test(p0.x, p0.y, (int32_t)ix, (int32_t)iy, (int32_t)icon,
                      (int32_t)icon)) {
           if (i == 0) {
-            g_show_shell = 1;
+            wm_open(APP_SHELL);
             wm_open(APP_SHELL);
             app_raise(APP_SHELL);
           } else if (i == 1) {
             if (simplefs_init()) {
-              g_explorer_open = 1;
+              wm_open(APP_EXPLORER);
               wm_open(APP_EXPLORER);
               app_raise(APP_EXPLORER);
             } else {
               shell_append("fs init failed\n> ");
             }
           } else if (i == 2) {
-            g_viewer_open = 1;
+            wm_open(APP_VIEWER);
             wm_open(APP_VIEWER);
             app_raise(APP_VIEWER);
           } else if (i == 3) {
@@ -1879,7 +1875,7 @@ void desktop_tick(void) {
     }
 
     // Explorer window interactions
-    if (g_explorer_open) {
+    if (wm_is_open(APP_EXPLORER)) {
       int32_t wx = g_explorer_win.x;
       int32_t wy = g_explorer_win.y;
       int32_t ww = g_explorer_win.w;
@@ -1887,7 +1883,7 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_explorer_open = 0;
+        wm_close(APP_EXPLORER);
         g_explorer_dragging = 0;
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx + ww - 46, wy + 5, 20, 20)) {
@@ -1941,13 +1937,13 @@ void desktop_tick(void) {
       }
     }
 
-    if (g_viewer_open) {
+    if (wm_is_open(APP_VIEWER)) {
       int32_t wx = g_viewer_win.x;
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
       // Close
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_viewer_open = 0;
+        wm_close(APP_VIEWER);
         g_viewer_dragging = 0;
         viewer_clear_content();
         ui_changed = 1;
@@ -2015,7 +2011,7 @@ void desktop_tick(void) {
     }
 
     // Setup Wizard interactions
-    if (g_setup_open) {
+    if (wm_is_open(APP_SETUP)) {
       int32_t wx = g_setup_win.x;
       int32_t wy = g_setup_win.y;
       int32_t ww = g_setup_win.w;
@@ -2028,7 +2024,7 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_setup_open = 0;
+        wm_close(APP_SETUP);
         g_setup_dragging = 0;
         ui_changed = 1;
       }
@@ -2050,7 +2046,7 @@ void desktop_tick(void) {
       else if (hit_test(p0.x, p0.y, wx + ww - 76, wy + wh - 28, 60, 18)) {
         if (g_setup_step == 5) {
           // Finish - close wizard
-          g_setup_open = 0;
+          wm_close(APP_SETUP);
           shell_append("setup: complete\n> ");
         } else {
           // Advance to next step and execute action
@@ -2080,7 +2076,7 @@ void desktop_tick(void) {
 
   // Window manager interactions (shell window)
   if (pressed & 1u) {
-    if (g_show_shell) {
+    if (wm_is_open(APP_SHELL)) {
       int32_t wx = g_shell_win.x;
       int32_t wy = g_shell_win.y;
       int32_t ww = g_shell_win.w;
@@ -2088,7 +2084,7 @@ void desktop_tick(void) {
 
       // Close button
       if (hit_test(p0.x, p0.y, wx + ww - 24, wy + 5, 20, 20)) {
-        g_show_shell = 0;
+        wm_close(APP_SHELL);
         g_shell_dragging = 0;
         ui_changed = 1;
       } else if (hit_test(p0.x, p0.y, wx, wy, ww, 30)) {
