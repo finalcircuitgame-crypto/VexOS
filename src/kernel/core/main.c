@@ -207,6 +207,7 @@ static void ci_memory_self_test(void) {
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
+extern int xhci_hid_ci_qemu_tablet_descriptor_test(void);
 
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -845,6 +846,9 @@ void kernel_main(BootInfo *bootInfo) {
   if (!input_ci_self_test(bootInfo->width, bootInfo->height))
     ci_memory_test_fail("pointer and keyboard input queues");
   serial_print("[CI] Pointer scaling/clamping and keyboard queues passed\n");
+  if (!xhci_hid_ci_qemu_tablet_descriptor_test())
+    ci_memory_test_fail("QEMU USB tablet HID Pointer descriptor parsing");
+  serial_print("[CI] QEMU USB tablet Pointer collection and absolute axes parsed\n");
   if (!wm_ci_self_test(5u))
     ci_memory_test_fail("window manager focus/open/close/z-order");
   serial_print("[CI] Window manager visibility/focus/z-order/geometry passed\n");
