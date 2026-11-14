@@ -11,7 +11,7 @@ fi
 # image formats from file signatures, so the extension is preserved as supplied.
 if command -v python3 >/dev/null 2>&1; then
     ASSET_SRC=""
-    for candidate in new.jpeg new.jpg new.png; do
+    for candidate in new.png new.jpeg new.jpg; do
         if [ -f "$candidate" ]; then
             ASSET_SRC="$candidate"
             break
