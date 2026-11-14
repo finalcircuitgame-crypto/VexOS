@@ -1651,10 +1651,10 @@ void desktop_tick(void) {
           np_text[np_len - 3u] == 'v' && np_text[np_len - 2u] == 'e' &&
           np_text[np_len - 1u] == 'x') {
         ci_notepad_text_seen = 1;
-        serial_print("[CI] Notepad accepted the full typed text vex\\n");
+        serial_print("[CI] Notepad accepted the full typed text vex\n");
       }
 #endif
-    }else if (wm_get_focus() == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
+    } else if (wm_get_focus() == APP_SHELL && g_show_shell && g_app_open[APP_SHELL]) {
       if (c == '\b') {
         if (g_shell_line_len) {
           g_shell_line_len--;
