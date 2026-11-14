@@ -271,7 +271,7 @@ int xhci_hid_ci_qemu_tablet_descriptor_test(void) {
          dev.hid_y_bitoff == 24u && dev.hid_y_bits == 16u &&
          !dev.hid_y_is_relative &&
          dev.hid_wheel_bitoff == 40u && dev.hid_wheel_bits == 8u &&
-         dev.hid_wheel_is_relative;
+         !dev.hid_wheel_is_relative;
 }
 #endif
 
