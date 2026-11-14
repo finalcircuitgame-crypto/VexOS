@@ -1020,12 +1020,6 @@ static void shell_run_specs(void) {
   shell_append(" KB\n");
 }
 
-static uint32_t shell_next_rand(void) {
-  // LCG
-  g_rand_state = (g_rand_state * 1664525u) + 1013904223u;
-  return g_rand_state;
-}
-
 static void shell_append(const char *s) { terminal_append(s); }
 
 static int streq_n(const char *a, const char *b, uint32_t n) {
