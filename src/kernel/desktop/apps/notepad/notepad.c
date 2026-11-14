@@ -1,5 +1,52 @@
 #include "notepad.h"
 #include "../../graphics/graphics.h"
+#define NOTEPAD_TEXT_CAPACITY 4096u
+static desktop_window_t g_window;
+static char g_filename[64];
+static char g_text[NOTEPAD_TEXT_CAPACITY];
+static uint32_t g_text_length;
+static uint32_t g_scroll;
+
+void notepad_init(uint32_t screen_width, uint32_t screen_height) {
+  g_filename[0] = 0;
+  g_text[0] = 0;
+  g_text_length = 0;
+  g_scroll = 0;
+  const char *name = "note.txt";
+  uint32_t i = 0;
+  while (i + 1u < sizeof(g_filename) && name[i]) {
+    g_filename[i] = name[i];
+    ++i;
+  }
+  g_filename[i] = 0;
+  g_window.w = (int32_t)(screen_width > 720u ? 660u : (screen_width > 48u ? screen_width - 48u : screen_width));
+  g_window.h = (int32_t)(screen_height > 560u ? 480u : (screen_height > 80u ? screen_height - 80u : screen_height));
+  g_window.x = ((int32_t)screen_width - g_window.w) / 2 + 54;
+  g_window.y = ((int32_t)screen_height - g_window.h) / 2 + 38;
+}
+
+desktop_window_t *notepad_window(void) { return &g_window; }
+const char *notepad_filename(void) { return g_filename; }
+const char *notepad_text(void) { return g_text; }
+uint32_t notepad_text_length(void) { return g_text_length; }
+uint32_t notepad_scroll(void) { return g_scroll; }
+
+uint8_t notepad_handle_char(char value) {
+  if (value == '\b') {
+    if (!g_text_length) return 0;
+    g_text[--g_text_length] = 0;
+    return 1;
+  }
+  if (value != '\n' && (value < 32 || value > 126)) return 0;
+  if (g_text_length + 1u >= sizeof(g_text)) return 0;
+  g_text[g_text_length++] = value;
+  g_text[g_text_length] = 0;
+  return 1;
+}
+
+void notepad_scroll_up(void) { if (g_scroll) --g_scroll; }
+void notepad_scroll_down(void) { ++g_scroll; }
+
 
 static void draw_line_number(uint32_t x, uint32_t y, uint32_t number) {
   char digits[11];
