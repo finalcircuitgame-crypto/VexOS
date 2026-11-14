@@ -1606,10 +1606,12 @@ void desktop_init(BootInfo *bootInfo) {
     uint32_t saved = g_rand_state;
     uint32_t *saved_back = g_back;
     g_back = g_bg;
+    gfx_set_backbuffer(g_back);
     g_rand_state = 0xC001D00Du;
     draw_background();
     g_rand_state = saved;
     g_back = saved_back;
+    gfx_set_backbuffer(g_back);
 
     // Initialize the presented frame.
     compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
@@ -2147,6 +2149,7 @@ void desktop_tick(void) {
 
       uint32_t *saved_back = g_back;
       g_back = NULL;
+      gfx_set_backbuffer(NULL);
 
       uint32_t fg = 0xFFFFFF;
       uint32_t outline = 0x000000;
@@ -2167,6 +2170,7 @@ void desktop_tick(void) {
       }
 
       g_back = saved_back;
+      gfx_set_backbuffer(g_back);
       g_last_cursor_x = p.x;
       g_last_cursor_y = p.y;
       g_last_cursor_buttons = p.buttons;
@@ -2304,6 +2308,8 @@ static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
 // Run the fullscreen setup wizard (blocking until complete)
 void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
   g_bi = bootInfo;
+  compositor_init(bootInfo);
+  gfx_init(bootInfo, NULL, _binary_CGA_F08_start);
   g_setup_complete = 0;
   g_fullscreen_setup_step = 0;
   g_fullscreen_setup_disk_ready = 0;
@@ -2344,6 +2350,7 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
       } else {
         g_back = fb;
       }
+      gfx_set_backbuffer(g_back);
 
       draw_fullscreen_setup_step(screen_w, screen_h);
 
@@ -2413,6 +2420,7 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
     kfree(wizard_back);
   }
   g_back = NULL;
+  gfx_set_backbuffer(NULL);
 }
 
 int desktop_is_setup_complete(void) {
