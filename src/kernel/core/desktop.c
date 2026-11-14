@@ -153,6 +153,54 @@ static int window_resize_update(int32_t pointer_x, int32_t pointer_y) {
   return win->w != old_width || win->h != old_height;
 }
 
+static void desktop_dirty_add_rect(wm_rect_t *dirty, uint8_t *valid,
+                                    int32_t x, int32_t y,
+                                    int32_t width, int32_t height) {
+  if (!dirty || !valid || !g_bi || width <= 0 || height <= 0)
+    return;
+
+  /* Include the window shadow/border around both its old and new bounds. */
+  int64_t left = (int64_t)x - 6;
+  int64_t top = (int64_t)y - 6;
+  int64_t right = (int64_t)x + width + 6;
+  int64_t bottom = (int64_t)y + height + 6;
+  if (left < 0) left = 0;
+  if (top < 0) top = 0;
+  if (right > g_bi->width) right = g_bi->width;
+  if (bottom > g_bi->height) bottom = g_bi->height;
+  if (right <= left || bottom <= top)
+    return;
+
+  if (!*valid) {
+    dirty->x = (int32_t)left;
+    dirty->y = (int32_t)top;
+    dirty->w = (int32_t)(right - left);
+    dirty->h = (int32_t)(bottom - top);
+    *valid = 1u;
+    return;
+  }
+
+  int64_t old_left = dirty->x;
+  int64_t old_top = dirty->y;
+  int64_t old_right = old_left + dirty->w;
+  int64_t old_bottom = old_top + dirty->h;
+  if (left > old_left) left = old_left;
+  if (top > old_top) top = old_top;
+  if (right < old_right) right = old_right;
+  if (bottom < old_bottom) bottom = old_bottom;
+  dirty->x = (int32_t)left;
+  dirty->y = (int32_t)top;
+  dirty->w = (int32_t)(right - left);
+  dirty->h = (int32_t)(bottom - top);
+}
+
+static void desktop_dirty_add_window(wm_rect_t *dirty, uint8_t *valid,
+                                     const wm_window_t *win) {
+  if (!win)
+    return;
+  desktop_dirty_add_rect(dirty, valid, win->x, win->y, win->w, win->h);
+}
+
 static void draw_resize_grip(const wm_window_t *win, uint8_t focused) {
   if (!win || win->w < 40 || win->h < 40)
     return;
@@ -1989,6 +2037,9 @@ void desktop_tick(void) {
   prev_buttons = buttons;
 
   uint8_t ui_changed = 0;
+  wm_rect_t motion_dirty = {0, 0, 0, 0};
+  uint8_t motion_dirty_valid = 0u;
+  uint8_t motion_geometry_changed = 0u;
 
   uint32_t kbd_budget = 32;
   while (kbd_budget--) {
@@ -2451,6 +2502,8 @@ void desktop_tick(void) {
     }
   }
 
+  uint8_t ui_changed_before_motion = ui_changed;
+
   if (!(buttons & 1u)) {
     g_shell_dragging = 0;
     g_explorer_dragging = 0;
@@ -2462,44 +2515,81 @@ void desktop_tick(void) {
   }
 
   if (g_shell_dragging && (p0.dx || p0.dy)) {
+    wm_window_t old_win = g_shell_win;
     g_shell_win.x = p0.x - g_shell_drag_off_x;
     g_shell_win.y = p0.y - g_shell_drag_off_y;
     constrain_desktop_window(&g_shell_win, 320u, 220u);
-    ui_changed = 1;
+    if (old_win.x != g_shell_win.x || old_win.y != g_shell_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_shell_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
   if (g_explorer_dragging && (p0.dx || p0.dy)) {
+    wm_window_t old_win = g_explorer_win;
     g_explorer_win.x = p0.x - g_explorer_drag_off_x;
     g_explorer_win.y = p0.y - g_explorer_drag_off_y;
     constrain_desktop_window(&g_explorer_win, 420u, 280u);
-    ui_changed = 1;
+    if (old_win.x != g_explorer_win.x || old_win.y != g_explorer_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_explorer_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
   if (g_viewer_dragging && (p0.dx || p0.dy)) {
+    wm_window_t old_win = g_viewer_win;
     g_viewer_win.x = p0.x - g_viewer_drag_off_x;
     g_viewer_win.y = p0.y - g_viewer_drag_off_y;
     constrain_desktop_window(&g_viewer_win, 360u, 220u);
-    ui_changed = 1;
+    if (old_win.x != g_viewer_win.x || old_win.y != g_viewer_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_viewer_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
   if (g_notepad_dragging && (p0.dx || p0.dy)) {
+    wm_window_t old_win = g_notepad_win;
     g_notepad_win.x = p0.x - g_notepad_drag_off_x;
     g_notepad_win.y = p0.y - g_notepad_drag_off_y;
     constrain_desktop_window(&g_notepad_win, 420u, 280u);
-    ui_changed = 1;
+    if (old_win.x != g_notepad_win.x || old_win.y != g_notepad_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_notepad_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
   if (g_setup_dragging && (p0.dx || p0.dy)) {
+    wm_window_t old_win = g_setup_win;
     g_setup_win.x = p0.x - g_setup_drag_off_x;
     g_setup_win.y = p0.y - g_setup_drag_off_y;
     constrain_desktop_window(&g_setup_win, 420u, 280u);
-    ui_changed = 1;
+    if (old_win.x != g_setup_win.x || old_win.y != g_setup_win.y) {
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+      desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &g_setup_win);
+      motion_geometry_changed = 1u;
+      ui_changed = 1;
+    }
   }
 
   if (g_window_resize_active &&
       (p0.x != g_window_resize_pointer_x ||
        p0.y != g_window_resize_pointer_y)) {
+    wm_window_t *resize_win = window_for_app(g_window_resize_app);
+    wm_window_t old_win = resize_win ? *resize_win : (wm_window_t){0, 0, 0, 0};
     if (window_resize_update(p0.x, p0.y)) {
+      if (resize_win) {
+        desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, &old_win);
+        desktop_dirty_add_window(&motion_dirty, &motion_dirty_valid, resize_win);
+      }
+      motion_geometry_changed = 1u;
       ui_changed = 1;
 #ifdef VEXOS_CI_INPUT_TEST
       static uint8_t resize_ci_seen;
@@ -2544,9 +2634,14 @@ void desktop_tick(void) {
     g_last_cursor_buttons = p.buttons;
   } else {
     static uint8_t g_desktop_dirty = 1;
-    uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
+    uint8_t partial_scene_changed =
+        (uint8_t)(motion_geometry_changed && !ui_changed_before_motion);
+    uint8_t scene_changed =
+        (uint8_t)(g_desktop_dirty ||
+                  (ui_changed && !partial_scene_changed) || g_tick < 2u);
 
     if (scene_changed) {
+      gfx_reset_clip_rect();
       blit_rect(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
@@ -2554,6 +2649,35 @@ void desktop_tick(void) {
       draw_taskbar();
       draw_start_menu();
       g_desktop_dirty = 0;
+    } else if (partial_scene_changed && motion_dirty_valid) {
+      /* A drag only invalidates the old/new window bounds, not the desktop. */
+      int32_t old_cursor_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
+      int32_t old_cursor_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
+      desktop_dirty_add_rect(&motion_dirty, &motion_dirty_valid,
+                             old_cursor_x, old_cursor_y, 26, 26);
+
+      gfx_set_clip_rect((uint32_t)motion_dirty.x, (uint32_t)motion_dirty.y,
+                        (uint32_t)motion_dirty.w, (uint32_t)motion_dirty.h);
+      blit_rect(g_back, g_bg, (uint32_t)motion_dirty.x,
+                (uint32_t)motion_dirty.y, (uint32_t)motion_dirty.w,
+                (uint32_t)motion_dirty.h);
+      draw_desktop_icons();
+      draw_widgets();
+      draw_open_windows();
+      draw_taskbar();
+      draw_start_menu();
+      gfx_reset_clip_rect();
+
+      blit_rect(g_bi->framebuffer, g_back, (uint32_t)motion_dirty.x,
+                (uint32_t)motion_dirty.y, (uint32_t)motion_dirty.w,
+                (uint32_t)motion_dirty.h);
+#ifdef VEXOS_CI_INPUT_TEST
+      static uint8_t move_ci_seen;
+      if (!move_ci_seen) {
+        move_ci_seen = 1u;
+        serial_print("[CI] Window move used clipped dirty-region redraw\n");
+      }
+#endif
     }
 
     input_pointer_state_t p = input_pointer_get();
@@ -2566,8 +2690,7 @@ void desktop_tick(void) {
         // Scene changes still need a complete presentation.
         blit_rect(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
       } else {
-        // Mouse-only updates restore just the old cursor footprint, not the
-        // entire screen. The 26px region includes the cursor outline/drag marker.
+        // Mouse-only updates restore just the old cursor footprint.
         int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
         int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
         blit_rect(g_bi->framebuffer, g_back, (uint32_t)restore_x,
