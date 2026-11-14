@@ -151,7 +151,13 @@ int xhci_ep0_control_no_data_out(xhci_device_state_t *dev, uint64_t setup) {
 }
 
 static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
+  if (!dev)
+    return 0;
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[xHCI] Could not allocate configuration descriptor buffer\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     buf[i] = 0;
 
@@ -710,6 +716,10 @@ static int xhci_cmd_enable_slot(uint32_t *out_slot_id) {
 
 xhci_trb_t *xhci_alloc_tr_ring(void) {
   xhci_trb_t *ring = (xhci_trb_t *)PMM_AllocatePage();
+  if (!ring) {
+    serial_print("[xHCI] Could not allocate transfer ring\n");
+    return NULL;
+  }
   for (int i = 0; i < 256; i++) {
     ring[i].data = 0;
     ring[i].status = 0;
@@ -759,6 +769,10 @@ static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
     return 0;
 
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    serial_print("[xHCI] EvaluateContext: input context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     input_ctx[i] = 0;
 
@@ -799,8 +813,14 @@ static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
 }
 
 static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
+  if (!dev)
+    return 0;
   // USB Device Descriptor is 18 bytes
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
+  if (!buf) {
+    serial_print("[xHCI] Could not allocate device descriptor buffer\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     buf[i] = 0;
 
@@ -869,18 +889,38 @@ static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
 
 static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
                                    uint32_t speed_code) {
-  // Allocate Device Context and EP0 transfer ring
+  if (slot_id == 0u || slot_id >= 256u || !dcbaa) {
+    serial_print("[xHCI] AddressDevice: invalid slot or missing DCBAA\n");
+    return 0;
+  }
+
+  // Allocate Device Context and EP0 transfer ring.
   uint8_t *dev_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!dev_ctx) {
+    serial_print("[xHCI] AddressDevice: device context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     dev_ctx[i] = 0;
 
   xhci_trb_t *ep0_ring = xhci_alloc_tr_ring();
+  if (!ep0_ring) {
+    PMM_FreePage(dev_ctx);
+    return 0;
+  }
 
-  // Write DCBAA entry for this slot
+  // Write DCBAA entry for this slot.
   dcbaa[slot_id] = (uint64_t)(uintptr_t)dev_ctx;
 
-  // Allocate Input Context (must hold Input Control + Slot + EP0)
+  // Allocate Input Context (must hold Input Control + Slot + EP0).
   uint8_t *input_ctx = (uint8_t *)PMM_AllocatePage();
+  if (!input_ctx) {
+    dcbaa[slot_id] = 0;
+    PMM_FreePage(ep0_ring);
+    PMM_FreePage(dev_ctx);
+    serial_print("[xHCI] AddressDevice: input context allocation failed\n");
+    return 0;
+  }
   for (uint32_t i = 0; i < 4096; i++)
     input_ctx[i] = 0;
 
