@@ -7,6 +7,8 @@ static char g_filename[64];
 static char g_text[NOTEPAD_TEXT_CAPACITY];
 static uint32_t g_text_length;
 static uint32_t g_scroll;
+static uint8_t g_dragging;
+static int32_t g_drag_offset_x, g_drag_offset_y;
 
 void notepad_init(uint32_t screen_width, uint32_t screen_height) {
   g_filename[0] = 0;
@@ -51,8 +53,6 @@ uint8_t notepad_handle_char(char value) {
 void notepad_scroll_up(void) { if (g_scroll) --g_scroll; }
 void notepad_scroll_down(void) { ++g_scroll; }
 
-static uint8_t g_dragging;
-static int32_t g_drag_offset_x, g_drag_offset_y;
 static uint8_t notepad_hit(int32_t px,int32_t py,int32_t x,int32_t y,int32_t w,int32_t h) {
   return (uint8_t)(px>=x && py>=y && px<x+w && py<y+h);
 }
