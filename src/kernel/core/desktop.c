@@ -39,6 +39,8 @@ typedef wm_rect_t wm_window_t;
 static wm_window_t g_shell_win;
 static wm_window_t g_explorer_win;
 static wm_window_t g_viewer_win;
+static wm_window_t g_notepad_win;
+static wm_window_t g_setup_win;
 static uint8_t g_shell_dragging;
 static int32_t g_shell_drag_off_x;
 static int32_t g_shell_drag_off_y;
@@ -77,6 +79,8 @@ typedef enum {
   APP_SETUP = 4,
   APP_COUNT = 5
 } app_id_t;
+
+static void app_raise(app_id_t app);
 
 static uint8_t g_window_resize_active;
 static app_id_t g_window_resize_app = APP_COUNT;
@@ -169,8 +173,6 @@ static void constrain_desktop_window(wm_window_t *win,
       g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
   wm_clamp_rect(win, g_bi->width, work_height, min_width, min_height);
 }
-
-static void app_raise(app_id_t app);
 
 static void viewer_clear_content(void) {
   if (g_viewer_pixels) {
@@ -363,7 +365,6 @@ static void app_raise(app_id_t app) {
   wm_raise((uint32_t)app);
 }
 
-static wm_window_t g_notepad_win;
 static uint8_t g_notepad_dragging;
 static int32_t g_notepad_drag_off_x;
 static int32_t g_notepad_drag_off_y;
@@ -373,7 +374,6 @@ static uint32_t g_notepad_text_len;
 static uint32_t g_notepad_scroll;
 
 // Setup Wizard state
-static wm_window_t g_setup_win;
 static uint8_t g_setup_dragging;
 static int32_t g_setup_drag_off_x;
 static int32_t g_setup_drag_off_y;
