@@ -1616,13 +1616,13 @@ void desktop_tick(void) {
       uint8_t input_result = terminal_handle_char(c);
       if (input_result == 2u) {
 #ifdef VEXOS_CI_INPUT_TEST
-        serial_print("[CI] Shell command submitted through keyboard\\n");
+        serial_print("[CI] Shell command submitted through keyboard\n");
 #endif
         shell_run_line(); ui_changed = 1;
       } else if (input_result == 1u) {
 #ifdef VEXOS_CI_INPUT_TEST
         static uint8_t ci_shell_char_seen;
-        if (!ci_shell_char_seen) { ci_shell_char_seen = 1; serial_print("[CI] Shell received printable keyboard input\\n"); }
+        if (!ci_shell_char_seen) { ci_shell_char_seen = 1; serial_print("[CI] Shell received printable keyboard input\n"); }
 #endif
         ui_changed = 1;
       }
