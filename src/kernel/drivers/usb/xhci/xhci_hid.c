@@ -32,6 +32,9 @@ int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff,
 
 static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
                                              const uint8_t *d, uint32_t len) {
+  if (!dev || !d || len == 0u || len > 4096u)
+    return;
+
   uint32_t usage_page = 0;
   uint32_t report_size = 0;
   uint32_t report_count = 0;
@@ -153,6 +156,14 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
           continue;
         }
 
+        /* Keep descriptor arithmetic bounded before storing bit offsets. */
+        uint64_t advance_bits = (uint64_t)count * (uint64_t)size_bits;
+        if (advance_bits > 0xFFFFu ||
+            (uint64_t)bitpos + advance_bits > 0xFFFFu) {
+          dev->hid_mouse_valid = 0;
+          return;
+        }
+
         uint8_t in_mouse = (in_mouse_app || in_mouse_phys) ? 1u : 0u;
         if (in_mouse) {
           for (uint32_t f = 0; f < count; f++) {
@@ -168,13 +179,16 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
 
             if (usage_page == 0x09) {
               if (dev->hid_buttons_bits == 0) {
-                dev->hid_buttons_bitoff = (uint16_t)(bitpos);
-                dev->hid_buttons_bits = (uint16_t)(count * size_bits);
+                uint32_t button_bits = count * size_bits;
+                if (button_bits > 32u)
+                  button_bits = 32u;
+                dev->hid_buttons_bitoff = (uint16_t)bitpos;
+                dev->hid_buttons_bits = (uint16_t)button_bits;
               }
               break;
             }
 
-            if (usage_page == 0x01) {
+            if (usage_page == 0x01 && size_bits <= 32u) {
               if (u == 0x30 && dev->hid_x_bits == 0) {
                 dev->hid_x_bitoff = (uint16_t)(bitpos + (f * size_bits));
                 dev->hid_x_bits = (uint8_t)size_bits;
@@ -199,7 +213,24 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
     }
   }
 
-  if (dev->hid_x_bits && dev->hid_y_bits) {
+  uint32_t report_bits = (uint32_t)dev->intr_mps * 8u;
+  uint32_t report_base = has_report_id ? 8u : 0u;
+  uint32_t x_end = (uint32_t)dev->hid_x_bitoff +
+                   (uint32_t)dev->hid_x_bits + report_base;
+  uint32_t y_end = (uint32_t)dev->hid_y_bitoff +
+                   (uint32_t)dev->hid_y_bits + report_base;
+  uint32_t button_end = (uint32_t)dev->hid_buttons_bitoff +
+                        (uint32_t)dev->hid_buttons_bits + report_base;
+  uint32_t wheel_end = (uint32_t)dev->hid_wheel_bitoff +
+                       (uint32_t)dev->hid_wheel_bits + report_base;
+
+  if (dev->hid_x_bits > 0u && dev->hid_x_bits <= 32u &&
+      dev->hid_y_bits > 0u && dev->hid_y_bits <= 32u &&
+      report_bits != 0u && report_id <= 0xFFu &&
+      x_end <= report_bits && y_end <= report_bits &&
+      (!dev->hid_buttons_bits || button_end <= report_bits) &&
+      (!dev->hid_wheel_bits || (dev->hid_wheel_bits <= 32u &&
+                                wheel_end <= report_bits))) {
     dev->hid_has_report_id = has_report_id ? 1u : 0u;
     dev->hid_mouse_report_id = (uint8_t)report_id;
     dev->hid_mouse_valid = 1;
