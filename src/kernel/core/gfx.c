@@ -230,19 +230,30 @@ void gfx_blit_rect(const BootInfo *surface, uint32_t *destination,
 }
 
 void gfx_blit_frame(const BootInfo *surface, const uint32_t *source,
-                    uint32_t source_pitch_pixels) {
+                    uint32_t source_pitch_pixels, uint32_t source_width,
+                    uint32_t source_height) {
   if (!surface || !source || !surface->framebuffer ||
       surface->width == 0u || surface->height == 0u ||
-      surface->pitch < surface->width || source_pitch_pixels == 0u) {
+      surface->pitch < surface->width || source_pitch_pixels == 0u ||
+      source_width == 0u || source_height == 0u) {
     return;
   }
 
-  for (uint32_t y = 0; y < surface->height; ++y) {
+  uint32_t copy_width = source_width < surface->width
+                            ? source_width
+                            : surface->width;
+  uint32_t copy_height = source_height < surface->height
+                             ? source_height
+                             : surface->height;
+  if (source_pitch_pixels < copy_width)
+    return;
+
+  for (uint32_t y = 0; y < copy_height; ++y) {
     uint32_t *dst_row =
         &surface->framebuffer[(uint64_t)y * surface->pitch];
     const uint32_t *src_row =
         &source[(uint64_t)y * source_pitch_pixels];
-    for (uint32_t x = 0; x < surface->width; ++x)
+    for (uint32_t x = 0; x < copy_width; ++x)
       dst_row[x] = src_row[x];
   }
 }
