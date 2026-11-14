@@ -135,6 +135,16 @@ int input_ci_self_test(uint32_t screen_width, uint32_t screen_height) {
   if (pointer.x != 0 || pointer.y != 479)
     return 0;
 
+  /* Absolute pointer input must recover normally after reaching screen edges. */
+  input_pointer_set_abs_scaled(32767, 32767, 32767, 32767, 0u);
+  pointer = input_pointer_get();
+  if (pointer.x != 639 || pointer.y != 479)
+    return 0;
+  input_pointer_set_abs_scaled(16384, 16384, 32767, 32767, 0u);
+  pointer = input_pointer_get();
+  if (pointer.x != 319 || pointer.y != 239)
+    return 0;
+
   input_kbd_push_char('z');
   input_kbd_push_char('\n');
   if (!input_kbd_pop_char(&character) || character != 'z')
