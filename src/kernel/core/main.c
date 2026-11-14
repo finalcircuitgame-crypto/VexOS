@@ -1,4 +1,5 @@
 #include "bootinfo.h"
+#include "gfx.h"
 #include "desktop.h"
 #include "gdt.h"
 #include "heap.h"
@@ -793,6 +794,9 @@ void kernel_main(BootInfo *bootInfo) {
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
 #ifdef VEXOS_CI_INPUT_TEST
+  if (!gfx_ci_self_test())
+    ci_memory_test_fail("framebuffer clipping/blending/blitting");
+  serial_print("[CI] Framebuffer clipping/blending/blitting passed\n");
   ci_memory_self_test();
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
