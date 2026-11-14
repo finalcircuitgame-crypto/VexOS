@@ -39,6 +39,13 @@ void gfx_blit_rect(const BootInfo *surface, uint32_t *destination,
                    const uint32_t *source, uint32_t x, uint32_t y,
                    uint32_t width, uint32_t height);
 
+/* Restrict subsequent drawing primitives to a screen-space dirty rectangle. */
+void gfx_set_clip_rect(uint32_t x, uint32_t y, uint32_t width,
+                       uint32_t height);
+void gfx_reset_clip_rect(void);
+void gfx_get_clip_rect(const BootInfo *surface, uint32_t *x, uint32_t *y,
+                       uint32_t *width, uint32_t *height);
+
 void gfx_blit_frame(const BootInfo *surface, const uint32_t *source,
                     uint32_t source_pitch_pixels, uint32_t source_width,
                     uint32_t source_height);
