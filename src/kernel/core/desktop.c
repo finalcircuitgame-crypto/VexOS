@@ -1439,73 +1439,166 @@ static void shell_run_line(void) {
 }
 
 static void draw_background(void) {
-  if (!g_bi)
+  if (!g_bi || !g_bi->framebuffer || !g_bi->width || !g_bi->height ||
+      g_bi->pitch < g_bi->width) {
     return;
+  }
 
   uint32_t *dst = g_back ? g_back : g_bi->framebuffer;
-
-  uint32_t h = g_bi->height ? g_bi->height : 1;
   uint32_t w = g_bi->width;
-  uint32_t horizon = (h * 52u) / 100u;
+  uint32_t h = g_bi->height;
+  uint32_t horizon = (h * 54u) / 100u;
   if (horizon >= h)
-    horizon = h - 1;
+    horizon = h - 1u;
 
-  for (uint32_t y = 0; y < h; y++) {
-    uint32_t *row = &dst[y * g_bi->pitch];
-    uint32_t r, g, b;
+  /* Deep-space to ocean-blue gradient, with a softer lower horizon. */
+  for (uint32_t y = 0; y < h; ++y) {
+    uint32_t t = (y * 255u) / (h ? h : 1u);
+    uint32_t red;
+    uint32_t green;
+    uint32_t blue;
     if (y < horizon) {
-      uint32_t t = (y * 255u) / (horizon ? horizon : 1);
-      r = 10 + (t * 18u) / 255u;
-      g = 14 + (t * 26u) / 255u;
-      b = 24 + (t * 60u) / 255u;
+      uint32_t upper = (y * 255u) / (horizon ? horizon : 1u);
+      red = 7u + (upper * 18u) / 255u;
+      green = 11u + (upper * 24u) / 255u;
+      blue = 23u + (upper * 58u) / 255u;
     } else {
-      uint32_t t = ((y - horizon) * 255u) / ((h - horizon) ? (h - horizon) : 1);
-      r = 10 + (t * 10u) / 255u;
-      g = 30 + (t * 60u) / 255u;
-      b = 50 + (t * 80u) / 255u;
+      uint32_t lower = ((y - horizon) * 255u) /
+                       ((h - horizon) ? (h - horizon) : 1u);
+      red = 8u + (lower * 8u) / 255u;
+      green = 25u + (lower * 38u) / 255u;
+      blue = 46u + (lower * 64u) / 255u;
     }
-    uint32_t base = (r << 16) | (g << 8) | b;
-    for (uint32_t x = 0; x < w; x++) {
-      row[x] = base;
+    uint32_t base = (red << 16) | (green << 8) | blue;
+    uint32_t *row = &dst[(uint64_t)y * g_bi->pitch];
+    for (uint32_t x = 0; x < w; ++x) {
+      /* Very faint horizontal variation keeps large fills from looking flat. */
+      uint32_t lift = ((x + t) & 31u) == 0u ? 1u : 0u;
+      uint32_t rr = red + lift;
+      uint32_t gg = green + lift;
+      row[x] = (rr << 16) | (gg << 8) | blue;
+    }
+    (void)base;
+  }
+
+  /* Deterministic stars with restrained brightness and size. */
+  uint32_t star_count = (w * h) / 5000u;
+  if (star_count > 190u)
+    star_count = 190u;
+  if (star_count < 40u)
+    star_count = 40u;
+  for (uint32_t i = 0; i < star_count; ++i) {
+    uint32_t seed = shell_next_rand();
+    uint32_t sx = seed % w;
+    uint32_t sy = shell_next_rand() % (horizon ? horizon : 1u);
+    uint32_t color = (seed & 15u) == 0u ? 0x00FFFFFFu
+                     : (seed & 3u) == 0u ? 0x00AFC8E8u
+                                         : 0x007F9BBCu;
+    dst[(uint64_t)sy * g_bi->pitch + sx] = color;
+    if ((seed & 31u) == 0u && sx + 1u < w)
+      dst[(uint64_t)sy * g_bi->pitch + sx + 1u] = 0x00B7CDE8u;
+  }
+
+  /* A single shaded planet with a thin orbital ring replaces the old
+     overlapping flat circles. Keep all arithmetic bounded by screen size. */
+  uint32_t radius = (w < h ? w : h) * 13u / 100u;
+  if (radius < 20u)
+    radius = 20u;
+  if (radius > 148u)
+    radius = 148u;
+  if (horizon < radius * 2u + 12u)
+    return;
+
+  uint32_t cx = (w * 76u) / 100u;
+  uint32_t cy = (horizon * 43u) / 100u;
+  uint32_t ring_rx = radius * 17u / 10u;
+  uint32_t ring_ry = radius * 48u / 100u;
+  if (!ring_ry)
+    ring_ry = 1u;
+
+  /* Back half of the orbit. */
+  int32_t left = (int32_t)cx - (int32_t)ring_rx;
+  int32_t right = (int32_t)cx + (int32_t)ring_rx;
+  int32_t top = (int32_t)cy - (int32_t)ring_ry;
+  int32_t bottom = (int32_t)cy + (int32_t)ring_ry;
+  for (int32_t py = top; py <= (int32_t)cy; ++py) {
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t px = left; px <= right; ++px) {
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
+      int64_t dx = (int64_t)px - (int64_t)cx;
+      int64_t dy = (int64_t)py - (int64_t)cy;
+      uint64_t ex = (uint64_t)(dx * dx) * 1000000ull /
+                    ((uint64_t)ring_rx * ring_rx);
+      uint64_t ey = (uint64_t)(dy * dy) * 1000000ull /
+                    ((uint64_t)ring_ry * ring_ry);
+      uint64_t ellipse = ex + ey;
+      if (ellipse >= 780000ull && ellipse <= 1160000ull)
+        dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] =
+            0x006B91B5u;
     }
   }
 
-  for (uint32_t x = 0; x < w; x++) {
-    uint32_t y0 = horizon;
-    dst[y0 * g_bi->pitch + x] = 0xB0C8FF;
-  }
+  /* Spherical body, lit from the upper-left. */
+  int32_t pr = (int32_t)radius;
+  uint64_t radius_squared = (uint64_t)radius * radius;
+  for (int32_t dy = -pr; dy <= pr; ++dy) {
+    int32_t py = (int32_t)cy + dy;
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t dx = -pr; dx <= pr; ++dx) {
+      uint64_t distance_squared =
+          (uint64_t)((int64_t)dx * dx + (int64_t)dy * dy);
+      if (distance_squared > radius_squared)
+        continue;
+      int32_t px = (int32_t)cx + dx;
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
 
-  uint32_t star_count = 220;
-  for (uint32_t i = 0; i < star_count; i++) {
-    uint32_t r0 = shell_next_rand();
-    uint32_t sx = r0 % (w ? w : 1);
-    uint32_t sy = (shell_next_rand() % (horizon ? horizon : 1));
-    uint32_t c = 0xE8F0FF;
-    if ((r0 & 7u) == 0)
-      c = 0xFFFFFF;
-    put_px(sx, sy, c);
-  }
+      int32_t light = 155 - ((dx + dy / 2) * 72) / pr;
+      if (light < 45)
+        light = 45;
+      if (light > 255)
+        light = 255;
+      uint32_t red = 18u + (uint32_t)light / 4u;
+      uint32_t green = 43u + (uint32_t)light / 2u;
+      uint32_t blue = 78u + ((uint32_t)light * 3u) / 5u;
+      uint32_t color = (red << 16) | (green << 8) | blue;
 
-  for (uint32_t i = 0; i < 3; i++) {
-    uint32_t cx = (w * (55u + i * 7u)) / 100u;
-    uint32_t cy = (h * (22u + i * 3u)) / 100u;
-    uint32_t rr = 140 - i * 30;
-    for (int32_t dy = -(int32_t)rr; dy <= (int32_t)rr; dy++) {
-      for (int32_t dx = -(int32_t)rr; dx <= (int32_t)rr; dx++) {
-        uint32_t dd = (uint32_t)(dx * dx + dy * dy);
-        if (dd <= (rr * rr)) {
-          uint32_t px = (uint32_t)((int32_t)cx + dx);
-          uint32_t py = (uint32_t)((int32_t)cy + dy);
-          if (px < w && py < horizon) {
-            uint32_t shade = 0xB0C8FF;
-            if (dd > (uint32_t)((rr * rr) * 7u / 10u))
-              shade = 0x6A88C8;
-            put_px(px, py, shade);
-          }
-        }
+      /* A thin highlight around the bright limb gives the sphere depth. */
+      if (distance_squared > (uint64_t)(radius - 2u) * (radius - 2u) &&
+          light > 125) {
+        color = 0x0099B7D9u;
       }
+      dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] = color;
     }
   }
+
+  /* Front half of the orbit is drawn over the planet. */
+  for (int32_t py = (int32_t)cy; py <= bottom; ++py) {
+    if (py < 0 || (uint32_t)py >= horizon)
+      continue;
+    for (int32_t px = left; px <= right; ++px) {
+      if (px < 0 || (uint32_t)px >= w)
+        continue;
+      int64_t dx = (int64_t)px - (int64_t)cx;
+      int64_t dy = (int64_t)py - (int64_t)cy;
+      uint64_t ex = (uint64_t)(dx * dx) * 1000000ull /
+                    ((uint64_t)ring_rx * ring_rx);
+      uint64_t ey = (uint64_t)(dy * dy) * 1000000ull /
+                    ((uint64_t)ring_ry * ring_ry);
+      uint64_t ellipse = ex + ey;
+      if (ellipse >= 780000ull && ellipse <= 1160000ull)
+        dst[(uint64_t)(uint32_t)py * g_bi->pitch + (uint32_t)px] =
+            0x0086A8C6u;
+    }
+  }
+
+  /* Keep the horizon distinct without the old white divider line. */
+  uint32_t horizon_y = horizon;
+  for (uint32_t x = 0; x < w; ++x)
+    dst[(uint64_t)horizon_y * g_bi->pitch + x] = 0x00354F6Cu;
 }
 
 static void draw_glyph_8x8(uint32_t x, uint32_t y, uint8_t ch, uint32_t fg) {
