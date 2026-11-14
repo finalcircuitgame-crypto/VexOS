@@ -78,6 +78,88 @@ typedef enum {
   APP_COUNT = 5
 } app_id_t;
 
+static uint8_t g_window_resize_active;
+static app_id_t g_window_resize_app = APP_COUNT;
+static int32_t g_window_resize_pointer_x;
+static int32_t g_window_resize_pointer_y;
+static int32_t g_window_resize_width;
+static int32_t g_window_resize_height;
+
+static wm_window_t *window_for_app(app_id_t app) {
+  switch (app) {
+    case APP_SHELL: return &g_shell_win;
+    case APP_EXPLORER: return &g_explorer_win;
+    case APP_VIEWER: return &g_viewer_win;
+    case APP_NOTEPAD: return &g_notepad_win;
+    case APP_SETUP: return &g_setup_win;
+    default: return NULL;
+  }
+}
+
+static void window_resize_begin(app_id_t app, int32_t pointer_x,
+                                int32_t pointer_y) {
+  wm_window_t *win = window_for_app(app);
+  if (!win)
+    return;
+  g_window_resize_active = 1u;
+  g_window_resize_app = app;
+  g_window_resize_pointer_x = pointer_x;
+  g_window_resize_pointer_y = pointer_y;
+  g_window_resize_width = win->w;
+  g_window_resize_height = win->h;
+  app_raise(app);
+}
+
+static void window_resize_update(int32_t pointer_x, int32_t pointer_y) {
+  if (!g_window_resize_active || g_window_resize_app >= APP_COUNT || !g_bi)
+    return;
+
+  wm_window_t *win = window_for_app(g_window_resize_app);
+  if (!win)
+    return;
+
+  int64_t delta_w = (int64_t)pointer_x - g_window_resize_pointer_x;
+  int64_t delta_h = (int64_t)pointer_y - g_window_resize_pointer_y;
+  if (delta_w > INT32_MAX) delta_w = INT32_MAX;
+  if (delta_w < INT32_MIN) delta_w = INT32_MIN;
+  if (delta_h > INT32_MAX) delta_h = INT32_MAX;
+  if (delta_h < INT32_MIN) delta_h = INT32_MIN;
+  win->w = g_window_resize_width;
+  win->h = g_window_resize_height;
+  uint32_t min_w = 320u;
+  uint32_t min_h = 220u;
+  if (g_window_resize_app == APP_EXPLORER ||
+      g_window_resize_app == APP_NOTEPAD) {
+    min_w = 420u;
+    min_h = 280u;
+  } else if (g_window_resize_app == APP_VIEWER) {
+    min_w = 360u;
+    min_h = 220u;
+  } else if (g_window_resize_app == APP_SETUP) {
+    min_w = 420u;
+    min_h = 280u;
+  }
+
+  uint32_t work_height =
+      g_bi->height > 56u ? g_bi->height - 56u : g_bi->height;
+  wm_resize_rect(win, (int32_t)delta_w, (int32_t)delta_h,
+                 g_bi->width, work_height, min_w, min_h);
+}
+
+static void draw_resize_grip(const wm_window_t *win, uint8_t focused) {
+  if (!win || win->w < 40 || win->h < 40)
+    return;
+  uint32_t color = focused ? 0x008DB4D7u : 0x005B7188u;
+  uint32_t x = (uint32_t)(win->x + win->w - 10);
+  uint32_t y = (uint32_t)(win->y + win->h - 10);
+  gfx_put_pixel(g_bi, g_back, x + 6u, y + 2u, color);
+  gfx_put_pixel(g_bi, g_back, x + 4u, y + 4u, color);
+  gfx_put_pixel(g_bi, g_back, x + 5u, y + 4u, color);
+  gfx_put_pixel(g_bi, g_back, x + 2u, y + 6u, color);
+  gfx_put_pixel(g_bi, g_back, x + 3u, y + 6u, color);
+  gfx_put_pixel(g_bi, g_back, x + 4u, y + 6u, color);
+}
+
 static void constrain_desktop_window(wm_window_t *win,
                                      uint32_t min_width,
                                      uint32_t min_height) {
@@ -1085,6 +1167,9 @@ static void draw_open_windows(void) {
       default:
         break;
     }
+    if (wm_is_visible((uint32_t)app))
+      draw_resize_grip(window_for_app(app),
+                       (uint8_t)wm_is_focused((uint32_t)app));
   }
 }
 
