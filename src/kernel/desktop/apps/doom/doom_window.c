@@ -94,11 +94,24 @@ void doom_window_draw(void){
  gfx_blend_round_rect((uint32_t)(x+w-23),(uint32_t)(y+6),17u,17u,5u,0xB94755u,255u);
  gfx_draw_string((uint32_t)(x+w-18),(uint32_t)(y+10),"x",0xFFFFFFu);
  int32_t cx=x+1,cy=y+31,cw=w-2,ch=h-32;if(cw<=0||ch<=0)return;
- gfx_draw_rect((uint32_t)cx,(uint32_t)cy,(uint32_t)cw,(uint32_t)ch,0x05070Au);
- if(!frame_ready||!framebuffer||!frame_w||!frame_h){gfx_draw_string((uint32_t)(cx+16),(uint32_t)(cy+16),"Starting Doom...",0xB7C7D9u);return;}
+ if(!frame_ready||!framebuffer||!frame_w||!frame_h){
+  gfx_draw_rect((uint32_t)cx,(uint32_t)cy,(uint32_t)cw,(uint32_t)ch,0x05070Au);
+  gfx_draw_string((uint32_t)(cx+16),(uint32_t)(cy+16),"Starting Doom...",0xB7C7D9u);
+  return;
+ }
  uint32_t dw=(uint32_t)cw,dh=(uint32_t)(((uint64_t)dw*frame_h)/frame_w);
  if(dh>(uint32_t)ch){dh=(uint32_t)ch;dw=(uint32_t)(((uint64_t)dh*frame_w)/frame_h);}
  if(!dw||!dh)return;
  uint32_t dx=(uint32_t)cx+((uint32_t)cw-dw)/2u,dy=(uint32_t)cy+((uint32_t)ch-dh)/2u;
+
+ /* Clear only the letterbox margins; the game image overwrites its own area. */
+ if(dy>(uint32_t)cy)
+  gfx_draw_rect((uint32_t)cx,(uint32_t)cy,(uint32_t)cw,dy-(uint32_t)cy,0x05070Au);
+ if(dy+dh<(uint32_t)(cy+ch))
+  gfx_draw_rect((uint32_t)cx,dy+dh,(uint32_t)cw,(uint32_t)(cy+ch)-(dy+dh),0x05070Au);
+ if(dx>(uint32_t)cx)
+  gfx_draw_rect((uint32_t)cx,dy,dx-(uint32_t)cx,dh,0x05070Au);
+ if(dx+dw<(uint32_t)(cx+cw))
+  gfx_draw_rect(dx+dw,dy,(uint32_t)(cx+cw)-(dx+dw),dh,0x05070Au);
  gfx_blit_scaled(framebuffer,frame_w,frame_h,DOOM_W,dx,dy,dw,dh);
 }
