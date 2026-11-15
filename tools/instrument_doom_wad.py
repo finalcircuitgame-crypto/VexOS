@@ -56,7 +56,7 @@ def inject(source: str) -> str:
         lambda indent: (
             f"{indent}{ASSIGN_MARKER}\n"
             f"{indent}if (i == 410u) {{\n"
-            f'{indent}    printf("[WADDBG] ASSIGN lump=%u entry=%p wad=%p class=%p pos=%d size=%d\\n",\n'
+            f'{indent}    printf("[WADDBG] ASSIGN lump=%u entry=%p local_wad=%p stored_wad=%p class=%p pos=%d size=%d\\n",\n'
             f"{indent}           i, (void *)lump_p, (void *)wad_file, (void *)lump_p->wad_file,\n"
             f"{indent}           (void *)(lump_p->wad_file ? lump_p->wad_file->file_class : NULL),\n"
             f"{indent}           lump_p->position, lump_p->size);\n"
