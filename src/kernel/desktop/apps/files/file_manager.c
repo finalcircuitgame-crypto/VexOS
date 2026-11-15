@@ -130,18 +130,18 @@ static const char *fm_file_kind(const char *name) {
 }
 
 static void fm_draw_file_icon(uint32_t x, uint32_t y, const char *name) {
-  uint32_t color = 0x8EA4BEu;
+  uint32_t accent = 0x8E7DFFu;
   const char *kind = fm_file_kind(name);
-  if (kind[0] == 'T') color = 0x63B98Au;
-  else if (kind[0] == 'I') color = 0x5FA9E8u;
-  else if (kind[0] == 'G') color = 0xD69B54u;
-  else if (kind[0] == 'E') color = 0xA88BDEu;
+  if (kind[0] == 'T') accent = 0x69D5B0u;
+  else if (kind[0] == 'I') accent = 0x65B7F0u;
+  else if (kind[0] == 'G') accent = 0xE5B36Du;
+  else if (kind[0] == 'E') accent = 0xB69BFFu;
 
-  gfx_blend_round_rect(x, y, 18u, 20u, 3u, 0xEAF0F7u, 255u);
-  gfx_draw_rect(x + 2u, y + 2u, 14u, 2u, color);
-  gfx_draw_rect(x + 4u, y + 8u, 10u, 1u, 0x8A9AAF);
-  gfx_draw_rect(x + 4u, y + 12u, 10u, 1u, 0x8A9AAF);
-  gfx_draw_rect(x + 4u, y + 16u, 7u, 1u, 0x8A9AAF);
+  gfx_blend_round_rect(x, y, 18u, 20u, 4u, 0x29334Bu, 255u);
+  gfx_draw_rect(x + 3u, y + 3u, 12u, 2u, accent);
+  gfx_draw_rect(x + 4u, y + 9u, 10u, 1u, 0x8793B0u);
+  gfx_draw_rect(x + 4u, y + 13u, 10u, 1u, 0x687590u);
+  gfx_draw_rect(x + 4u, y + 17u, 7u, 1u, 0x687590u);
 }
 
 static int fm_get_name(uint32_t storage_index, char *out) {
@@ -281,6 +281,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   int32_t y = g_window.y;
   int32_t w = g_window.w;
   int32_t h = g_window.h;
+
   char count_text[24];
   fm_u32_to_text(count_text, g_visible_count);
   uint32_t count_len = fm_name_length(count_text);
@@ -292,124 +293,153 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   count_text[count_len++] = 's';
   count_text[count_len] = 0;
 
-  context->draw_chrome(&g_window, "Files", count_text, context->focused, 1, 0);
+  context->draw_chrome(&g_window, "Files", count_text,
+                       context->focused, 1, 0);
 
+  /* Breadcrumb and search toolbar */
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
-                (uint32_t)(w - 2), 38u, 0x17263A);
+                (uint32_t)(w - 2), 38u, 0x191F33u);
   gfx_blend_round_rect((uint32_t)(x + 12), (uint32_t)(y + 38),
-                       (uint32_t)(w - 24), 24u, 6u, 0x0D1928u, 255u);
+                       (uint32_t)(w - 24), 24u, 6u, 0x101626u, 255u);
   gfx_draw_string((uint32_t)(x + 22), (uint32_t)(y + 46), "<",
-                  0x71879Du);
+                  0x9C91E8u);
   gfx_draw_string((uint32_t)(x + 42), (uint32_t)(y + 46), ">",
-                  0x71879Du);
+                  0x697590u);
   gfx_draw_rect((uint32_t)(x + 62), (uint32_t)(y + 43), 1u, 14u,
-                0x344A60);
+                0x35405B);
   gfx_draw_string((uint32_t)(x + 76), (uint32_t)(y + 46),
-                  "This PC  /  VexOS Storage", 0xDCE8F4u);
+                  "VexOS  /  Storage  /  Root", 0xDCE0F2u);
 
   uint32_t search_width = w > 600 ? 154u : 110u;
   uint32_t search_x = (uint32_t)(x + w) - search_width - 22u;
   gfx_blend_round_rect(search_x, (uint32_t)(y + 38), search_width,
-                       24u, 6u, 0x0D1928u, 255u);
+                       24u, 6u, 0x101626u, 255u);
   gfx_draw_string(search_x + 9u, (uint32_t)(y + 46),
                   g_search[0] ? g_search : "Search files",
-                  g_search_focused ? 0xF1F6FCu : 0x71879Du);
+                  g_search_focused ? 0xF3F0FFu : 0x8490ADu);
   if (g_search_focused) {
     uint32_t cursor_x = search_x + 9u + fm_name_length(g_search) * 8u;
     if (cursor_x < search_x + search_width - 6u)
-      gfx_draw_rect(cursor_x, (uint32_t)(y + 44), 1u, 12u, 0x75B8F2u);
+      gfx_draw_rect(cursor_x, (uint32_t)(y + 44), 1u, 12u, 0xA99BFFu);
   }
 
-  uint32_t by = (uint32_t)y + 70u;
-  uint32_t bh = h > 84 ? (uint32_t)h - 84u : 1u;
-  gfx_blend_round_rect((uint32_t)(x + 10), by, 140u, bh, 5u,
-                       0x131F2E, 255u);
-  gfx_draw_string((uint32_t)(x + 22), by + 14u, "LOCATIONS",
-                  0x7891AAu);
-  gfx_blend_round_rect((uint32_t)(x + 16), by + 32u, 128u, 26u, 5u,
-                       0x23415F, 255u);
-  gfx_draw_rect((uint32_t)(x + 20), by + 40u, 8u, 10u, 0x70B7F2u);
-  gfx_draw_string((uint32_t)(x + 36), by + 41u, "Storage",
-                  0xF1F6FCu);
-  gfx_draw_string((uint32_t)(x + 22), by + 76u, "VOLUME",
-                  0x7891AAu);
-  gfx_draw_string((uint32_t)(x + 22), by + 94u, "VexOS disk",
-                  0xC8D7E6u);
-  gfx_draw_string((uint32_t)(x + 22), by + 112u, "Root files",
-                  0x849BB2u);
+  uint32_t body_y = (uint32_t)y + 70u;
+  uint32_t body_h = h > 84 ? (uint32_t)h - 84u : 1u;
 
-  uint32_t mx = (uint32_t)x + 160u;
-  uint32_t mw = w > 176 ? (uint32_t)w - 172u : 1u;
-  gfx_draw_string(mx + 8u, by + 10u, "All files", 0xF1F6FCu);
-  gfx_draw_string(mx + 8u, by + 28u,
-                  "Files on your VexOS storage volume", 0x8FA5BBu);
+  /* Places rail */
+  gfx_blend_round_rect((uint32_t)(x + 10), body_y, 140u, body_h,
+                       7u, 0x121A2Bu, 255u);
+  gfx_draw_rect((uint32_t)(x + 10), body_y + 1u, 2u,
+                body_h > 2u ? body_h - 2u : 1u, 0x796BDAu);
+  gfx_draw_string((uint32_t)(x + 22), body_y + 14u,
+                  "QUICK ACCESS", 0x8F9AB6u);
+  gfx_blend_round_rect((uint32_t)(x + 16), body_y + 32u,
+                       128u, 27u, 5u, 0x302B50u, 255u);
+  gfx_draw_rect((uint32_t)(x + 20), body_y + 40u, 3u, 11u, 0x9A88FFu);
+  gfx_draw_string((uint32_t)(x + 34), body_y + 41u,
+                  "Storage", 0xF1F0FFu);
+  gfx_draw_string((uint32_t)(x + 22), body_y + 78u,
+                  "DEVICES", 0x8F9AB6u);
+  gfx_blend_round_rect((uint32_t)(x + 18), body_y + 91u,
+                       124u, 26u, 5u, 0x1A2438u, 255u);
+  gfx_draw_rect((uint32_t)(x + 24), body_y + 100u, 10u, 8u, 0x67DDB5u);
+  gfx_draw_string((uint32_t)(x + 42), body_y + 100u,
+                  "VexOS disk", 0xCAD2E7u);
+  gfx_draw_string((uint32_t)(x + 24), body_y + 126u,
+                  "Root volume", 0x7E8BA8u);
 
-  uint32_t header_y = by + 50u;
-  gfx_draw_rect(mx + 2u, header_y, mw - 4u, 23u, 0x1A2A3Du);
-  gfx_draw_string(mx + 14u, header_y + 8u,
-                  g_sort_descending ? "NAME  v" : "NAME  ^", 0xB8CDE1u);
-  uint32_t kind_x = mx + (mw > 490u ? 330u : 210u);
-  uint32_t size_x = mx + (mw > 490u ? 500u : 0u);
-  gfx_draw_string(kind_x, header_y + 8u, "TYPE", 0x9EB4CAu);
-  if (mw > 490u)
-    gfx_draw_string(size_x, header_y + 8u, "SIZE", 0x9EB4CAu);
-  gfx_draw_rect(mx + 2u, header_y + 22u, mw - 4u, 1u, 0x30445Au);
+  /* Main file list surface */
+  uint32_t list_x = (uint32_t)x + 160u;
+  uint32_t list_w = w > 176 ? (uint32_t)w - 172u : 1u;
+  gfx_blend_round_rect(list_x, body_y, list_w, body_h,
+                       7u, 0x111929u, 255u);
+  gfx_draw_string(list_x + 14u, body_y + 12u,
+                  "Storage", 0xF0F1FCu);
+  gfx_draw_string(list_x + 14u, body_y + 30u,
+                  "Files on this device", 0x8995B1u);
+  if (list_w > 340u) {
+    gfx_blend_round_rect(list_x + list_w - 112u, body_y + 10u,
+                         98u, 20u, 6u, 0x202B3Eu, 255u);
+    gfx_draw_string(list_x + list_w - 101u, body_y + 16u,
+                    "LOCAL DISK", 0x8DDCC0u);
+  }
 
-  uint32_t list_y = header_y + 24u;
+  uint32_t header_y = body_y + 50u;
+  gfx_draw_rect(list_x + 2u, header_y, list_w - 4u, 23u, 0x1B263B);
+  gfx_draw_string(list_x + 14u, header_y + 8u,
+                  g_sort_descending ? "NAME  v" : "NAME  ^",
+                  0xC1B8FFu);
+  uint32_t type_x = list_x + (list_w > 490u ? 330u : 210u);
+  uint32_t size_x = list_x + (list_w > 490u ? 500u : 0u);
+  gfx_draw_string(type_x, header_y + 8u, "TYPE", 0xA1ABC4u);
+  if (list_w > 490u)
+    gfx_draw_string(size_x, header_y + 8u, "SIZE", 0xA1ABC4u);
+  gfx_draw_rect(list_x + 2u, header_y + 22u, list_w - 4u, 1u, 0x34405A);
+
+  uint32_t rows_y = header_y + 24u;
   uint32_t available_h = h > 178 ? (uint32_t)h - 178u : 0u;
-  uint32_t rows = available_h / FILE_MANAGER_ROW_HEIGHT;
+  uint32_t row_capacity = available_h / FILE_MANAGER_ROW_HEIGHT;
   uint32_t remaining = g_visible_count > g_scroll ?
       g_visible_count - g_scroll : 0u;
-  uint32_t visible_rows = fm_min_u32(remaining, rows);
+  uint32_t visible_rows = fm_min_u32(remaining, row_capacity);
 
   if (!g_visible_count) {
-    const char *empty_title = g_search[0] ? "No matching files" : "No files yet";
-    gfx_draw_string(mx + 18u, list_y + 28u, empty_title, 0xD5E1EDu);
-    gfx_draw_string(mx + 18u, list_y + 48u,
-                    g_search[0] ? "Try a different search." :
-                    "Files on this volume will appear here.",
-                    0x8299B1u);
-  } else {
-    gfx_push_clip(mx, list_y, mw, rows * FILE_MANAGER_ROW_HEIGHT);
-    for (uint32_t row = 0; row < visible_rows; row++) {
+    uint32_t empty_x = list_x + (list_w > 280u ? (list_w - 280u) / 2u : 18u);
+    gfx_blend_round_rect(empty_x + 88u, rows_y + 18u,
+                         44u, 44u, 12u, 0x252344u, 255u);
+    gfx_draw_string(empty_x + 104u, rows_y + 33u, "V", 0xB4A8FFu);
+    gfx_draw_string(empty_x + 30u, rows_y + 78u,
+                    g_search[0] ? "No matching files" : "This folder is empty",
+                    0xE1E4F2u);
+    gfx_draw_string(empty_x + 18u, rows_y + 98u,
+                    g_search[0] ? "Try another search term." :
+                    "Files saved to this volume will appear here.",
+                    0x8793AEu);
+  } else if (row_capacity) {
+    gfx_push_clip(list_x, rows_y, list_w,
+                  row_capacity * FILE_MANAGER_ROW_HEIGHT);
+    for (uint32_t row = 0; row < visible_rows; ++row) {
       uint32_t visible_index = g_scroll + row;
       uint32_t storage_index = g_visible[visible_index];
       char name[FILE_MANAGER_NAME_CAP];
       if (!fm_get_name(storage_index, name))
         continue;
 
-      uint32_t row_y = list_y + row * FILE_MANAGER_ROW_HEIGHT;
-      if (storage_index == g_selected)
-        gfx_blend_round_rect(mx + 4u, row_y + 1u, mw - 8u, 25u,
-                             4u, 0x25496Bu, 255u);
-      else if (row & 1u)
-        gfx_draw_rect(mx + 4u, row_y + 1u, mw - 8u, 25u, 0x162536u);
+      uint32_t row_y = rows_y + row * FILE_MANAGER_ROW_HEIGHT;
+      if (storage_index == g_selected) {
+        gfx_blend_round_rect(list_x + 5u, row_y + 1u,
+                             list_w - 10u, 25u, 5u, 0x302B50u, 255u);
+        gfx_draw_rect(list_x + 6u, row_y + 5u, 2u, 17u, 0xA18FFFu);
+      } else if (row & 1u) {
+        gfx_draw_rect(list_x + 5u, row_y + 1u,
+                      list_w - 10u, 25u, 0x151F30u);
+      }
 
-      fm_draw_file_icon(mx + 13u, row_y + 3u, name);
+      fm_draw_file_icon(list_x + 14u, row_y + 3u, name);
       if (fm_name_length(name) > 34u)
         name[34] = 0;
-      gfx_draw_string(mx + 42u, row_y + 9u, name,
-                      storage_index == g_selected ? 0xFFFFFFu : 0xD7E3EFu);
-      gfx_draw_string(kind_x, row_y + 9u, fm_file_kind(name), 0x8FA8C0u);
-      if (mw > 490u)
+      gfx_draw_string(list_x + 42u, row_y + 9u, name,
+                      storage_index == g_selected ? 0xFFFFFFu : 0xD7DDF0u);
+      gfx_draw_string(type_x, row_y + 9u, fm_file_kind(name), 0x929DB8u);
+      if (list_w > 490u)
         fm_draw_size(size_x, row_y + 9u, name);
     }
     gfx_pop_clip();
   }
 
   gfx_draw_rect((uint32_t)(x + 160), (uint32_t)(y + h - 28),
-                mw, 1u, 0x2A3D52u);
+                list_w, 1u, 0x303A53u);
   if (g_selected != 0xFFFFFFFFu) {
     char selected_name[FILE_MANAGER_NAME_CAP];
     if (fm_get_name(g_selected, selected_name))
       gfx_draw_string((uint32_t)(x + 174), (uint32_t)(y + h - 18),
-                      selected_name, 0x9EB2C8u);
+                      selected_name, 0xB4A8FFu);
   } else {
     gfx_draw_string((uint32_t)(x + 174), (uint32_t)(y + h - 18),
-                    "VexOS Storage", 0x7891AAu);
+                    "VexOS Storage", 0x8995B1u);
   }
   gfx_draw_string((uint32_t)(x + w - 150), (uint32_t)(y + h - 18),
-                  "Double-click to open", 0x7891AAu);
+                  "Double-click to open", 0x8995B1u);
 }
 
 file_manager_event_t file_manager_handle_click(
