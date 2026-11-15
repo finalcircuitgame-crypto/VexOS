@@ -245,6 +245,11 @@ static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb)
   if (dev->intr_index == 255) {
     dev->intr_index = 0;
     dev->intr_cycle ^= 1;
+    // Without updating the Link TRB's cycle bit, the controller follows it
+    // once, then stops consuming interrupt reports after the next ring lap.
+    dev->intr_ring[255].control =
+        (dev->intr_ring[255].control & ~1u) |
+        (uint32_t)(dev->intr_cycle & 1u);
   }
 }
 
