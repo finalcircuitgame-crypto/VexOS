@@ -324,7 +324,14 @@ int desktop_doom_app_ready(void) {
   g_start_open = 0;
   wm_raise(APP_DOOM);
   g_doom_window_dirty = 1;
+#ifdef VEXOS_CI_INPUT_TEST
+  if (g_ring3_task_started)
+    serial_print("[DOOMWIN] Ring 3 Doom window opened and focused\n");
+  else
+    serial_print("[CI] Preflight Doom surface opened (not a game launch)\n");
+#else
   serial_print("[DOOMWIN] Window opened and focused\n");
+#endif
   return 1;
 }
 
@@ -762,7 +769,14 @@ int desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
     g_doom_window_dirty = 1;
     if (!g_doom_frame_reported) {
       g_doom_frame_reported = 1;
+#ifdef VEXOS_CI_INPUT_TEST
+      if (g_ring3_task_started)
+        serial_print("[DOOMWIN] First frame rendered by Ring 3 Doom\n");
+      else
+        serial_print("[CI] Preflight framebuffer draw passed\n");
+#else
       serial_print("[DOOMWIN] First frame received from Doom\n");
+#endif
     }
   }
   return accepted;
@@ -991,6 +1005,9 @@ static void shell_run_line(void) {
     launch_ring3_task("doom.elf");
 #endif
   } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4)) {
+#ifdef VEXOS_CI_INPUT_TEST
+    serial_print("[CI] DOOM command accepted by terminal shell\n");
+#endif
     shell_append("launching doom.elf...\n");
     launch_ring3_task("doom.elf");
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
@@ -1606,7 +1623,12 @@ void desktop_tick(void) {
     // Desktop shortcuts launch their matching applications.
     if(!doom_window_is_maximized()&&!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
       if(i==0u){if(simplefs_init()){g_explorer_open=1;g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
-      else if(i==1u){g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);}else if(i==2u){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);}else{g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);}ui_changed=1;break;}}}
+      else if(i==1u){
+        g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
+#ifdef VEXOS_CI_INPUT_TEST
+        serial_print("[CI] Terminal opened from desktop shortcut\n");
+#endif
+      }else if(i==2u){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);}else{g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
 
