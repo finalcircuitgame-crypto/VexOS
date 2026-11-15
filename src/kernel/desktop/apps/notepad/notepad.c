@@ -54,7 +54,7 @@ static uint32_t notepad_visual_row_count(uint32_t columns) {
 }
 
 static uint32_t notepad_visible_rows(void) {
-  uint32_t height = g_window.h > 100 ? (uint32_t)g_window.h - 100u : 0u;
+  uint32_t height = g_window.h > 120 ? (uint32_t)g_window.h - 120u : 0u;
   return height / NOTEPAD_LINE_HEIGHT;
 }
 
