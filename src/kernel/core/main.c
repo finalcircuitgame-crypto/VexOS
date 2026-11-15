@@ -955,6 +955,11 @@ void kernel_main(BootInfo *bootInfo) {
         // burning a CPU core in a polling loop. STI;HLT avoids the check/HLT
         // lost-wakeup window when the timer fires between the condition and HLT.
         __asm__ volatile("sti; hlt" ::: "memory");
+        // Service USB reports and keyboard input on every PIT wakeup, not
+        // only once per rendered frame. This keeps input latency near 1 ms
+        // while the desktop renderer remains frame-rate limited.
+        xhci_poll_events();
+        desktop_tick();
       }
     }
     last_frame_ticks = Timer_Ticks();
