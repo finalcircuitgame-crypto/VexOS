@@ -288,6 +288,10 @@ jobs:
                       }
                   })
                   time.sleep(0.25)
+              # Ring-3 temporarily owns the display; wait for its exit syscall
+              # to return control to the desktop before the next shell command.
+              if sequence == ["r", "i", "n", "g", "3", "ret"]:
+                  time.sleep(1.5)
           # Let the desktop process the final key and redraw Notepad before capture.
           time.sleep(0.5)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
