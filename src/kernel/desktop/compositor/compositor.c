@@ -1,5 +1,5 @@
 #include "compositor.h"
-#include "../../include/hw_profile.h"
+#include "../../../include/hw_profile.h"
 
 static BootInfo *g_boot_info;
 static uint8_t g_qemu_vga;
