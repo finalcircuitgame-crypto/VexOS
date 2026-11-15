@@ -368,9 +368,16 @@ jobs:
                   time.sleep(2.0)
                   command({"execute": "screendump", "arguments": {"filename": "artifacts/04-doom.png"}})
                   # Close Doom through its window control so desktop tests can continue.
+                  # QEMU's absolute tablet axes are 0..32767 (not 0..65535).
+                  close_baseline = ""
+                  try:
+                      with open("serial.log", encoding="utf-8", errors="replace") as log:
+                          close_baseline = log.read()
+                  except OSError:
+                      pass
                   command({"execute": "input-send-event", "arguments": {"events": [
-                      {"type": "abs", "data": {"axis": "x", "value": 64500}},
-                      {"type": "abs", "data": {"axis": "y", "value": 700}}
+                      {"type": "abs", "data": {"axis": "x", "value": 32350}},
+                      {"type": "abs", "data": {"axis": "y", "value": 600}}
                   ]}})
                   time.sleep(0.1)
                   command({"execute": "input-send-event", "arguments": {"events": [
@@ -380,7 +387,28 @@ jobs:
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": False}}
                   ]}})
-                  time.sleep(1.5)
+                  close_deadline = time.time() + 5
+                  close_serial = ""
+                  close_delta = ""
+                  while time.time() < close_deadline:
+                      try:
+                          with open("serial.log", encoding="utf-8", errors="replace") as log:
+                              close_serial = log.read()
+                      except OSError:
+                          close_serial = ""
+                      close_delta = (
+                          close_serial[len(close_baseline):]
+                          if close_serial.startswith(close_baseline) else close_serial
+                      )
+                      if "[USERMODE] exiting ring3" in close_delta:
+                          break
+                      time.sleep(0.05)
+                  else:
+                      raise RuntimeError(
+                          "Doom close button did not return control to the desktop.\\n"
+                          + close_delta[-6000:]
+                      )
+                  time.sleep(0.5)
           # Let the desktop process the final key and redraw Notepad before capture.
           time.sleep(0.5)
           command({"execute": "screendump", "arguments": {"filename": "artifacts/05-notepad.png"}})
