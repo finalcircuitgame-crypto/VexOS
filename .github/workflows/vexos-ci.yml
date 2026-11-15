@@ -283,6 +283,8 @@ jobs:
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
             "[KERNEL] Desktop initialized" \
+            "[KERNEL] QEMU stdvga detected; mapping two framebuffer pages" \
+            "[DISPLAY] QEMU VBE double-buffered page flipping enabled" \
             "[KERNEL] Starting main loop"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
