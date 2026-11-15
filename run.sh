@@ -65,8 +65,14 @@ with open(img_path, 'r+b') as f:
     table = bytearray(read_at(f, table_lba * SECTOR, table_secs * SECTOR))
 
     entry_size = 1 + NAME_MAX + 4 + 4 + 4  # packed
+    entries_per_sector = SECTOR // entry_size
+
+    def entry_offset(i):
+        # Keep each packed entry inside one sector, matching the kernel.
+        return (i // entries_per_sector) * SECTOR + (i % entries_per_sector) * entry_size
+
     def get_entry(i):
-        off = i * entry_size
+        off = entry_offset(i)
         e = table[off:off+entry_size]
         used = e[0]
         name = e[1:1+NAME_MAX].split(b'\x00', 1)[0].decode('ascii', errors='ignore')
@@ -74,7 +80,7 @@ with open(img_path, 'r+b') as f:
         return used, name, start_lba, size_bytes
 
     def set_entry(i, used, name, start_lba, size_bytes):
-        off = i * entry_size
+        off = entry_offset(i)
         name_b = name.encode('ascii', errors='ignore')[:NAME_MAX-1]
         name_b = name_b + b'\x00' * (NAME_MAX - len(name_b))
         e = bytearray(entry_size)
