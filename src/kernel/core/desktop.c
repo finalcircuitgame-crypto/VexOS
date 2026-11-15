@@ -1533,15 +1533,21 @@ void desktop_tick(void) {
    */
   static uint8_t ci_demo_stage;
   static uint8_t ci_demo_char_index;
+  static uint8_t ci_demo_clock_primed;
   static const char ci_demo_command[] = "doom";
   if (clock_changed) {
     if (ci_demo_stage == 0u) {
-      g_show_shell = 1;
-      g_app_open[APP_SHELL] = 1;
-      wm_raise(APP_SHELL);
-      ci_demo_stage = 1u;
-      serial_print("[CI] Terminal opened by automated desktop playtest\n");
-      ui_changed = 1;
+      if (!ci_demo_clock_primed) {
+        /* Let the opening desktop appear in the recording first. */
+        ci_demo_clock_primed = 1u;
+      } else {
+        g_show_shell = 1;
+        g_app_open[APP_SHELL] = 1;
+        wm_raise(APP_SHELL);
+        ci_demo_stage = 1u;
+        serial_print("[CI] Terminal opened by automated desktop playtest\n");
+        ui_changed = 1;
+      }
     } else if (ci_demo_stage == 1u && ci_demo_char_index < 4u) {
       if (terminal_handle_char(ci_demo_command[ci_demo_char_index])) {
         ci_demo_char_index++;
