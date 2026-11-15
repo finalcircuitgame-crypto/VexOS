@@ -70,6 +70,10 @@ $(KERNEL_OBJS): Makefile
 
 FONT_OBJ = $(OBJDIR)/font.o
 
+DESKTOP_ICON_SOURCES = $(addprefix assets/icons/,file-manager.png terminal.png settings.png notepad.png image-viewer.png doom.png)
+DESKTOP_ICON_BIN = $(OBJDIR)/desktop_icons.bin
+DESKTOP_ICON_OBJ = $(OBJDIR)/desktop_icons.o
+
 all: setup $(DISK_IMG) $(STORAGE_IMG)
 
 setup:
@@ -87,9 +91,17 @@ $(FONT_OBJ): CGA.F08
 	@mkdir -p $(dir $@)
 	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386 $< $@
 
+# Convert the desktop PNGs to tightly packed RGBA and embed them in the kernel.
+$(DESKTOP_ICON_BIN): tools/prepare_desktop_icons.py $(DESKTOP_ICON_SOURCES)
+	@mkdir -p $(dir $@)
+	python3 $< --output $@ $(DESKTOP_ICON_SOURCES)
+
+$(DESKTOP_ICON_OBJ): $(DESKTOP_ICON_BIN)
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents desktop_icons.bin desktop_icons.o
+
 # Build Kernel
-$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ)
-	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) -o $@
+$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(DESKTOP_ICON_OBJ)
+	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(DESKTOP_ICON_OBJ) -o $@
 
 # Pattern rules for nested kernel directories
 $(OBJDIR)/%.o: $(KERNELDIR)/%.c

@@ -19,6 +19,7 @@ static uint32_t *g_bg;
 
 extern uint8_t _binary_CGA_F08_start[];
 extern uint8_t _binary_CGA_F08_end[];
+extern const uint8_t _binary_desktop_icons_bin_start[];
 
 static char g_text[1024];
 static uint32_t g_text_len;
@@ -354,240 +355,38 @@ void desktop_user_app_exited(int faulted) {
 }
 
 static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
-static int streq_n(const char *a, const char *b, uint32_t n);static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
-                                uint32_t scale) {
-  if (scale == 0)
-    return;
-  for (uint32_t yy = 0; yy < 20u; yy++) {
-    for (uint32_t xx = 0; xx < 20u; xx++) {
-      uint32_t c = pix[yy * 20u + xx];
-      if (!(c & 0xFF000000u))
-        continue;
-      uint32_t rgb = c & 0x00FFFFFFu;
-      for (uint32_t sy = 0; sy < scale; sy++) {
-        for (uint32_t sx = 0; sx < scale; sx++) {
-          gfx_put_pixel(x + xx * scale + sx, y + yy * scale + sy, rgb);
-        }
-      }
-    }
+static int streq_n(const char *a, const char *b, uint32_t n);
+
+#define DESKTOP_ICON_WIDTH 32u
+#define DESKTOP_ICON_HEIGHT 32u
+#define DESKTOP_ICON_BYTES (DESKTOP_ICON_WIDTH * DESKTOP_ICON_HEIGHT * 4u)
+
+static const uint8_t *desktop_icon_pixels(app_id_t app) {
+  uint32_t icon_index;
+  switch (app) {
+    case APP_EXPLORER: icon_index = 0u; break;
+    case APP_SHELL:    icon_index = 1u; break;
+    case APP_SETUP:    icon_index = 2u; break;
+    case APP_NOTEPAD:  icon_index = 3u; break;
+    case APP_VIEWER:   icon_index = 4u; break;
+    case APP_DOOM:     icon_index = 5u; break;
+    default: return NULL;
   }
+
+  return _binary_desktop_icons_bin_start +
+         (uint64_t)icon_index * (uint64_t)DESKTOP_ICON_BYTES;
 }
 
-static const uint32_t k_icon_shell_20[20u * 20u] = {
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+static void draw_app_icon(uint32_t x, uint32_t y, uint32_t size,
+                          app_id_t app) {
+  const uint8_t *pixels = desktop_icon_pixels(app);
+  if (!pixels || !size)
+    return;
 
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu,
-    0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-};
-
-static const uint32_t k_icon_explorer_20[20u * 20u] = {
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0x00000000u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u,
-    0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u,
-    0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u, 0xFFCC8B12u,
-    0xFFCC8B12u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFCC8B12u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFCC8B12u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFCC8B12u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFCC8B12u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFCC8B12u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFCC8B12u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFCC8B12u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u, 0xFFF3C046u,
-    0xFFCC8B12u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u, 0xFFE6A823u,
-    0xFFE6A823u, 0xFFE6A823u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-};
-
-static const uint32_t k_icon_viewer_20[20u * 20u] = {
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFF2D80FFu, 0xFF2D80FFu,
-    0xFF2D80FFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF0B111Cu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFF0B111Cu, 0x00000000u,
-
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-};
-
-static const uint32_t k_icon_notepad_20[20u * 20u] = {
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
-
-    0x00000000u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u,
-    0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0xFF2A3140u, 0x00000000u,
-
-    0x00000000u, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-    0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000000u,
-
-    0x00000000u, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu,
-    0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu,
-    0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu,
-    0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0xFF2D80FFu, 0x00000000u,
-};
-
-
-static void draw_app_icon(uint32_t x,uint32_t y,uint32_t size,app_id_t app){
-  uint32_t tile=app==APP_EXPLORER?0x35402Du:app==APP_VIEWER?0x263D60u:app==APP_NOTEPAD?0x493B65u:app==APP_SETUP?0x3B345Bu:app==APP_DOOM?0x5B2E3Au:0x243B59u;
-  if(size<18u)return;gfx_blend_round_rect(x,y,size,size,size/5u,tile,255);gfx_draw_rect(x+1u,y+1u,size-2u,1u,0x7187A4u);
-  if(size<28u){const char *m=app==APP_EXPLORER?"F":app==APP_VIEWER?"V":app==APP_NOTEPAD?"N":app==APP_SETUP?"S":app==APP_DOOM?"D":">";gfx_draw_string(x+(size-8u)/2u,y+(size-8u)/2u,m,0xFFFFFFu);return;}
-  if(app==APP_SHELL){gfx_blend_round_rect(x+6u,y+7u,size-12u,size-14u,4u,0x0A1423u,255);gfx_draw_rect(x+7u,y+8u,size-14u,5u,0x385777u);gfx_draw_rect(x+10u,y+10u,3u,2u,0xF28B82u);gfx_draw_rect(x+15u,y+10u,3u,2u,0xF6C76Bu);gfx_draw_rect(x+20u,y+10u,3u,2u,0x74C69Du);gfx_draw_string(x+10u,y+20u,">_",0x7DE0B1u);}
-  else if(app==APP_EXPLORER){gfx_blend_round_rect(x+6u,y+14u,size-12u,size-21u,4u,0xC98222u,255);gfx_blend_round_rect(x+8u,y+10u,size/2u,9u,3u,0xF4C45Eu,255);gfx_draw_rect(x+7u,y+18u,size-14u,2u,0xFFE08Au);}
-  else if(app==APP_VIEWER){gfx_blend_round_rect(x+6u,y+6u,size-12u,size-12u,4u,0xEAF2F8u,255);gfx_draw_rect(x+9u,y+9u,size-18u,size-18u,0x83C5E8u);gfx_blend_round_rect(x+size-15u,y+11u,5u,5u,3u,0xFFD166u,255);gfx_draw_rect(x+10u,y+size-17u,size/3u,6u,0x2E8B72u);gfx_draw_rect(x+size/3u,y+size-20u,size/3u,9u,0x26765Fu);}
-  else if(app==APP_NOTEPAD){gfx_blend_round_rect(x+8u,y+5u,size-16u,size-10u,3u,0xF4F7FCu,255);gfx_draw_rect(x+12u,y+11u,size-24u,2u,0x4C8BD8u);gfx_draw_rect(x+12u,y+17u,size-24u,2u,0xA9BBD0u);gfx_draw_rect(x+12u,y+23u,size-24u,2u,0xA9BBD0u);if(size>38u)gfx_draw_rect(x+12u,y+29u,size-24u,2u,0xA9BBD0u);}
-  else if(app==APP_DOOM){gfx_blend_round_rect(x+7u,y+7u,size-14u,size-14u,size/4u,0x8A3446u,255);gfx_draw_rect(x+size/2u-2u,y+10u,4u,size-20u,0xF4D8D8u);gfx_draw_rect(x+10u,y+size/2u-2u,size-20u,4u,0xF4D8D8u);}
-  else{gfx_blend_round_rect(x+9u,y+9u,size-18u,size-18u,size/4u,0x8A79CBu,255);gfx_blend_round_rect(x+size/2u-4u,y+size/2u-4u,8u,8u,4u,0xE8E3FFu,255);gfx_draw_rect(x+size/2u-2u,y+6u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+size/2u-2u,y+size-13u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+6u,y+size/2u-2u,7u,4u,0xDCD4FFu);gfx_draw_rect(x+size-13u,y+size/2u-2u,7u,4u,0xDCD4FFu);}
+  gfx_blit_rgba_scaled(pixels, DESKTOP_ICON_WIDTH, DESKTOP_ICON_HEIGHT,
+                       DESKTOP_ICON_WIDTH, x, y, size, size);
 }
+
 static void draw_file_icon(uint32_t x,uint32_t y,const char *name){
   uint32_t c=0x8EA4BEu,n=0;while(name&&name[n])n++;
   if(n>4u&&streq_n(&name[n-4u],".txt",4u))c=0x63B98Au;else if(n>4u&&streq_n(&name[n-4u],".png",4u))c=0x5FA9E8u;else if(n>4u&&streq_n(&name[n-4u],".wad",4u))c=0xD69B54u;else if(n>4u&&streq_n(&name[n-4u],".elf",4u))c=0xA88BDEu;
@@ -964,7 +763,7 @@ static void draw_start_menu(void){
 
 static void draw_desktop_icons(void){
   if(!g_bi)return;uint32_t x=22u,y=132u,sz=42u,step=84u;const app_id_t apps[4]={APP_EXPLORER,APP_SHELL,APP_NOTEPAD,APP_VIEWER};
-  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;gfx_blend_round_rect(x-7u,iy-7u,56u,70u,8u,0x14263Au,90u);draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;gfx_draw_string(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
+  for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;gfx_draw_string(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
 }
 
 static void draw_widgets(void){

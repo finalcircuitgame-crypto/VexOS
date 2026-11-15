@@ -231,6 +231,36 @@ void gfx_blit_scaled(const uint32_t *source, uint32_t source_width,
   }
 }
 
+void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
+                          uint32_t source_height, uint32_t source_stride,
+                          uint32_t x, uint32_t y, uint32_t width,
+                          uint32_t height) {
+  if (!source || !source_width || !source_height ||
+      source_stride < source_width || !width || !height)
+    return;
+
+  uint32_t x1, y1, x2, y2;
+  if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
+    return;
+
+  for (uint32_t dy = y1; dy < y2; ++dy) {
+    uint32_t sy = (uint32_t)(((uint64_t)(dy - y) * source_height) / height);
+    for (uint32_t dx = x1; dx < x2; ++dx) {
+      uint32_t sx = (uint32_t)(((uint64_t)(dx - x) * source_width) / width);
+      const uint8_t *pixel =
+          source + (((uint64_t)sy * source_stride + sx) * 4ull);
+      uint8_t alpha = pixel[3];
+      if (!alpha)
+        continue;
+
+      uint32_t color = ((uint32_t)pixel[0] << 16) |
+                       ((uint32_t)pixel[1] << 8) |
+                       (uint32_t)pixel[2];
+      gfx_blend_pixel(dx, dy, color, alpha);
+    }
+  }
+}
+
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground) {
   if (!g_font)

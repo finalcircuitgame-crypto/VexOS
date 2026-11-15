@@ -42,6 +42,10 @@ void gfx_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1,
 void gfx_blit_scaled(const uint32_t *source, uint32_t source_width,
                      uint32_t source_height, uint32_t source_stride,
                      uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
+                          uint32_t source_height, uint32_t source_stride,
+                          uint32_t x, uint32_t y, uint32_t width,
+                          uint32_t height);
 
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground);
