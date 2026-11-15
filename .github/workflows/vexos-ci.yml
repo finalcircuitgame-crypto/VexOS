@@ -20,10 +20,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Initialize test artifact directory
+        run: |
+          mkdir -p artifacts
+          printf 'Test result: NOT STARTED\\n' > artifacts/test-result.txt
+
       - name: Install toolchain and VM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg
 
       - name: Verify UEFI toolchain paths
         run: |
@@ -137,7 +142,69 @@ jobs:
           mkdir -p artifacts
           rm -f artifacts/*.png /tmp/vexos-qmp.sock serial.log qemu.log
 
-          xvfb-run -a qemu-system-x86_64 \
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp >xvfb.log 2>&1 &
+          xvfb_pid=$!
+          sleep 0.5
+          if ! kill -0 "$xvfb_pid" 2>/dev/null; then
+            echo "Recording/display setup FAILED: Xvfb did not start." | tee artifacts/test-result.txt
+            cat xvfb.log || true
+            exit 1
+          fi
+
+          recording="artifacts/vexos-ci-run-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}.mp4"
+          ffmpeg -hide_banner -loglevel info -y \
+            -f x11grab -framerate 30 -video_size 1280x800 -i "$DISPLAY+0,0" \
+            -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+            -movflags +faststart "$recording" >recording.log 2>&1 &
+          ffmpeg_pid=$!
+          sleep 1
+          if ! kill -0 "$ffmpeg_pid" 2>/dev/null; then
+            echo "Recording FAILED TO START: ffmpeg exited before QEMU launch." | tee artifacts/test-result.txt
+            cat recording.log || true
+            exit 1
+          fi
+          echo "Recording started: $recording"
+
+          qemu_pid=""
+          finish_test_capture() {
+            test_status=$?
+            trap - EXIT
+            set +e
+            if [ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2>/dev/null; then kill "$qemu_pid" 2>/dev/null; fi
+            if [ -n "$qemu_pid" ]; then wait "$qemu_pid" 2>/dev/null; fi
+            if [ -n "$ffmpeg_pid" ] && kill -0 "$ffmpeg_pid" 2>/dev/null; then
+              kill -INT "$ffmpeg_pid" 2>/dev/null
+              wait "$ffmpeg_pid"
+              ffmpeg_status=$?
+            else
+              ffmpeg_status=1
+            fi
+            kill "$xvfb_pid" 2>/dev/null
+            wait "$xvfb_pid" 2>/dev/null
+            if [ "$test_status" -eq 0 ]; then
+              printf 'Test result: PASS\\n' > artifacts/test-result.txt
+            else
+              printf 'Test result: FAIL (exit %s)\\n' "$test_status" > artifacts/test-result.txt
+            fi
+            if [ "$ffmpeg_status" -ne 0 ] || [ ! -s "$recording" ]; then
+              printf 'Recording status: FAILED TO FINALIZE\\n' >> artifacts/test-result.txt
+              echo "ERROR: MP4 recording could not be finalized." | tee -a artifacts/test-result.txt
+              test_status=1
+            elif ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 "$recording" >> artifacts/test-result.txt 2>recording-verify.log; then
+              printf 'Recording status: INVALID MP4 (ffprobe validation failed)\\n' >> artifacts/test-result.txt
+              cat recording-verify.log || true
+              test_status=1
+            else
+              printf 'Recording status: FINALIZED AND VERIFIED\\n' >> artifacts/test-result.txt
+              printf 'Recording file: %s\\n' "$recording" >> artifacts/test-result.txt
+            fi
+            cat artifacts/test-result.txt
+            exit "$test_status"
+          }
+          trap finish_test_capture EXIT
+
+          qemu-system-x86_64 \
             -machine pc \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
@@ -157,11 +224,6 @@ jobs:
             -d int,cpu_reset -D qemu-debug.log \
             -no-reboot -no-shutdown >qemu.log 2>&1 &
           qemu_pid=$!
-          cleanup() {
-            kill "$qemu_pid" 2>/dev/null || true
-            wait "$qemu_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
@@ -492,13 +554,21 @@ jobs:
           fi
 
           echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, and typed command."
+          printf 'Test result: PASS - all boot and desktop interaction markers observed\\n' > artifacts/test-result.txt
           tail -c 5000 serial.log
 
-      - name: Upload QEMU desktop screenshots
+      - name: Upload complete QEMU test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vexos-qemu-screenshots
-          path: artifacts/*.png
+          name: vexos-ci-run-${{ github.run_number }}-${{ github.run_id }}
+          path: |
+            artifacts/
+            serial.log
+            qemu.log
+            qemu-debug.log
+            xvfb.log
+            recording.log
+            recording-verify.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
