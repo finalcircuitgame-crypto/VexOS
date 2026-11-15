@@ -23,67 +23,73 @@ void window_chrome_draw(const desktop_window_t *win, const char *title,
   else if (title && title[0] == 'S')
     app = APP_SETUP;
 
-  gfx_blend_round_rect((uint32_t)(x + 4), (uint32_t)(y + 6),
-                       (uint32_t)w, (uint32_t)h, 9u, 0x02060Cu, 155);
+  /* Deep frame, clear focused edge, and a separate title surface. */
+  gfx_blend_round_rect((uint32_t)(x + 4), (uint32_t)(y + 7),
+                       (uint32_t)w, (uint32_t)h, 11u, 0x03050Cu, 175u);
   gfx_blend_round_rect((uint32_t)x, (uint32_t)y, (uint32_t)w,
-                       (uint32_t)h, 8u, 0x101A28u, 255);
+                       (uint32_t)h, 9u, 0x101626u, 255u);
   gfx_draw_rect((uint32_t)x, (uint32_t)y, (uint32_t)w, 1u,
-                focused ? 0x5EA9F7u : 0x3B4C62u);
+                focused ? 0x9A88FFu : 0x34405Cu);
   gfx_draw_rect((uint32_t)x, (uint32_t)(y + h - 1), (uint32_t)w, 1u,
-                0x26364Au);
-  gfx_draw_rect((uint32_t)x, (uint32_t)y, 1u, (uint32_t)h, 0x35485Fu);
+                0x2A344B);
+  gfx_draw_rect((uint32_t)x, (uint32_t)y, 1u, (uint32_t)h, 0x303B57);
   gfx_draw_rect((uint32_t)(x + w - 1), (uint32_t)y, 1u,
-                (uint32_t)h, 0x26364Au);
+                (uint32_t)h, 0x252F46);
+
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 1),
                 (uint32_t)(w - 2), 29u,
-                focused ? 0x1D3550u : 0x1A293Bu);
+                focused ? 0x20213Au : 0x191F31u);
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 29),
                 (uint32_t)(w - 2), 1u,
-                focused ? 0x42688Cu : 0x34475Du);
+                focused ? 0x554B86u : 0x303A52u);
+  if (focused)
+    gfx_draw_rect((uint32_t)(x + 12), (uint32_t)(y + 1), 44u, 2u,
+                  0xAA9BFFu);
 
   if (draw_icon)
     draw_icon((uint32_t)(x + 8), (uint32_t)(y + 6), 20u, app);
   if (title)
     gfx_draw_string((uint32_t)(x + 36), (uint32_t)(y + 11), title,
-                    focused ? 0xF5F8FCu : 0xC0CAD8u);
+                    focused ? 0xF4F3FFu : 0xC6CBE0u);
 
   if (subtitle && subtitle[0]) {
     uint32_t title_len = 0;
     uint32_t subtitle_len = 0;
     while (title && title[title_len])
-      title_len++;
+      ++title_len;
     while (subtitle[subtitle_len])
-      subtitle_len++;
+      ++subtitle_len;
 
     uint32_t subtitle_x = (uint32_t)(x + 36) + title_len * 8u + 10u;
     if (subtitle_x + subtitle_len * 8u < (uint32_t)(x + w - 100)) {
       gfx_draw_rect(subtitle_x - 5u, (uint32_t)(y + 10), 1u, 10u,
-                    0x59708Au);
+                    0x59617F);
       gfx_draw_string(subtitle_x, (uint32_t)(y + 11), subtitle,
-                      0x9EB5CCu);
+                      0x929CB9u);
     }
   }
 
+  /* Keep the existing hit boxes; only the control treatment changes. */
   gfx_blend_round_rect((uint32_t)(x + w - 23), (uint32_t)(y + 6),
-                       17u, 17u, 5u, 0xB94755u, 255u);
+                       17u, 17u, 6u, 0x873B59u, 255u);
   gfx_draw_string((uint32_t)(x + w - 18), (uint32_t)(y + 10), "x",
-                  0xFFFFFFu);
+                  0xFFF5FAu);
 
   if (has_scroll) {
     gfx_blend_round_rect((uint32_t)(x + w - 45), (uint32_t)(y + 6),
-                         17u, 17u, 5u, 0x334B65u, 255u);
+                         17u, 17u, 6u, 0x303955u, 255u);
     gfx_blend_round_rect((uint32_t)(x + w - 65), (uint32_t)(y + 6),
-                         17u, 17u, 5u, 0x334B65u, 255u);
+                         17u, 17u, 6u, 0x303955u, 255u);
     gfx_draw_string((uint32_t)(x + w - 41), (uint32_t)(y + 10), "^",
-                    0xE8F1FAu);
+                    0xE4E6F5u);
     gfx_draw_string((uint32_t)(x + w - 61), (uint32_t)(y + 10), "v",
-                    0xE8F1FAu);
+                    0xE4E6F5u);
   }
 
   if (has_save) {
     gfx_blend_round_rect((uint32_t)(x + w - 85), (uint32_t)(y + 6),
-                         17u, 17u, 5u, 0x236B59u, 255u);
+                         17u, 17u, 6u, 0x245D57u, 255u);
     gfx_draw_string((uint32_t)(x + w - 80), (uint32_t)(y + 10), "S",
-                    0xF0FFF8u);
+                    0xE9FFF9u);
   }
 }
