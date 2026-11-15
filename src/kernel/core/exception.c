@@ -1,6 +1,10 @@
 #include <stdint.h>
+#include "../../include/task.h"
 
 void serial_print(const char *str);
+extern void usermode_cleanup_current(void);
+extern void syscall_process_cleanup(void);
+extern void desktop_user_app_exited(int faulted);
 
 struct InterruptFrameErr {
   uint64_t r15;
@@ -35,12 +39,10 @@ static void hex64(char out[17], uint64_t v) {
   out[16] = 0;
 }
 
-uint64_t exception_handler(uint64_t rsp) {
-  struct InterruptFrameErr *f = (struct InterruptFrameErr *)rsp;
-
-  serial_print("[KERNEL PANIC] ");
-  serial_print("[EXC] vector=");
+static void print_exception_details(const struct InterruptFrameErr *f) {
   char h[17];
+
+  serial_print(" vector=");
   hex64(h, f->vector);
   serial_print(h);
   serial_print(" err=");
@@ -59,7 +61,40 @@ uint64_t exception_handler(uint64_t rsp) {
   hex64(h, f->rip);
   serial_print(h);
   serial_print("\n");
+}
 
-  __asm__ volatile("cli; hlt");
-  return rsp;
+static __attribute__((noreturn)) void kernel_panic_halt(void) {
+  serial_print("[KERNEL PANIC] Fatal kernel-mode exception. System halted.\n");
+  for (;;) {
+    __asm__ volatile("cli; hlt");
+  }
+}
+
+uint64_t exception_handler(uint64_t rsp) {
+  struct InterruptFrameErr *f = (struct InterruptFrameErr *)rsp;
+  if (!f)
+    kernel_panic_halt();
+
+  /* The saved CS RPL identifies the privilege level at the time of fault. */
+  if ((f->cs & 3u) == 3u) {
+    serial_print("[USERFAULT] Terminating ring-3 application:");
+    print_exception_details(f);
+
+    /* Reclaim process-owned state while executing on the dedicated kernel
+       transition stack. The transition stack itself is freed later, after
+       the scheduler has switched back to the kernel task. */
+    usermode_cleanup_current();
+    syscall_process_cleanup();
+    desktop_user_app_exited(1);
+
+    serial_print("[USERFAULT] Application terminated; kernel continues.\n");
+    uint64_t next_rsp = Task_Exit(rsp);
+    if (!next_rsp)
+      kernel_panic_halt();
+    return next_rsp;
+  }
+
+  serial_print("[KERNEL PANIC] ");
+  print_exception_details(f);
+  kernel_panic_halt();
 }
