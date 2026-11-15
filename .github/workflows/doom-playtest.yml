@@ -37,7 +37,7 @@ jobs:
           test -s dist/storage.img
 
           make clean
-          make VEXOS_CI=1 -j2 all
+          make VEXOS_CI=1 VEXOS_CI_DOOM_DEMO=1 -j2 all
           make doom
           test -s dist/doom.elf
           readelf -h dist/doom.elf | grep -q 'EXEC'
