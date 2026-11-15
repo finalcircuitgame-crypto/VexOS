@@ -2,7 +2,7 @@
 #define VEXOS_GRAPHICS_H
 
 #include <stdint.h>
-#include "../../include/bootinfo.h"
+#include "../../../include/bootinfo.h"
 
 void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font);
 void gfx_set_backbuffer(uint32_t *backbuffer);
