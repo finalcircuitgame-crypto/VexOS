@@ -1,6 +1,6 @@
 #include "notepad.h"
 #include "../../graphics/graphics.h"
-#include "../../../include/simplefs.h"
+#include "../../../../include/simplefs.h"
 #define NOTEPAD_TEXT_CAPACITY 4096u
 static desktop_window_t g_window;
 static char g_filename[64];
