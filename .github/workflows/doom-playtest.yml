@@ -71,7 +71,7 @@ jobs:
           payload = bytes((i * 37 + 11) & 0xFF for i in range(700))
           superblock = struct.pack("<8I", 0x31465353, 1, 1, 8, 9, 11, 1, 0)
           table = bytearray(8 * 512)
-          entry = struct.pack("<B32sIII", 1, b"ci.txt".ljust(32, b"\\0"), 9, len(payload), 0)
+          entry = struct.pack("<B32sIII", 1, b"ci.txt".ljust(32, b"\0"), 9, len(payload), 0)
           table[:len(entry)] = entry
           with open(image, "r+b") as disk:
               disk.seek(0)
@@ -80,7 +80,7 @@ jobs:
               disk.seek(512)
               disk.write(table)
               disk.seek(9 * 512)
-              disk.write(payload.ljust(1024, b"\\0"))
+              disk.write(payload.ljust(1024, b"\0"))
           PY
 
           python3 tools/pack_doom_storage.py --image dist/storage.img --elf dist/doom.elf --wad dist/freedoom/freedoom1.wad
