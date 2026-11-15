@@ -13,6 +13,7 @@ extern void usermode_cleanup_current(void);
 extern void desktop_user_app_exited(int faulted);
 extern uint64_t Timer_Ticks(void);
 extern void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
+extern void xhci_poll_events(void);
 
 #define MAX_OPEN_FILES 16
 #define USER_FILENAME_MAX 32u
@@ -275,6 +276,12 @@ uint64_t syscall_handler(uint64_t rsp) {
         frame->rax = 0;
         break;
     case 10: {
+        // The ring-3 app replaces the desktop task while it is running, so
+        // the normal kernel main loop no longer polls xHCI. Poll here before
+        // draining the event queue; otherwise key-up reports never arrive
+        // and Doom can leave a key logically held forever.
+        xhci_poll_events();
+
         input_kbd_event_t event;
         if (input_kbd_pop_event(&event))
             frame->rax = 0x10000ULL | ((uint64_t)event.pressed << 8) | event.usage;
