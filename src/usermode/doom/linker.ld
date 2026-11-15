@@ -6,7 +6,8 @@ PHDRS
 }
 SECTIONS
 {
-  . = 0x00400000;
+  /* Match the CI ring-3 fixture: keep user pages clear of supervisor identity mappings. */
+  . = 0x0000004000000000;
   .text : ALIGN(0x1000) { *(.text.start) *(.text .text.*) } :text
   .rodata : ALIGN(0x1000) { *(.rodata .rodata.*) } :text
   .data : ALIGN(0x1000) { *(.data .data.*) *(.init_array .init_array.*) } :data
