@@ -1,0 +1,3 @@
+# Doom IWADs are supplied locally and must not be committed.
+*.wad
+*.WAD
