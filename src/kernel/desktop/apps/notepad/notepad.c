@@ -59,8 +59,8 @@ static uint32_t notepad_visible_rows(void) {
 }
 
 static uint32_t notepad_max_scroll(void) {
-  uint32_t columns = g_window.w > 72 ?
-      ((uint32_t)g_window.w - 72u) / 8u : 1u;
+  uint32_t columns = g_window.w > 82 ?
+      ((uint32_t)g_window.w - 82u) / 8u : 1u;
   uint32_t rows = notepad_visual_row_count(columns);
   uint32_t visible = notepad_visible_rows();
   return rows > visible ? rows - visible : 0u;
