@@ -521,6 +521,7 @@ file_manager_event_t file_manager_handle_click(
   if (fm_hit(px, py, search_x - 30, y + 38, 24, 24)) {
     g_scroll = 0;
     g_selected = 0xFFFFFFFFu;
+    g_search_focused = 0;
     g_last_click_index = 0xFFFFFFFFu;
     fm_refresh();
     wm_raise(APP_EXPLORER);
