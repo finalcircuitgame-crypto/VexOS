@@ -21,7 +21,7 @@ extern void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
 
 typedef struct {
     int used;
-    void *data;
+    char name[USER_FILENAME_MAX];
     uint32_t size;
     uint32_t cursor;
 } open_file_t;
@@ -93,22 +93,10 @@ static int sys_open(const char *filename) {
         return -1;
     }
 
-    // Keep zero-length files openable even if the allocator treats size 0 as
-    // an invalid allocation request.
-    void *data = kmalloc(size ? (size_t)size : 1u);
-    if (!data) return -1;
-
-    uint32_t out_len = 0;
-    if (!simplefs_read_file(name_buf, data, size, &out_len) || out_len != size) {
-        serial_print("[USERMODE] file read failed: ");
-        serial_print(name_buf);
-        serial_print("\n");
-        kfree(data);
-        return -1;
-    }
-
+    // Keep descriptors lightweight: stream large assets on demand.
     g_files[fd].used = 1;
-    g_files[fd].data = data;
+    for (uint32_t i = 0; i < USER_FILENAME_MAX; ++i)
+        g_files[fd].name[i] = name_buf[i];
     g_files[fd].size = size;
     g_files[fd].cursor = 0;
     return fd;
@@ -124,12 +112,15 @@ static int sys_read(int fd, void *buf, uint32_t count) {
     uint32_t to_read = count > available ? available : count;
     if (!VMM_IsUserRange(buf, to_read, 1)) return -1;
 
-    uint8_t *dst = (uint8_t *)buf;
-    const uint8_t *src = (const uint8_t *)file->data + file->cursor;
-    for (uint32_t i = 0; i < to_read; i++) dst[i] = src[i];
+    uint32_t bytes_read = 0;
+    if (!simplefs_read_file_at(file->name, file->cursor, buf,
+                               to_read, &bytes_read))
+        return -1;
+    if (bytes_read > to_read)
+        return -1;
 
-    file->cursor += to_read;
-    return (int)to_read;
+    file->cursor += bytes_read;
+    return (int)bytes_read;
 }
 
 static int sys_seek(int fd, int offset, int whence) {
@@ -152,8 +143,7 @@ static int sys_seek(int fd, int offset, int whence) {
 static int sys_close(int fd) {
     if (fd < 3 || fd >= MAX_OPEN_FILES || !g_files[fd].used) return -1;
 
-    kfree(g_files[fd].data);
-    g_files[fd].data = NULL;
+    g_files[fd].name[0] = '\0';
     g_files[fd].size = 0;
     g_files[fd].cursor = 0;
     g_files[fd].used = 0;
