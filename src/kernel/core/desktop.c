@@ -307,6 +307,11 @@ int desktop_doom_mouse_input_active(void) {
   if(g_doom_mouse_captured)return 1;
   input_pointer_state_t p=input_pointer_get();return doom_window_pointer_in_content(p.x,p.y);
 }
+int desktop_doom_mouse_buttons_active(void) {
+  if(!desktop_doom_input_active())return 0;
+  input_pointer_state_t p=input_pointer_get();
+  return doom_window_pointer_in_content(p.x,p.y);
+}
 int desktop_doom_close_requested(void) { return doom_window_close_requested(); }
 
 /* Called from the kernel after a ring-3 process exits or faults. */
@@ -549,13 +554,14 @@ static const uint32_t k_icon_notepad_20[20u * 20u] = {
 
 
 static void draw_app_icon(uint32_t x,uint32_t y,uint32_t size,app_id_t app){
-  uint32_t tile=app==APP_EXPLORER?0x35402Du:app==APP_VIEWER?0x263D60u:app==APP_NOTEPAD?0x493B65u:app==APP_SETUP?0x3B345Bu:0x243B59u;
+  uint32_t tile=app==APP_EXPLORER?0x35402Du:app==APP_VIEWER?0x263D60u:app==APP_NOTEPAD?0x493B65u:app==APP_SETUP?0x3B345Bu:app==APP_DOOM?0x5B2E3Au:0x243B59u;
   if(size<18u)return;gfx_blend_round_rect(x,y,size,size,size/5u,tile,255);gfx_draw_rect(x+1u,y+1u,size-2u,1u,0x7187A4u);
-  if(size<28u){const char *m=app==APP_EXPLORER?"F":app==APP_VIEWER?"V":app==APP_NOTEPAD?"N":app==APP_SETUP?"S":">";gfx_draw_string(x+(size-8u)/2u,y+(size-8u)/2u,m,0xFFFFFFu);return;}
+  if(size<28u){const char *m=app==APP_EXPLORER?"F":app==APP_VIEWER?"V":app==APP_NOTEPAD?"N":app==APP_SETUP?"S":app==APP_DOOM?"D":">";gfx_draw_string(x+(size-8u)/2u,y+(size-8u)/2u,m,0xFFFFFFu);return;}
   if(app==APP_SHELL){gfx_blend_round_rect(x+6u,y+7u,size-12u,size-14u,4u,0x0A1423u,255);gfx_draw_rect(x+7u,y+8u,size-14u,5u,0x385777u);gfx_draw_rect(x+10u,y+10u,3u,2u,0xF28B82u);gfx_draw_rect(x+15u,y+10u,3u,2u,0xF6C76Bu);gfx_draw_rect(x+20u,y+10u,3u,2u,0x74C69Du);gfx_draw_string(x+10u,y+20u,">_",0x7DE0B1u);}
   else if(app==APP_EXPLORER){gfx_blend_round_rect(x+6u,y+14u,size-12u,size-21u,4u,0xC98222u,255);gfx_blend_round_rect(x+8u,y+10u,size/2u,9u,3u,0xF4C45Eu,255);gfx_draw_rect(x+7u,y+18u,size-14u,2u,0xFFE08Au);}
   else if(app==APP_VIEWER){gfx_blend_round_rect(x+6u,y+6u,size-12u,size-12u,4u,0xEAF2F8u,255);gfx_draw_rect(x+9u,y+9u,size-18u,size-18u,0x83C5E8u);gfx_blend_round_rect(x+size-15u,y+11u,5u,5u,3u,0xFFD166u,255);gfx_draw_rect(x+10u,y+size-17u,size/3u,6u,0x2E8B72u);gfx_draw_rect(x+size/3u,y+size-20u,size/3u,9u,0x26765Fu);}
   else if(app==APP_NOTEPAD){gfx_blend_round_rect(x+8u,y+5u,size-16u,size-10u,3u,0xF4F7FCu,255);gfx_draw_rect(x+12u,y+11u,size-24u,2u,0x4C8BD8u);gfx_draw_rect(x+12u,y+17u,size-24u,2u,0xA9BBD0u);gfx_draw_rect(x+12u,y+23u,size-24u,2u,0xA9BBD0u);if(size>38u)gfx_draw_rect(x+12u,y+29u,size-24u,2u,0xA9BBD0u);}
+  else if(app==APP_DOOM){gfx_blend_round_rect(x+7u,y+7u,size-14u,size-14u,size/4u,0x8A3446u,255);gfx_draw_rect(x+size/2u-2u,y+10u,4u,size-20u,0xF4D8D8u);gfx_draw_rect(x+10u,y+size/2u-2u,size-20u,4u,0xF4D8D8u);}
   else{gfx_blend_round_rect(x+9u,y+9u,size-18u,size-18u,size/4u,0x8A79CBu,255);gfx_blend_round_rect(x+size/2u-4u,y+size/2u-4u,8u,8u,4u,0xE8E3FFu,255);gfx_draw_rect(x+size/2u-2u,y+6u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+size/2u-2u,y+size-13u,4u,7u,0xDCD4FFu);gfx_draw_rect(x+6u,y+size/2u-2u,7u,4u,0xDCD4FFu);gfx_draw_rect(x+size-13u,y+size/2u-2u,7u,4u,0xDCD4FFu);}
 }
 static void draw_file_icon(uint32_t x,uint32_t y,const char *name){
@@ -907,15 +913,15 @@ static void draw_taskbar(void){
   if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh;gfx_blend_rect(0u,y,g_bi->width,bh,0x080E18u,224u);gfx_draw_rect(0u,y,g_bi->width,1u,0x53799Cu);uint32_t sy=y+6u,sh=bh-12u;
   gfx_blend_round_rect(8u,sy,48u,sh,10u,g_start_open?0x28588Bu:0x1A3451u,255u);gfx_draw_rect(18u,sy+10u,10u,10u,0xE8F3FFu);gfx_draw_rect(31u,sy+10u,10u,10u,0x8FC7F4u);gfx_draw_rect(18u,sy+23u,10u,10u,0x8FC7F4u);gfx_draw_rect(31u,sy+23u,10u,10u,0xE8F3FFu);
   uint32_t sw=196u;if(sw+72u>g_bi->width)sw=g_bi->width>72u?g_bi->width-72u:1u;gfx_blend_round_rect(62u,sy,sw,sh,10u,0x111E2Du,235u);gfx_draw_rect(62u,sy,sw,1u,0x344B64u);gfx_blend_round_rect(74u,sy+13u,10u,10u,5u,0x7894AFu,255u);gfx_draw_rect(83u,sy+22u,5u,2u,0x7894AFu);gfx_draw_string(96u,sy+18u,"Search apps and files",0x91A7BEu);
-  uint32_t dw=420u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;gfx_blend_round_rect(dx,sy,dw,sh,12u,0x101C2Au,242u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);gfx_draw_rect(dx+1u,sy+sh-1u,dw-2u,1u,0x0B1420u);uint32_t ix=dx+16u,iy=sy+((sh>40u)?((sh-40u)/2u):0u);for(uint32_t i=0;i<4u;i++){draw_app_icon(ix,iy,40u,(app_id_t)i);ix+=50u;if(ix+56u>dx+dw)break;}
+  uint32_t dw=420u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;gfx_blend_round_rect(dx,sy,dw,sh,12u,0x101C2Au,242u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);gfx_draw_rect(dx+1u,sy+sh-1u,dw-2u,1u,0x0B1420u);uint32_t ix=dx+16u,iy=sy+((sh>40u)?((sh-40u)/2u):0u);const app_id_t dock_apps[5]={APP_SHELL,APP_EXPLORER,APP_VIEWER,APP_NOTEPAD,APP_DOOM};for(uint32_t i=0;i<5u;i++){if(i<4u||g_ring3_task_started)draw_app_icon(ix,iy,40u,dock_apps[i]);ix+=50u;if(ix+56u>dx+dw)break;}
   uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){gfx_blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);gfx_draw_string(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);gfx_draw_string(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
 }
 
 static void draw_start_menu(void){
   if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;gfx_blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
   gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);gfx_draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);gfx_draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);gfx_draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);gfx_draw_string(x+16u,y+9u,"VEXOS",0xF0F6FCu);gfx_draw_string(x+208u,y+9u,"APPS",0x7FA0BEu);gfx_draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
-  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);if(i<5u)draw_app_icon(x+17u,ry+1u,19u,apps[i]);else{gfx_blend_round_rect(x+17u,ry+1u,19u,19u,5u,0x334B65u,255u);gfx_draw_string(x+23u,ry+6u,"?",0xEAF3FCu);}gfx_draw_string(x+46u,ry+7u,i<5u?app_registry_name(apps[i]):"Help",0xDCE8F4u);if(i==0u)gfx_draw_string(x+232u,ry+7u,">",0x75A8D4u);}
+  const app_id_t apps[6]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP,APP_DOOM};
+  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);draw_app_icon(x+17u,ry+1u,19u,apps[i]);gfx_draw_string(x+46u,ry+7u,app_registry_name(apps[i]),0xDCE8F4u);if(i==0u)gfx_draw_string(x+232u,ry+7u,">",0x75A8D4u);}
 }
 
 static void draw_desktop_icons(void){
@@ -1660,7 +1666,7 @@ void desktop_tick(void) {
         }else if(ry>=72&&ry<94){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
         }else if(ry>=94&&ry<116){g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
         }else if(ry>=116&&ry<138){g_setup_open=1;g_app_open[APP_SETUP]=1;g_setup_step=0;wm_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);shell_append("VexOS help: help clear echo mem ver uptime ps rand specs fs explorer view notepad setup\n> ");g_start_open=0;ui_changed=1;}
+        }else if(ry>=138&&ry<162){g_start_open=0;if(g_ring3_task_started)wm_raise(APP_DOOM);else launch_ring3_task();ui_changed=1;}
       }else{g_start_open=0;ui_changed=1;}
     }
 
@@ -1686,7 +1692,7 @@ void desktop_tick(void) {
       uint32_t ix = dock_x + 16;
       uint32_t iy = sy + ((sh > icon) ? ((sh - icon) / 2u) : 0u);
 
-      for (uint32_t i = 0; i < 4; i++) {
+      for (uint32_t i = 0; i < 5; i++) {
         if (hit_test(p0.x, p0.y, (int32_t)ix, (int32_t)iy, (int32_t)icon,
                      (int32_t)icon)) {
           if (i == 0) {
@@ -1708,6 +1714,8 @@ void desktop_tick(void) {
           } else if (i == 3) {
             g_app_open[APP_NOTEPAD] = 1;
             wm_raise(APP_NOTEPAD);
+          } else if (i == 4 && g_ring3_task_started) {
+            wm_raise(APP_DOOM);
           }
           ui_changed = 1;
           break;

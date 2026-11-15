@@ -295,8 +295,9 @@ uint64_t syscall_handler(uint64_t rsp) {
         int32_t dx=0,dy=0;
         input_pointer_take_motion(&dx,&dy);
         uint32_t buttons=0;
-        if(desktop_doom_mouse_input_active()) buttons=pointer.buttons&7u;
-        else {dx=0;dy=0;}
+        if(desktop_doom_mouse_input_active()) {
+            if(desktop_doom_mouse_buttons_active()) buttons=pointer.buttons&7u;
+        } else {dx=0;dy=0;}
         frame->rax=(uint64_t)(uint16_t)clamp_mouse_axis(dx)|
                    ((uint64_t)(uint16_t)clamp_mouse_axis(dy)<<16)|
                    ((uint64_t)buttons<<32);
