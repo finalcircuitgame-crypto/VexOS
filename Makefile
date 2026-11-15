@@ -20,7 +20,16 @@ CFLAGS_EFI = -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -I$(EFI_INC)
 LDFLAGS_EFI = -nostdlib -znocombreloc -T $(EFI_LIB)/elf_x86_64_efi.lds -shared -Bsymbolic -L$(EFI_LIB) $(EFI_LIB)/crt0-efi-x86_64.o
 
 # Kernel Flags
+VEXOS_VERSION ?= 2.0.0-dev
+VEXOS_BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
 CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
+CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
+
+# Refresh the embedded Git build ID on every make invocation.
+.PHONY: FORCE_VEXOS_BUILD_ID
+FORCE_VEXOS_BUILD_ID:
+$(OBJDIR)/core/main.o: FORCE_VEXOS_BUILD_ID
 
 # Optimize CPU-side desktop/rendering and memory paths. Keep hardware drivers
 # at their existing optimization level until their MMIO/DMA paths are audited.
