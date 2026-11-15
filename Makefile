@@ -24,6 +24,7 @@ VEXOS_VERSION ?= 2.0.0-dev
 VEXOS_BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
+CFLAGS_KERNEL += -MMD -MP
 CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
 
 # Refresh the embedded Git build ID on every make invocation.
@@ -60,6 +61,8 @@ KERNEL_ASMS := $(shell find $(KERNELDIR) -name "*.s")
 # Map to object files in OBJDIR, maintaining directory structure
 KERNEL_OBJS := $(patsubst $(KERNELDIR)/%.c, $(OBJDIR)/%.o, $(KERNEL_SRCS)) \
               $(patsubst $(KERNELDIR)/%.s, $(OBJDIR)/%_asm.o, $(KERNEL_ASMS))
+KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
+-include $(KERNEL_DEPS)
 FONT_OBJ = $(OBJDIR)/font.o
 
 all: setup $(DISK_IMG) $(STORAGE_IMG)
