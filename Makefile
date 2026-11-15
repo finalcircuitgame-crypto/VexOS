@@ -28,6 +28,9 @@ $(OBJDIR)/core/desktop.o $(OBJDIR)/core/png.o $(OBJDIR)/core/jpeg.o \
 $(OBJDIR)/core/picojpeg.o $(OBJDIR)/core/simplefs.o \
 $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
+# Keep window rendering and compositor hot paths optimized.
+$(OBJDIR)/desktop/%.o: CFLAGS_KERNEL += -O2
+
 # CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
 ifeq ($(VEXOS_CI),1)
 CFLAGS_KERNEL += -DVEXOS_CI_SKIP_WIZARD -DVEXOS_CI_INPUT_TEST
