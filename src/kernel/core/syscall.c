@@ -85,7 +85,13 @@ static int sys_open(const char *filename) {
     }
 
     uint32_t size = 0;
-    if (!simplefs_file_size(name_buf, &size)) return -1;
+    if (!simplefs_file_size(name_buf, &size)) {
+        serial_print("[USERMODE] file lookup failed: ");
+        serial_print(name_buf);
+        serial_print("\\n");
+        simplefs_list();
+        return -1;
+    }
 
     // Keep zero-length files openable even if the allocator treats size 0 as
     // an invalid allocation request.
@@ -94,6 +100,9 @@ static int sys_open(const char *filename) {
 
     uint32_t out_len = 0;
     if (!simplefs_read_file(name_buf, data, size, &out_len) || out_len != size) {
+        serial_print("[USERMODE] file read failed: ");
+        serial_print(name_buf);
+        serial_print("\\n");
         kfree(data);
         return -1;
     }
