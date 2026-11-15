@@ -304,9 +304,9 @@ void desktop_user_app_exited(int faulted) {
     g_ring3_task_stack = NULL;
   }
   if (faulted)
-    shell_append("ring3: application crashed; returned to desktop\\n> ");
+    shell_append("ring3: application crashed; returned to desktop\n> ");
   else
-    shell_append("ring3: application exited\\n> ");
+    shell_append("ring3: application exited\n> ");
 }
 
 static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
