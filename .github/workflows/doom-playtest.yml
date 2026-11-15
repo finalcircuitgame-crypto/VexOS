@@ -23,7 +23,7 @@ jobs:
       - name: Install build and QEMU dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm unzip
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm xdotool unzip
 
       - name: Build VexOS and Doom
         shell: bash
@@ -160,15 +160,16 @@ jobs:
           done
           grep -Fq "[KERNEL] Starting main loop" serial.log || { cat serial.log; exit 1; }
 
-          # Capture the desktop, then issue the Doom shell command over QMP.
+          # QEMU's desktop does not start with the terminal focused. Open the
+          # terminal from its desktop shortcut before typing the Doom command.
+          # The VM framebuffer is 1280x800 inside the 1920x800 Xvfb capture.
           python3 - <<'PY'
           import json, socket, time
-          path = "/tmp/vexos-doom-qmp.sock"
-          deadline = time.time() + 15
           sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          deadline = time.time() + 15
           while True:
               try:
-                  sock.connect(path)
+                  sock.connect("/tmp/vexos-doom-qmp.sock")
                   break
               except (FileNotFoundError, ConnectionRefusedError):
                   if time.time() >= deadline: raise
@@ -177,25 +178,50 @@ jobs:
           greeting = json.loads(stream.readline())
           if "QMP" not in greeting: raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
           def command(payload):
-              sock.sendall((json.dumps(payload) + "\r\n").encode())
+              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
               while True:
                   response = json.loads(stream.readline())
                   if "return" in response: return response["return"]
                   if "error" in response: raise RuntimeError(response["error"])
           command({"execute":"qmp_capabilities"})
-          command({"execute":"screendump","arguments":{"filename":"artifacts/01-desktop.png"}})
-          for key in ["d","o","o","m","ret"]:
-              command({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":key}],"hold-time":100}})
-              time.sleep(0.3)
-          time.sleep(1)
-          command({"execute":"screendump","arguments":{"filename":"artifacts/02-doom-launching.png"}})
+          command({"execute":"screendump","arguments":{"filename":"artifacts/01-desktop.ppm"}})
           stream.close()
           sock.close()
           PY
+          ffmpeg -hide_banner -loglevel error -y -i artifacts/01-desktop.ppm artifacts/01-desktop.png
+          rm artifacts/01-desktop.ppm
+
+          # The terminal shortcut is the second desktop icon on the left.
+          xdotool mousemove --sync 44 238 click 1
+          sleep 0.75
+          xdotool type --clearmodifiers --delay 120 "doom"
+          xdotool key Return
+          sleep 1
+          python3 - <<'PY'
+          import json, socket
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          sock.connect("/tmp/vexos-doom-qmp.sock")
+          stream = sock.makefile("r", encoding="utf-8")
+          json.loads(stream.readline())
+          sock.sendall((json.dumps({"execute":"qmp_capabilities"}) + "\\r\\n").encode())
+          while True:
+              msg=json.loads(stream.readline())
+              if "return" in msg: break
+              if "error" in msg: raise RuntimeError(msg["error"])
+          sock.sendall((json.dumps({"execute":"screendump","arguments":{"filename":"artifacts/02-doom-launching.ppm"}}) + "\\r\\n").encode())
+          while True:
+              msg=json.loads(stream.readline())
+              if "return" in msg: break
+              if "error" in msg: raise RuntimeError(msg["error"])
+          stream.close()
+          sock.close()
+          PY
+          ffmpeg -hide_banner -loglevel error -y -i artifacts/02-doom-launching.ppm artifacts/02-doom-launching.png
+          rm artifacts/02-doom-launching.ppm
 
           echo "Waiting for the real Doom window and first rendered frame..."
           for i in $(seq 1 300); do
-            if grep -Fq "[DOOMWIN] First frame received from Doom" serial.log && grep -Fq "[WADDBG] LOCAL_OPEN" serial.log; then break; fi
+            if grep -Fq "[WADDBG] LOCAL_OPEN" serial.log && grep -Fq "[DOOMWIN] First frame received from Doom" serial.log; then break; fi
             sleep 0.1
           done
           grep -Fq "[DOOMWIN] Window opened and focused" serial.log
@@ -222,12 +248,18 @@ jobs:
                   if "return" in msg: return
                   if "error" in msg: raise RuntimeError(msg["error"])
           command({"execute":"qmp_capabilities"})
-          for name, delay in [("03-doom-10s.png",10),("04-doom-25s.png",15),("05-doom-40s.png",15),("06-doom-55s.png",15)]:
+          for name, delay in [("03-doom-10s.ppm",10),("04-doom-25s.ppm",15),("05-doom-40s.ppm",15),("06-doom-55s.ppm",15)]:
               time.sleep(delay)
               command({"execute":"screendump","arguments":{"filename":"artifacts/"+name}})
           stream.close(); sock.close()
           PY
+          for ppm in artifacts/03-doom-10s.ppm artifacts/04-doom-25s.ppm artifacts/05-doom-40s.ppm artifacts/06-doom-55s.ppm; do
+            png="${ppm%.ppm}.png"
+            ffmpeg -hide_banner -loglevel error -y -i "$ppm" "$png"
+            rm "$ppm"
+          done
 
+          grep -Fq "[WADDBG] LOCAL_OPEN" serial.log
           grep -Fq "[DOOMWIN] First frame received from Doom" serial.log
           printf 'Test result: PASS - VexOS booted and Doom opened with a rendered frame.\n' > artifacts/test-result.txt
           echo "DOOM playtest capture complete."
