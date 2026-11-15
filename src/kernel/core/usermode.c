@@ -271,10 +271,14 @@ int usermode_ci_self_test(void) {
 }
 #endif
 
-void usermode_launch(void) {
+void usermode_launch(const char *filename) {
     uint32_t elf_size = 0;
-    if (!simplefs_file_size("doom.elf", &elf_size) || elf_size < sizeof(Elf64_Ehdr)) {
-        serial_print("[USERMODE] doom.elf missing or too small\n");
+    if (!filename || !filename[0])
+        filename = "doom.elf";
+    if (!simplefs_file_size(filename, &elf_size) || elf_size < sizeof(Elf64_Ehdr)) {
+        serial_print("[USERMODE] executable missing or too small: ");
+        serial_print(filename);
+        serial_print("\n");
         return;
     }
 
@@ -285,7 +289,7 @@ void usermode_launch(void) {
     }
 
     uint32_t out_len = 0;
-    if (!simplefs_read_file("doom.elf", elf_data, elf_size, &out_len) ||
+    if (!simplefs_read_file(filename, elf_data, elf_size, &out_len) ||
         out_len != elf_size) {
         serial_print("[USERMODE] failed to read complete doom.elf\n");
         kfree(elf_data);

@@ -298,6 +298,7 @@ static uint8_t g_doom_frame_reported;
 static uint8_t g_doom_render_trace_done;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
+static const char *g_ring3_elf_name = "doom.elf";
 
 int desktop_doom_app_ready(void) {
   if (!doom_window_open()) {
@@ -411,7 +412,7 @@ static void draw_file_icon(uint32_t x,uint32_t y,const char *name){
 }
 
 static void ring3_task_entry(void) {
-  usermode_launch();
+  usermode_launch(g_ring3_elf_name);
 
   // On success usermode_launch transfers to ring 3 and never returns. A
   // return means the loader rejected the image or failed before the switch.
@@ -421,9 +422,12 @@ static void ring3_task_entry(void) {
   }
 }
 
-static void launch_ring3_task(void) {
+static void launch_ring3_task(const char *filename) {
   if (g_ring3_task_started)
     return;
+  if (!filename || !filename[0])
+    filename = "doom.elf";
+  g_ring3_elf_name = filename;
   g_ring3_task_started = 1;
 
   if (!simplefs_init()) {
@@ -433,8 +437,10 @@ static void launch_ring3_task(void) {
   }
 
   uint32_t elf_size = 0;
-  if (!simplefs_file_size("doom.elf", &elf_size) || elf_size == 0) {
-    shell_append("ring3: doom.elf not found\n");
+  if (!simplefs_file_size(filename, &elf_size) || elf_size == 0) {
+    shell_append("ring3: executable not found: ");
+    shell_append(filename);
+    shell_append("\n");
     g_ring3_task_started = 0;
     return;
   }
@@ -968,10 +974,17 @@ static void shell_run_line(void) {
 #ifdef VEXOS_CI_INPUT_TEST
     serial_print("[CI] Shell specs command executed\n");
 #endif
-  } else if ((g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) ||
-             (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4))) {
+  } else if (g_shell_line_len == 5 && streq_n(g_shell_line, "ring3", 5)) {
+#ifdef VEXOS_CI_INPUT_TEST
+    shell_append("launching ci-ring3.elf...\n");
+    launch_ring3_task("ci-ring3.elf");
+#else
     shell_append("launching doom.elf...\n");
-    launch_ring3_task();
+    launch_ring3_task("doom.elf");
+#endif
+  } else if (g_shell_line_len == 4 && streq_n(g_shell_line, "doom", 4)) {
+    shell_append("launching doom.elf...\n");
+    launch_ring3_task("doom.elf");
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
     shell_append("mounting fs...\n");
     if (simplefs_init()) {
@@ -1550,7 +1563,7 @@ void desktop_tick(void) {
         }else if(ry>=72&&ry<94){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
         }else if(ry>=94&&ry<116){g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
         }else if(ry>=116&&ry<138){g_setup_open=1;g_app_open[APP_SETUP]=1;g_setup_step=0;wm_raise(APP_SETUP);g_start_open=0;ui_changed=1;
-        }else if(ry>=138&&ry<162){g_start_open=0;if(g_ring3_task_started)wm_raise(APP_DOOM);else launch_ring3_task();ui_changed=1;}
+        }else if(ry>=138&&ry<162){g_start_open=0;if(g_ring3_task_started)wm_raise(APP_DOOM);else launch_ring3_task("doom.elf");ui_changed=1;}
       }else{g_start_open=0;ui_changed=1;}
     }
 

@@ -353,7 +353,7 @@ static void ci_install_ring3_elf_fixture(void) {
   for (uint32_t i = 0; i < message_len; i++)
     image[0x1000u + data_offset + i] = (uint8_t)message[i];
 
-  if (!simplefs_write_file("doom.elf", image, file_size))
+  if (!simplefs_write_file("ci-ring3.elf", image, file_size))
     ci_memory_test_fail("write ring3 ELF fixture to SimpleFS");
   serial_print("[CI] Valid ring3 ELF fixture installed in SimpleFS\\n");
 }

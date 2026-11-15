@@ -317,6 +317,13 @@ jobs:
               ["v", "e", "x"],
           ]
           for sequence in sequences:
+              baseline_serial = ""
+              if sequence == ["d", "o", "o", "m", "ret"]:
+                  try:
+                      with open("serial.log", encoding="utf-8", errors="replace") as log:
+                          baseline_serial = log.read()
+                  except OSError:
+                      baseline_serial = ""
               for key in sequence:
                   command({
                       "execute": "send-key",
@@ -332,18 +339,32 @@ jobs:
                   time.sleep(1.5)
               if sequence == ["d", "o", "o", "m", "ret"]:
                   # Verify the real Doom process, not the synthetic CI framebuffer pixel.
-                  required = ("[WADDBG] LOCAL_OPEN", "[DOOMWIN] First frame received from Doom")
+                  required = (
+                      "[DOOMWIN] Window opened and focused",
+                      "[WADDBG] LOCAL_OPEN",
+                      "[DOOMWIN] First frame received from Doom",
+                  )
                   deadline = time.time() + 30
+                  serial = ""
+                  serial_delta = ""
                   while time.time() < deadline:
                       try:
-                          serial = open("serial.log", encoding="utf-8", errors="replace").read()
+                          with open("serial.log", encoding="utf-8", errors="replace") as log:
+                              serial = log.read()
                       except OSError:
                           serial = ""
-                      if all(marker in serial for marker in required):
+                      serial_delta = (
+                          serial[len(baseline_serial):]
+                          if serial.startswith(baseline_serial) else serial
+                      )
+                      if all(marker in serial_delta for marker in required):
                           break
                       time.sleep(0.1)
                   else:
-                      raise RuntimeError("Real Doom did not load Freedoom and submit a frame.\\n" + serial[-12000:])
+                      raise RuntimeError(
+                          "Real Doom did not open Freedoom and submit a fresh frame.\\n"
+                          + serial_delta[-12000:]
+                      )
                   time.sleep(2.0)
                   command({"execute": "screendump", "arguments": {"filename": "artifacts/04-doom.png"}})
                   # Close Doom through its window control so desktop tests can continue.
