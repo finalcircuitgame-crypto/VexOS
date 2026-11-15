@@ -21,8 +21,23 @@ void Task_Init() {
 }
 
 void Task_Create(void (*entry)(), void *stack_top) {
-  if (!entry || !stack_top || task_count >= 10)
+  if (!entry || !stack_top)
     return;
+
+  /* Reuse a completed task slot so repeatedly launching and crashing an
+     application does not exhaust the fixed scheduler table. */
+  int slot = -1;
+  for (int i = 1; i < task_count; ++i) {
+    if (!tasks[i].active) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot < 0) {
+    if (task_count >= 10)
+      return;
+    slot = task_count++;
+  }
 
   // The interrupt stub restores 15 GPRs, then executes IRETQ.
   // In 64-bit mode the IRET frame includes RIP, CS, RFLAGS, RSP and SS.
@@ -44,9 +59,8 @@ void Task_Create(void (*entry)(), void *stack_top) {
     *(--stack) = 0;
   }
 
-  tasks[task_count].rsp = (uint64_t)stack;
-  tasks[task_count].active = 1;
-  task_count++;
+  tasks[slot].rsp = (uint64_t)stack;
+  tasks[slot].active = 1;
 }
 
 
