@@ -63,6 +63,11 @@ KERNEL_OBJS := $(patsubst $(KERNELDIR)/%.c, $(OBJDIR)/%.o, $(KERNEL_SRCS)) \
               $(patsubst $(KERNELDIR)/%.s, $(OBJDIR)/%_asm.o, $(KERNEL_ASMS))
 KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
 -include $(KERNEL_DEPS)
+
+# The Makefile controls compiler flags and dependency generation. Rebuild the
+# existing objects once so every kernel translation unit gains a .d file.
+$(KERNEL_OBJS): Makefile
+
 FONT_OBJ = $(OBJDIR)/font.o
 
 all: setup $(DISK_IMG) $(STORAGE_IMG)
