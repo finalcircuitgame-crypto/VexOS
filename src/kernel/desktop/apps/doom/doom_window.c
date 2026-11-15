@@ -96,6 +96,5 @@ void doom_window_draw(void){
  if(dh>(uint32_t)ch){dh=(uint32_t)ch;dw=(uint32_t)(((uint64_t)dh*frame_w)/frame_h);}
  if(!dw||!dh)return;
  uint32_t dx=(uint32_t)cx+((uint32_t)cw-dw)/2u,dy=(uint32_t)cy+((uint32_t)ch-dh)/2u;
- for(uint32_t row=0;row<dh;row++){uint32_t sy=(uint32_t)(((uint64_t)row*frame_h)/dh);
-  for(uint32_t col=0;col<dw;col++){uint32_t sx=(uint32_t)(((uint64_t)col*frame_w)/dw);gfx_put_pixel(dx+col,dy+row,framebuffer[sy*DOOM_W+sx]);}}
+ gfx_blit_scaled(framebuffer,frame_w,frame_h,DOOM_W,dx,dy,dw,dh);
 }

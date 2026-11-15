@@ -3,16 +3,11 @@
 static BootInfo *g_boot_info;
 static uint32_t *g_backbuffer;
 static const uint8_t *g_font;
+static gfx_rect_t g_clip_stack[GFX_CLIP_STACK_MAX];
+static uint32_t g_clip_depth;
 
-void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font) {
-  g_boot_info = boot_info;
-  g_backbuffer = backbuffer;
-  g_font = font;
-}
-
-void gfx_set_backbuffer(uint32_t *backbuffer) {
-  g_backbuffer = backbuffer;
-}
+static uint32_t gfx_min_u32(uint32_t a, uint32_t b) { return a < b ? a : b; }
+static uint32_t gfx_max_u32(uint32_t a, uint32_t b) { return a > b ? a : b; }
 
 static uint32_t *gfx_target(void) {
   if (!g_boot_info)
@@ -20,99 +15,244 @@ static uint32_t *gfx_target(void) {
   return g_backbuffer ? g_backbuffer : g_boot_info->framebuffer;
 }
 
-void gfx_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
-  if (!g_boot_info || x >= g_boot_info->width || y >= g_boot_info->height)
-    return;
-  uint32_t *dst = gfx_target();
-  if (dst)
-    dst[y * g_boot_info->pitch + x] = color;
-}
-
-void gfx_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color) {
-  if (!g_boot_info || x >= g_boot_info->width || y >= g_boot_info->height)
-    return;
-  uint32_t x2 = x + width, y2 = y + height;
-  if (x2 < x || x2 > g_boot_info->width) x2 = g_boot_info->width;
-  if (y2 < y || y2 > g_boot_info->height) y2 = g_boot_info->height;
-  uint32_t *dst = gfx_target();
-  if (!dst) return;
-  for (uint32_t yy = y; yy < y2; ++yy) {
-    uint32_t *row = &dst[yy * g_boot_info->pitch];
-    for (uint32_t xx = x; xx < x2; ++xx) row[xx] = color;
+static gfx_rect_t gfx_screen_rect(void) {
+  gfx_rect_t r = {0, 0, 0, 0};
+  if (g_boot_info) {
+    r.width = g_boot_info->width;
+    r.height = g_boot_info->height;
   }
+  return r;
 }
 
-static uint32_t blend_rgb(uint32_t dst, uint32_t src, uint8_t alpha) {
+static gfx_rect_t gfx_intersect(gfx_rect_t a, gfx_rect_t b) {
+  uint32_t ax2 = a.x + a.width;
+  uint32_t ay2 = a.y + a.height;
+  uint32_t bx2 = b.x + b.width;
+  uint32_t by2 = b.y + b.height;
+  if (ax2 < a.x) ax2 = UINT32_MAX;
+  if (ay2 < a.y) ay2 = UINT32_MAX;
+  if (bx2 < b.x) bx2 = UINT32_MAX;
+  if (by2 < b.y) by2 = UINT32_MAX;
+
+  uint32_t x1 = gfx_max_u32(a.x, b.x);
+  uint32_t y1 = gfx_max_u32(a.y, b.y);
+  uint32_t x2 = gfx_min_u32(ax2, bx2);
+  uint32_t y2 = gfx_min_u32(ay2, by2);
+  gfx_rect_t out = {x1, y1, x2 > x1 ? x2 - x1 : 0,
+                    y2 > y1 ? y2 - y1 : 0};
+  return out;
+}
+
+static gfx_rect_t gfx_current_clip(void) {
+  return g_clip_depth ? g_clip_stack[g_clip_depth - 1u] : gfx_screen_rect();
+}
+
+static uint32_t gfx_blend_rgb(uint32_t dst, uint32_t src, uint8_t alpha) {
   uint32_t inv = 255u - (uint32_t)alpha;
-  uint32_t r = (((dst >> 16) & 255u) * inv + ((src >> 16) & 255u) * alpha) / 255u;
-  uint32_t g = (((dst >> 8) & 255u) * inv + ((src >> 8) & 255u) * alpha) / 255u;
+  uint32_t r = (((dst >> 16) & 255u) * inv +
+                ((src >> 16) & 255u) * alpha) / 255u;
+  uint32_t g = (((dst >> 8) & 255u) * inv +
+                ((src >> 8) & 255u) * alpha) / 255u;
   uint32_t b = ((dst & 255u) * inv + (src & 255u) * alpha) / 255u;
   return (r << 16) | (g << 8) | b;
 }
 
-void gfx_blend_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color, uint8_t alpha) {
-  if (!g_boot_info || !alpha || x >= g_boot_info->width || y >= g_boot_info->height)
+void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font) {
+  g_boot_info = boot_info;
+  g_backbuffer = backbuffer;
+  g_font = font;
+  g_clip_depth = 0;
+}
+
+void gfx_set_backbuffer(uint32_t *backbuffer) { g_backbuffer = backbuffer; }
+void gfx_reset_clip(void) { g_clip_depth = 0; }
+
+int gfx_push_clip(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+  if (g_clip_depth >= GFX_CLIP_STACK_MAX)
+    return 0;
+  gfx_rect_t requested = {x, y, width, height};
+  gfx_rect_t parent = gfx_current_clip();
+  g_clip_stack[g_clip_depth++] = gfx_intersect(parent, requested);
+  return 1;
+}
+
+void gfx_pop_clip(void) {
+  if (g_clip_depth)
+    --g_clip_depth;
+}
+
+void gfx_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
+  if (!g_boot_info || x >= g_boot_info->width || y >= g_boot_info->height)
     return;
-  uint32_t x2 = x + width, y2 = y + height;
-  if (x2 < x || x2 > g_boot_info->width) x2 = g_boot_info->width;
-  if (y2 < y || y2 > g_boot_info->height) y2 = g_boot_info->height;
+  gfx_rect_t clip = gfx_current_clip();
+  if (x < clip.x || y < clip.y || x - clip.x >= clip.width ||
+      y - clip.y >= clip.height)
+    return;
   uint32_t *dst = gfx_target();
-  if (!dst) return;
-  for (uint32_t yy = y; yy < y2; ++yy) {
+  if (dst)
+    dst[y * g_boot_info->pitch + x] = color & 0x00FFFFFFu;
+}
+
+void gfx_blend_pixel(uint32_t x, uint32_t y, uint32_t color, uint8_t alpha) {
+  if (!alpha || !g_boot_info || x >= g_boot_info->width ||
+      y >= g_boot_info->height)
+    return;
+  gfx_rect_t clip = gfx_current_clip();
+  if (x < clip.x || y < clip.y || x - clip.x >= clip.width ||
+      y - clip.y >= clip.height)
+    return;
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
+  uint32_t *pixel = &dst[y * g_boot_info->pitch + x];
+  *pixel = gfx_blend_rgb(*pixel, color, alpha);
+}
+
+static int gfx_clip_bounds(uint32_t x, uint32_t y, uint32_t width,
+                           uint32_t height, uint32_t *x1, uint32_t *y1,
+                           uint32_t *x2, uint32_t *y2) {
+  if (!g_boot_info || !width || !height)
+    return 0;
+  uint32_t right = x + width;
+  uint32_t bottom = y + height;
+  if (right < x) right = UINT32_MAX;
+  if (bottom < y) bottom = UINT32_MAX;
+  gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
+  *x1 = gfx_max_u32(x, clip.x);
+  *y1 = gfx_max_u32(y, clip.y);
+  *x2 = gfx_min_u32(right, clip.x + clip.width);
+  *y2 = gfx_min_u32(bottom, clip.y + clip.height);
+  return *x1 < *x2 && *y1 < *y2;
+}
+
+void gfx_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                   uint32_t color) {
+  uint32_t x1, y1, x2, y2;
+  if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
+    return;
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
+  color &= 0x00FFFFFFu;
+  for (uint32_t yy = y1; yy < y2; ++yy) {
     uint32_t *row = &dst[yy * g_boot_info->pitch];
-    for (uint32_t xx = x; xx < x2; ++xx) row[xx] = blend_rgb(row[xx], color, alpha);
+    for (uint32_t xx = x1; xx < x2; ++xx)
+      row[xx] = color;
   }
 }
 
-void gfx_blend_round_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t radius, uint32_t color, uint8_t alpha) {
-  if (!g_boot_info || !alpha || x >= g_boot_info->width || y >= g_boot_info->height)
+void gfx_blend_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                    uint32_t color, uint8_t alpha) {
+  uint32_t x1, y1, x2, y2;
+  if (!alpha || !gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
     return;
-  if (!radius) { gfx_blend_rect(x, y, width, height, color, alpha); return; }
-  uint32_t x2 = x + width, y2 = y + height;
-  if (x2 < x || x2 > g_boot_info->width) x2 = g_boot_info->width;
-  if (y2 < y || y2 > g_boot_info->height) y2 = g_boot_info->height;
-  uint32_t rr = radius * radius;
   uint32_t *dst = gfx_target();
-  if (!dst) return;
-  for (uint32_t yy = y; yy < y2; ++yy) {
+  if (!dst)
+    return;
+  for (uint32_t yy = y1; yy < y2; ++yy) {
     uint32_t *row = &dst[yy * g_boot_info->pitch];
-    for (uint32_t xx = x; xx < x2; ++xx) {
-      uint32_t inside = 1;
-      if (xx < x + radius && yy < y + radius) {
-        int32_t dx=(int32_t)xx-(int32_t)(x+radius), dy=(int32_t)yy-(int32_t)(y+radius);
-        inside=(uint32_t)(dx*dx+dy*dy)<=rr;
-      } else if (xx >= x2-radius && yy < y+radius) {
-        int32_t dx=(int32_t)xx-(int32_t)(x2-radius-1u), dy=(int32_t)yy-(int32_t)(y+radius);
-        inside=(uint32_t)(dx*dx+dy*dy)<=rr;
-      } else if (xx < x+radius && yy >= y2-radius) {
-        int32_t dx=(int32_t)xx-(int32_t)(x+radius), dy=(int32_t)yy-(int32_t)(y2-radius-1u);
-        inside=(uint32_t)(dx*dx+dy*dy)<=rr;
-      } else if (xx >= x2-radius && yy >= y2-radius) {
-        int32_t dx=(int32_t)xx-(int32_t)(x2-radius-1u), dy=(int32_t)yy-(int32_t)(y2-radius-1u);
-        inside=(uint32_t)(dx*dx+dy*dy)<=rr;
-      }
-      if (inside) row[xx]=blend_rgb(row[xx],color,alpha);
+    for (uint32_t xx = x1; xx < x2; ++xx)
+      row[xx] = gfx_blend_rgb(row[xx], color, alpha);
+  }
+}
+
+void gfx_blend_round_rect(uint32_t x, uint32_t y, uint32_t width,
+                          uint32_t height, uint32_t radius, uint32_t color,
+                          uint8_t alpha) {
+  uint32_t x1, y1, x2, y2;
+  if (!alpha || !gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
+    return;
+  if (!radius) {
+    gfx_blend_rect(x, y, width, height, color, alpha);
+    return;
+  }
+  uint32_t limit = gfx_min_u32(width, height) / 2u;
+  if (radius > limit) radius = limit;
+  uint32_t left = x + radius;
+  uint32_t right = x + width - radius - 1u;
+  uint32_t top = y + radius;
+  uint32_t bottom = y + height - radius - 1u;
+  int64_t rr = (int64_t)radius * radius;
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
+  for (uint32_t yy = y1; yy < y2; ++yy) {
+    uint32_t *row = &dst[yy * g_boot_info->pitch];
+    for (uint32_t xx = x1; xx < x2; ++xx) {
+      int64_t dx = 0, dy = 0;
+      if (xx < left) dx = (int64_t)left - xx;
+      else if (xx > right) dx = (int64_t)xx - right;
+      if (yy < top) dy = (int64_t)top - yy;
+      else if (yy > bottom) dy = (int64_t)yy - bottom;
+      if (dx * dx + dy * dy <= rr)
+        row[xx] = gfx_blend_rgb(row[xx], color, alpha);
     }
   }
 }
 
-void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character, uint32_t foreground) {
-  if (!g_font) return;
-  const uint8_t *glyph = &g_font[(uint32_t)character * 8u];
-  for (uint32_t gy=0; gy<8u; ++gy) {
-    uint8_t row=glyph[gy];
-    for (uint32_t gx=0; gx<8u; ++gx)
-      if (row & (uint8_t)(1u << (7u-gx))) gfx_put_pixel(x+gx,y+gy,foreground);
+void gfx_draw_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+                   uint32_t color) {
+  int32_t dx = x1 >= x0 ? x1 - x0 : x0 - x1;
+  int32_t sx = x0 < x1 ? 1 : -1;
+  int32_t dy = y1 >= y0 ? y0 - y1 : y1 - y0;
+  int32_t sy = y0 < y1 ? 1 : -1;
+  int32_t error = dx + dy;
+  for (;;) {
+    if (x0 >= 0 && y0 >= 0)
+      gfx_put_pixel((uint32_t)x0, (uint32_t)y0, color);
+    if (x0 == x1 && y0 == y1)
+      break;
+    int32_t twice = error * 2;
+    if (twice >= dy) { error += dy; x0 += sx; }
+    if (twice <= dx) { error += dx; y0 += sy; }
   }
 }
 
-void gfx_draw_string(uint32_t x, uint32_t y, const char *text, uint32_t foreground) {
-  uint32_t cx=x;
+void gfx_blit_scaled(const uint32_t *source, uint32_t source_width,
+                     uint32_t source_height, uint32_t source_stride,
+                     uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+  if (!source || !source_width || !source_height ||
+      source_stride < source_width || !width || !height)
+    return;
+  uint32_t x1, y1, x2, y2;
+  if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
+    return;
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
+  for (uint32_t dy = y1; dy < y2; ++dy) {
+    uint32_t sy = (uint32_t)(((uint64_t)(dy - y) * source_height) / height);
+    uint32_t *out = &dst[dy * g_boot_info->pitch];
+    const uint32_t *in = &source[sy * source_stride];
+    for (uint32_t dx = x1; dx < x2; ++dx) {
+      uint32_t sx = (uint32_t)(((uint64_t)(dx - x) * source_width) / width);
+      out[dx] = in[sx] & 0x00FFFFFFu;
+    }
+  }
+}
+
+void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
+                    uint32_t foreground) {
+  if (!g_font)
+    return;
+  const uint8_t *glyph = &g_font[(uint32_t)character * 8u];
+  for (uint32_t gy = 0; gy < 8u; ++gy) {
+    uint8_t row = glyph[gy];
+    for (uint32_t gx = 0; gx < 8u; ++gx) {
+      if (row & (uint8_t)(1u << (7u - gx)))
+        gfx_put_pixel(x + gx, y + gy, foreground);
+    }
+  }
+}
+
+void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
+                     uint32_t foreground) {
+  uint32_t cx = x;
   while (text && *text) {
-    char ch=*text++;
-    if (ch=='\n') { y+=8u; cx=x; continue; }
-    if (ch=='\t') { cx+=32u; continue; }
-    gfx_draw_glyph(cx,y,(uint8_t)ch,foreground);
-    cx+=8u;
+    char ch = *text++;
+    if (ch == '\n') { y += 8u; cx = x; continue; }
+    if (ch == '\t') { cx += 32u; continue; }
+    gfx_draw_glyph(cx, y, (uint8_t)ch, foreground);
+    cx += 8u;
   }
 }
