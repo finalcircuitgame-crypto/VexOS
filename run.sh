@@ -157,8 +157,8 @@ if [ ! -f build/OVMF_VARS_4M.fd ]; then
     cp "$OVMF_VARS_TEMPLATE" build/OVMF_VARS_4M.fd
 fi
 
+# Use the pc machine's legacy primary IDE ports for the SimpleFS PIO disk.
 qemu-system-x86_64 \
-    # The normal desktop storage path uses legacy primary-channel IDE PIO.
     -machine pc \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
