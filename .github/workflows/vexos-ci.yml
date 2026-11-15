@@ -485,18 +485,16 @@ jobs:
                           + open("serial.log", encoding="utf-8", errors="replace").read()[-6000:]
                       )
                   time.sleep(0.2)
+                  # Keep the press active until the desktop consumes it. A short
+                  # pulse can be missed while the Ring-3 Doom task is busy.
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": True}}
                   ]}})
-                  time.sleep(0.1)
-                  command({"execute": "input-send-event", "arguments": {"events": [
-                      {"type": "btn", "data": {"button": "left", "down": False}}
-                  ]}})
-                  command({"execute": "screendump", "arguments": {"filename": "artifacts/05-close-attempt.png"}})
-                  close_deadline = time.time() + 5
+                  click_deadline = time.time() + 3
                   close_serial = ""
                   close_delta = ""
-                  while time.time() < close_deadline:
+                  close_hit = False
+                  while time.time() < click_deadline:
                       try:
                           with open("serial.log", encoding="utf-8", errors="replace") as log:
                               close_serial = log.read()
@@ -506,13 +504,36 @@ jobs:
                           close_serial[len(close_baseline):]
                           if close_serial.startswith(close_baseline) else close_serial
                       )
-                      if ("[DOOMWIN] Close button hit" in close_delta and
-                              "[USERMODE] exiting ring3" in close_delta):
+                      if "[DOOMWIN] Close button hit" in close_delta:
+                          close_hit = True
+                          break
+                      time.sleep(0.05)
+                  command({"execute": "input-send-event", "arguments": {"events": [
+                      {"type": "btn", "data": {"button": "left", "down": False}}
+                  ]}})
+                  command({"execute": "screendump", "arguments": {"filename": "artifacts/05-close-attempt.png"}})
+                  if not close_hit:
+                      raise RuntimeError(
+                          "Doom close press was not consumed by the close handler.\\n"
+                          + close_delta[-6000:]
+                      )
+                  exit_deadline = time.time() + 5
+                  while time.time() < exit_deadline:
+                      try:
+                          with open("serial.log", encoding="utf-8", errors="replace") as log:
+                              close_serial = log.read()
+                      except OSError:
+                          close_serial = ""
+                      close_delta = (
+                          close_serial[len(close_baseline):]
+                          if close_serial.startswith(close_baseline) else close_serial
+                      )
+                      if "[USERMODE] exiting ring3" in close_delta:
                           break
                       time.sleep(0.05)
                   else:
                       raise RuntimeError(
-                          "Doom close click did not reach the close handler and exit ring 3.\\n"
+                          "Doom close handler ran, but Ring 3 did not exit.\\n"
                           + close_delta[-6000:]
                       )
                   time.sleep(0.5)

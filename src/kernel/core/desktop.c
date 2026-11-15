@@ -1465,8 +1465,19 @@ void desktop_tick(void) {
     return;
 
   static uint32_t prev_buttons = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+  static uint32_t ci_doom_buttons = UINT32_MAX;
+#endif
   input_pointer_state_t p0 = input_pointer_get();
   g_last_ptr = p0;
+#ifdef VEXOS_CI_INPUT_TEST
+  if (g_app_open[APP_DOOM] && p0.buttons != ci_doom_buttons) {
+    ci_doom_buttons = p0.buttons;
+    serial_print((p0.buttons & 1u)
+        ? "[CI] Doom left mouse button down reached desktop_tick\n"
+        : "[CI] Doom left mouse button up reached desktop_tick\n");
+  }
+#endif
 #ifdef VEXOS_CI_INPUT_TEST
   if (g_app_open[APP_DOOM] && !g_doom_close_pointer_reported &&
       p0.x >= (int32_t)g_bi->width - 32 && p0.y >= 0 && p0.y <= 32) {
