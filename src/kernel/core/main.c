@@ -628,8 +628,6 @@ static void ci_framebuffer_syscall_self_test(void) {
   syscall_handler((uint64_t)(uintptr_t)&frame);
 
   if (frame.rax != 0)
-    ci_memory_test_fail("framebuffer syscall rejected valid 1x1 frame");
-  if (frame.rax != 0)
     ci_memory_test_fail("framebuffer syscall rejected active Doom surface");
 
   if (!VMM_UnmapPage(user_pixel, 1) ||
