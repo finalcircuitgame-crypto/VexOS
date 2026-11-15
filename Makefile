@@ -135,9 +135,16 @@ $(DOOMOBJDIR)/%.o: $(DOOMDIR)/%.c
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
 
 # Instrument the WAD directory loader without modifying the upstream submodule.
-$(DOOMOBJDIR)/w_wad.o: $(DOOMDIR)/w_wad.c tools/instrument_doom_wad.py
+# FORCE ensures a stale pre-instrumentation object can never be linked silently.
+.PHONY: FORCE_DOOM_WAD_DIAG
+FORCE_DOOM_WAD_DIAG:
+$(DOOMOBJDIR)/w_wad.o: FORCE_DOOM_WAD_DIAG $(DOOMDIR)/w_wad.c tools/instrument_doom_wad.py
 	@mkdir -p $(DOOMOBJDIR)
-	python3 tools/instrument_doom_wad.py --source $< --output $(DOOMOBJDIR)/w_wad_instrumented.c
+	python3 tools/instrument_doom_wad.py --source $(DOOMDIR)/w_wad.c --output $(DOOMOBJDIR)/w_wad_instrumented.c
+	@grep -q 'VEXOS_WAD_DIAG_ASSIGN' $(DOOMOBJDIR)/w_wad_instrumented.c || (echo "[WADDBG] missing ASSIGN instrumentation" >&2; exit 1)
+	@grep -q 'VEXOS_WAD_DIAG_AFTER_FREE' $(DOOMOBJDIR)/w_wad_instrumented.c || (echo "[WADDBG] missing AFTER_FREE instrumentation" >&2; exit 1)
+	@grep -q 'VEXOS_WAD_DIAG_READ' $(DOOMOBJDIR)/w_wad_instrumented.c || (echo "[WADDBG] missing READ instrumentation" >&2; exit 1)
+	@echo "[WADDBG] compiling instrumented w_wad.c"
 	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/w_wad_instrumented.c -o $@
 
 $(DOOMOBJDIR)/doomgeneric_vexos.o: $(SRCDIR)/usermode/doom/doomgeneric_vexos.c
