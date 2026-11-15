@@ -30,7 +30,7 @@ def inject(source: str) -> str:
     assign_diag = f"""
         {ASSIGN_MARKER}
         if (i == 410u) {{
-            printf("[WADDBG] ASSIGN lump=%u entry=%p wad=%p class=%p pos=%d size=%d\\\\n",
+            printf("[WADDBG] ASSIGN lump=%u entry=%p wad=%p class=%p pos=%d size=%d\\n",
                    i, (void *)lump_p, (void *)lump_p->wad_file,
                    (void *)(lump_p->wad_file ? lump_p->wad_file->file_class : NULL),
                    lump_p->position, lump_p->size);
@@ -48,7 +48,7 @@ def inject(source: str) -> str:
     {AFTER_FREE_MARKER}
     if (numlumps > 410u) {{
         wad_file_t *debug_wad = lumpinfo[410].wad_file;
-        printf("[WADDBG] AFTER_FREE lump=410 entry=%p wad=%p class=%p pos=%d size=%d\\\\n",
+        printf("[WADDBG] AFTER_FREE lump=410 entry=%p wad=%p class=%p pos=%d size=%d\\n",
                (void *)&lumpinfo[410], (void *)debug_wad,
                (void *)(debug_wad ? debug_wad->file_class : NULL),
                lumpinfo[410].position, lumpinfo[410].size);
@@ -66,7 +66,7 @@ def inject(source: str) -> str:
     {READ_MARKER}
     if (lump == 410u) {{
         wad_file_t *debug_wad = l->wad_file;
-        printf("[WADDBG] READ lump=%u directory=%p entry=%p wad=%p class=%p pos=%d size=%d\\\\n",
+        printf("[WADDBG] READ lump=%u directory=%p entry=%p wad=%p class=%p pos=%d size=%d\\n",
                lump, (void *)lumpinfo, (void *)l, (void *)debug_wad,
                (void *)(debug_wad ? debug_wad->file_class : NULL),
                l->position, l->size);
