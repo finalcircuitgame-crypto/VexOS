@@ -13,6 +13,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef VEXOS_VERSION
+#define VEXOS_VERSION "2.0.0-dev"
+#endif
+#ifndef VEXOS_BUILD_ID
+#define VEXOS_BUILD_ID "unknown"
+#endif
+
 // Defined in other files
 void ConsoleInit(BootInfo *bootInfo);
 void PrintString(const char *str, uint32_t color);
@@ -617,6 +624,7 @@ static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
   serial_print("[KERNEL] Entered kernel_main\n");
+  serial_print("[VexOS] Version " VEXOS_VERSION " | build " VEXOS_BUILD_ID "\\n");
   serial_print("[KERNEL] BUILD: xhci-portscan-v2\n");
   // ... Console, PMM, VMM init ...
   serial_print("[KERNEL] Calling ConsoleInit...\n");
@@ -630,6 +638,7 @@ void kernel_main(BootInfo *bootInfo) {
   }
 
   PrintString("Tiny64 Kernel Loaded!\n", 0xFFFFFF);
+  PrintString("VexOS " VEXOS_VERSION " (" VEXOS_BUILD_ID ")\n", 0xFFFFFF);
   serial_print("[KERNEL] Setting up GDT...\n");
   SetupGDT();
   // Setup TSS/IST so hardware IRQs can run on a dedicated interrupt stack.
@@ -959,7 +968,9 @@ void kernel_main(BootInfo *bootInfo) {
         // only once per rendered frame. This keeps input latency near 1 ms
         // while the desktop renderer remains frame-rate limited.
         xhci_poll_events();
-        desktop_tick();
+        // Desktop rendering stays on the frame cadence below. Calling
+        // desktop_tick() here used to repaint the full scene on every PIT
+        // wakeup (up to 1000 times/second), starving window interaction.
       }
     }
     last_frame_ticks = Timer_Ticks();
