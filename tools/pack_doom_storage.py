@@ -90,7 +90,7 @@ def main():
                 count += 1
             entries[slot] = (1, name, start, len(data))
             next_lba += sectors
-            print(f"Packed {name}: {len(data):,} bytes at LBA {start}")
+            print(f"Packed {name}: {len(data):,} bytes at LBA {start} (table slot {slot})")
 
         image.seek(table_lba * SECTOR)
         image.write(table)
