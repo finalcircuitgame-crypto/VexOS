@@ -262,13 +262,16 @@ void gfx_blit_scaled(const uint32_t *source, uint32_t source_width,
   const uint64_t sx_step_rem = source_width % width;
   const uint32_t sy_step = source_height / height;
   const uint64_t sy_step_rem = source_height % height;
+  const uint64_t x_start = (uint64_t)(x1 - x) * source_width;
+  const uint32_t sx_start = (uint32_t)(x_start / width);
+  const uint64_t sx_start_rem = x_start % width;
   const uint64_t y_start = (uint64_t)(y1 - y) * source_height;
   uint32_t sy = (uint32_t)(y_start / height);
   uint64_t sy_rem = y_start % height;
 
   for (uint32_t dy = y1; dy < y2; ++dy) {
-    uint32_t sx = (uint32_t)(((uint64_t)(x1 - x) * source_width) / width);
-    uint64_t sx_rem = ((uint64_t)(x1 - x) * source_width) % width;
+    uint32_t sx = sx_start;
+    uint64_t sx_rem = sx_start_rem;
     uint32_t *out = &dst[dy * g_boot_info->pitch];
     const uint32_t *in = &source[sy * source_stride];
 
