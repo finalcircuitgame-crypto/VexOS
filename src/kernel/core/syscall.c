@@ -279,7 +279,8 @@ uint64_t syscall_handler(uint64_t rsp) {
         frame->rax = desktop_doom_app_ready() ? 0u : (uint64_t)-1;
         break;
     case 10: {
-        /* The kernel desktop task owns xHCI event-ring polling. */
+        /* int 0x80 is an interrupt gate: this poll cannot be preempted by PIT. */
+        xhci_poll_events();
         input_kbd_event_t event;
         if(!desktop_doom_input_active()) {
             frame->rax=0;
@@ -295,7 +296,8 @@ uint64_t syscall_handler(uint64_t rsp) {
         break;
     }
     case 12: {
-        /* Read the input state collected by the desktop task's xHCI poll. */
+        /* int 0x80 is an interrupt gate: this poll cannot be preempted by PIT. */
+        xhci_poll_events();
         input_pointer_state_t pointer=input_pointer_get();
         int32_t dx=0,dy=0;
         input_pointer_take_motion(&dx,&dy);
@@ -322,6 +324,10 @@ uint64_t syscall_handler(uint64_t rsp) {
         } else {
             desktop_draw_frame((const uint32_t *)(uintptr_t)frame->rdi,
                                (uint32_t)w, (uint32_t)h);
+            /* Present the submitted frame through the normal desktop compositor.
+               This syscall runs with interrupts disabled, so desktop state cannot
+               be re-entered by the PIT scheduler while it is being updated. */
+            desktop_tick();
             frame->rax = 0;
         }
         break;

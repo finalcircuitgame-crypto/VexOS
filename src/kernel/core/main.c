@@ -13,6 +13,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* xHCI polling is shared by the desktop and user-mode input syscalls.
+   Keep the event-ring walk atomic against the PIT task switch. */
+static void xhci_poll_events_atomic(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq\n\tcli\n\tpopq %0"
+                   : "=r"(flags) :: "memory");
+  xhci_poll_events();
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
 #ifndef VEXOS_VERSION
 #define VEXOS_VERSION "2.0.0-dev"
 #endif
@@ -947,8 +958,8 @@ void kernel_main(BootInfo *bootInfo) {
       ci_task_runtime_reported = 1;
     }
 #endif
-    // Keep xHCI polling frequent so mouse/keyboard remain responsive
-    xhci_poll_events();
+    // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
+    xhci_poll_events_atomic();
 
     // Run desktop tick
     desktop_tick();
@@ -967,7 +978,7 @@ void kernel_main(BootInfo *bootInfo) {
         // Service USB reports and keyboard input on every PIT wakeup, not
         // only once per rendered frame. This keeps input latency near 1 ms
         // while the desktop renderer remains frame-rate limited.
-        xhci_poll_events();
+        xhci_poll_events_atomic();
         // Desktop rendering stays on the frame cadence below. Calling
         // desktop_tick() here used to repaint the full scene on every PIT
         // wakeup (up to 1000 times/second), starving window interaction.
