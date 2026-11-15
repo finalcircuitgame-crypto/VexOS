@@ -21,12 +21,25 @@ Run:
 The normal build produces `dist/BOOTX64.EFI`, `dist/kernel.elf`, the bootable FAT image `dist/tiny64.img`, and the separate persistent data image `dist/storage.img`.
 
 DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not**
-built by the kernel Makefile: VexOS still needs a platform backend for
-`DG_Init`, `DG_DrawFrame`, `DG_SleepMs`, `DG_GetTicksMs`, and `DG_GetKey`,
-plus a separate user-mode ELF build and a compatible IWAD in SimpleFS storage. The launcher is configured for Freedoom Phase 1 (`freefreedoom1.wad`), which is freely redistributable under its own license. The
-desktop's `doom` / `ring3` command looks for that `doom.elf` file and reports
-when it is missing. Do not use the old `BUILD_DOOMGENERIC=1` option; it was a
-no-op placeholder, not a working port.
+built by the kernel Makefile: it is a separate user-mode ELF with a VexOS
+platform backend. The launcher looks for the IWAD at the canonical SimpleFS
+name `doom.wad`; the source file can be the registered game's `DOOM.WAD`,
+shareware `DOOM1.WAD`, or another compatible IWAD.
+
+To build the Doom app and prepare storage with your own IWAD:
+
+```sh
+make doom
+make doom-storage WAD=/path/to/DOOM.WAD
+```
+
+The packer validates the IWAD header and directory, then stores it as
+`doom.wad` alongside `doom.elf`. The WAD stays outside the repository; local
+`.wad` / `.WAD` files are ignored by Git. The desktop's `doom` / `ring3`
+command launches the user-mode app. The CI playtest continues to use
+Freedoom as its redistributable test IWAD, but it is packed under the same
+`doom.wad` runtime filename. Do not use the old `BUILD_DOOMGENERIC=1`
+option; it was a no-op placeholder, not a working port.
 
 ## Run (development)
 run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into the SimpleFS storage image if that file exists.
