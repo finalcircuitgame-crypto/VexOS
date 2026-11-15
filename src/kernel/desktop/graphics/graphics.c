@@ -143,8 +143,15 @@ void gfx_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
 
 void gfx_blend_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                     uint32_t color, uint8_t alpha) {
+  if (!alpha)
+    return;
+  if (alpha == 255u) {
+    gfx_draw_rect(x, y, width, height, color);
+    return;
+  }
+
   uint32_t x1, y1, x2, y2;
-  if (!alpha || !gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
+  if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
     return;
   uint32_t *dst = gfx_target();
   if (!dst)
@@ -168,23 +175,50 @@ void gfx_blend_round_rect(uint32_t x, uint32_t y, uint32_t width,
   }
   uint32_t limit = gfx_min_u32(width, height) / 2u;
   if (radius > limit) radius = limit;
-  uint32_t left = x + radius;
-  uint32_t right = x + width - radius - 1u;
-  uint32_t top = y + radius;
-  uint32_t bottom = y + height - radius - 1u;
-  int64_t rr = (int64_t)radius * radius;
+  if (alpha == 255u) {
+    color &= 0x00FFFFFFu;
+  }
+
+  const uint64_t radius_sq = (uint64_t)radius * radius;
+  const uint32_t left_center = x + radius;
+  const uint32_t right_center = x + width - radius - 1u;
+  const uint32_t top_center = y + radius;
+  const uint32_t bottom_center = y + height - radius - 1u;
   uint32_t *dst = gfx_target();
   if (!dst)
     return;
+
+  /* Calculate one horizontal inset per row instead of testing every pixel
+     with 64-bit distance math. The inner span is then a simple row fill/blend. */
   for (uint32_t yy = y1; yy < y2; ++yy) {
+    uint32_t dy = 0;
+    if (yy < top_center)
+      dy = top_center - yy;
+    else if (yy > bottom_center)
+      dy = yy - bottom_center;
+
+    uint32_t inset = 0;
+    if (dy) {
+      uint64_t remaining = radius_sq - (uint64_t)dy * dy;
+      while ((uint64_t)(inset + 1u) * (inset + 1u) <= remaining)
+        ++inset;
+    } else {
+      inset = radius;
+    }
+
+    uint32_t row_left = left_center - inset;
+    uint32_t row_right = right_center + inset + 1u;
+    if (row_left < x1) row_left = x1;
+    if (row_right > x2) row_right = x2;
+    if (row_left >= row_right)
+      continue;
+
     uint32_t *row = &dst[yy * g_boot_info->pitch];
-    for (uint32_t xx = x1; xx < x2; ++xx) {
-      int64_t dx = 0, dy = 0;
-      if (xx < left) dx = (int64_t)left - xx;
-      else if (xx > right) dx = (int64_t)xx - right;
-      if (yy < top) dy = (int64_t)top - yy;
-      else if (yy > bottom) dy = (int64_t)yy - bottom;
-      if (dx * dx + dy * dy <= rr)
+    if (alpha == 255u) {
+      for (uint32_t xx = row_left; xx < row_right; ++xx)
+        row[xx] = color;
+    } else {
+      for (uint32_t xx = row_left; xx < row_right; ++xx)
         row[xx] = gfx_blend_rgb(row[xx], color, alpha);
     }
   }
@@ -243,8 +277,12 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
   if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
     return;
 
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
   for (uint32_t dy = y1; dy < y2; ++dy) {
     uint32_t sy = (uint32_t)(((uint64_t)(dy - y) * source_height) / height);
+    uint32_t *out = &dst[dy * g_boot_info->pitch];
     for (uint32_t dx = x1; dx < x2; ++dx) {
       uint32_t sx = (uint32_t)(((uint64_t)(dx - x) * source_width) / width);
       const uint8_t *pixel =
@@ -256,7 +294,10 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
       uint32_t color = ((uint32_t)pixel[0] << 16) |
                        ((uint32_t)pixel[1] << 8) |
                        (uint32_t)pixel[2];
-      gfx_blend_pixel(dx, dy, color, alpha);
+      if (alpha == 255u)
+        out[dx] = color;
+      else
+        out[dx] = gfx_blend_rgb(out[dx], color, alpha);
     }
   }
 }
