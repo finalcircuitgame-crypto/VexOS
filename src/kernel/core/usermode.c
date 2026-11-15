@@ -21,6 +21,43 @@ void serial_print(const char *str);
 #define USER_STACK_PAGES 32u
 #define MAX_USER_IMAGE_PAGES 16384u
 
+/* One user process is active at a time in the current task model. */
+static uint64_t *g_user_mapped_pages;
+static uint32_t g_user_mapped_page_count;
+static void *g_user_kernel_stack;
+static void *g_deferred_kernel_stack;
+static uint8_t g_user_process_active;
+
+void usermode_cleanup_current(void) {
+    if (!g_user_process_active)
+        return;
+
+    while (g_user_mapped_page_count > 0) {
+        uint64_t va = g_user_mapped_pages[--g_user_mapped_page_count];
+        VMM_UnmapPage((void *)(uintptr_t)va, 1);
+    }
+
+    if (g_user_mapped_pages)
+        kfree(g_user_mapped_pages);
+    g_user_mapped_pages = NULL;
+
+    /* Do not free the active ring-transition stack while the exception or
+       syscall handler is still running on it. Reap it from the kernel task. */
+    if (g_user_kernel_stack)
+        g_deferred_kernel_stack = g_user_kernel_stack;
+    g_user_kernel_stack = NULL;
+    g_user_process_active = 0;
+}
+
+void usermode_reap_deferred(void) {
+    if (!g_deferred_kernel_stack)
+        return;
+
+    void *stack = g_deferred_kernel_stack;
+    g_deferred_kernel_stack = NULL;
+    PMM_FreePage(stack);
+}
+
 typedef struct {
     unsigned char e_ident[16];
     uint16_t e_type;
@@ -406,8 +443,14 @@ void usermode_launch(void) {
     }
 
     uint64_t user_entry = ehdr->e_entry;
-    kfree(mapped_pages);
     kfree(elf_data);
+
+    /* Retain the page list until the process exits or faults, so its user
+       mappings can be reclaimed without touching the kernel transition stack. */
+    g_user_mapped_pages = mapped_pages;
+    g_user_mapped_page_count = mapped_count;
+    g_user_kernel_stack = kernel_stack;
+    g_user_process_active = 1;
 
     TSS_Load((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     serial_print("[USERMODE] entering ring3\n");
