@@ -192,8 +192,8 @@ $(DOOMOBJDIR)/doom_entry.o: $(SRCDIR)/usermode/doom/doom_entry.c
 clean:
 	rm -rf $(DISTDIR)/*
 # Create a bootable SimpleFS payload containing DoomGeneric and the user's WAD.
-# Usage: make doom-storage WAD=/path/to/freedoom1.wad
+# Usage: make doom-storage WAD=/path/to/DOOM.WAD (or DOOM1.WAD / another IWAD)
 .PHONY: doom-storage
 doom-storage: doom $(STORAGE_IMG)
-	@test -n "$(WAD)" || (echo "Usage: make doom-storage WAD=/path/to/doom1.wad" >&2; exit 2)
+	@test -n "$(WAD)" || (echo "Usage: make doom-storage WAD=/path/to/DOOM.WAD" >&2; exit 2)
 	python3 tools/pack_doom_storage.py --image $(STORAGE_IMG) --elf $(DOOMDIST) --wad "$(WAD)"
