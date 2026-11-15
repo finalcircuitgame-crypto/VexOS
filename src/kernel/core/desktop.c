@@ -10,6 +10,7 @@
 #include "../../include/jpeg.h"
 #include "../../include/interrupts.h"
 #include <stdint.h>
+#include "../desktop/window_manager.h"
 
 static BootInfo *g_bi;
 static uint32_t g_tick;
@@ -930,7 +931,9 @@ static void draw_setup_window_if_open(void) {
 }
 static void draw_open_windows(void) {
   window_compositor_draw();
-}nt hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
+}
+
+static int hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
                     int32_t h) {
   if (px < x || py < y)
     return 0;
