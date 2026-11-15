@@ -72,6 +72,12 @@ static uint32_t g_viewer_scroll;
 
 static uint8_t g_app_open[APP_COUNT];
 
+/* A maximized Doom window occupies the complete display, including the dock
+   region. The taskbar must stay behind it until the game leaves maximized mode. */
+static int desktop_doom_fullscreen_active(void) {
+  return g_app_open[APP_DOOM] && doom_window_is_maximized();
+}
+
 static void viewer_clear_content(void) {
   if (g_viewer_pixels) {
     kfree(g_viewer_pixels);
@@ -348,16 +354,18 @@ int desktop_doom_input_active(void) { return g_app_open[APP_DOOM] && wm_get_focu
 int desktop_doom_mouse_input_active(void) {
   if(!desktop_doom_input_active()){g_doom_mouse_captured=0;return 0;}
   input_pointer_state_t p=input_pointer_get();
-  uint32_t bar_h=56u;if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
-  if(g_bi&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
+  uint32_t bar_h = desktop_doom_fullscreen_active() ? 0u : 56u;
+  if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
+  if(g_bi&&bar_h&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
   if(g_doom_mouse_captured)return 1;
   return doom_window_pointer_in_content(p.x,p.y);
 }
 int desktop_doom_mouse_buttons_active(void) {
   if(!desktop_doom_input_active())return 0;
   input_pointer_state_t p=input_pointer_get();
-  uint32_t bar_h=56u;if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
-  if(g_bi&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
+  uint32_t bar_h = desktop_doom_fullscreen_active() ? 0u : 56u;
+  if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
+  if(g_bi&&bar_h&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
   return doom_window_pointer_in_content(p.x,p.y);
 }
 int desktop_doom_close_requested(void) { return doom_window_close_requested(); }
@@ -1661,7 +1669,8 @@ void desktop_init(BootInfo *bootInfo) {
     draw_desktop_icons();
     
     draw_open_windows();
-    draw_taskbar();
+    if (!desktop_doom_fullscreen_active())
+      draw_taskbar();
     draw_start_menu();
     input_pointer_state_t p = input_pointer_get();
     compositor_present(g_back, g_bi->width, g_bi->height);
@@ -2114,8 +2123,9 @@ void desktop_tick(void) {
                 pointer.y != g_last_cursor_y ||
                 pointer.buttons != g_last_cursor_buttons);
 
-  uint32_t doom_visible_bottom =
-      (g_bi->height > 56u) ? (g_bi->height - 56u) : 0u;
+  uint32_t doom_visible_bottom = g_bi->height;
+  if (!desktop_doom_fullscreen_active())
+    doom_visible_bottom = (g_bi->height > 56u) ? (g_bi->height - 56u) : 0u;
   uint32_t doom_visible_height =
       (doom_visible_bottom > 31u) ? (doom_visible_bottom - 31u) : 0u;
   uint8_t doom_partial_update = (uint8_t)(
@@ -2147,6 +2157,7 @@ void desktop_tick(void) {
       draw_background();
       draw_desktop_icons();
       draw_open_windows();
+      if (!desktop_doom_fullscreen_active())
       draw_taskbar();
       draw_start_menu();
 
@@ -2176,6 +2187,7 @@ void desktop_tick(void) {
         serial_print("[DOOMWIN] Finished window draw stage\n");
         g_doom_render_trace_done = 1;
       }
+      if (!desktop_doom_fullscreen_active())
       draw_taskbar();
       draw_start_menu();
       g_desktop_dirty = 0;
