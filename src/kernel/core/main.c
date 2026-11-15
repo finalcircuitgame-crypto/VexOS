@@ -624,7 +624,7 @@ static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
   serial_print("[KERNEL] Entered kernel_main\n");
-  serial_print("[VexOS] Version " VEXOS_VERSION " | build " VEXOS_BUILD_ID "\\n");
+  serial_print("[VexOS] Version " VEXOS_VERSION " | build " VEXOS_BUILD_ID "\n");
   serial_print("[KERNEL] BUILD: xhci-portscan-v2\n");
   // ... Console, PMM, VMM init ...
   serial_print("[KERNEL] Calling ConsoleInit...\n");
