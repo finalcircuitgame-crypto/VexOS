@@ -7,6 +7,15 @@ if ! make all; then
     exit 1
 fi
 
+# Automatically include the repository's Doom IWAD when it is present.
+# The packer replaces the existing doom.wad entry in-place when it fits.
+if [ -f "assets/doom.wad" ]; then
+    if ! make doom-storage WAD="assets/doom.wad"; then
+        echo "Doom storage build failed; not launching QEMU."
+        exit 1
+    fi
+fi
+
 # Embed wallpaper asset into the SimpleFS storage image
 if command -v python3 >/dev/null 2>&1; then
     if [ -f "new.png" ]; then

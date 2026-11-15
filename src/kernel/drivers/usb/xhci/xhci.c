@@ -66,6 +66,8 @@ uint32_t make_trb_control(uint32_t type, uint8_t cycle) {
 }
 
 void xhci_ring_doorbell_cmd(void) {
+  // Ensure the command TRB and any Link TRB update are visible to the xHC.
+  xhci_dma_write_barrier();
   // Doorbell 0, target=0 (Command Ring)
   doorbell_regs[0] = 0;
 }
@@ -334,16 +336,17 @@ void xhci_cmd_ring_push(const xhci_trb_t *trb) {
 
   command_ring_index++;
 
-  // If we are about to step onto the Link TRB, jump back and toggle cycle.
+  // Publish preceding entries before exposing the Link TRB to the controller.
   if (command_ring_index == (XHCI_CMD_RING_TRBS - 1)) {
-    // The Link TRB is part of the producer ring too: keep its cycle bit in
-    // sync with the producer cycle or the controller stops at the first wrap.
+    xhci_dma_write_barrier();
+    command_ring[XHCI_CMD_RING_TRBS - 1].control ^= 1u;
+    if (command_ring[XHCI_CMD_RING_TRBS - 1].control & (1u << 1))
+      command_ring_cycle ^= 1u;
     command_ring_index = 0;
-    command_ring_cycle ^= 1;
-    command_ring[XHCI_CMD_RING_TRBS - 1].control =
-        (command_ring[XHCI_CMD_RING_TRBS - 1].control & ~1u) |
-        (uint32_t)(command_ring_cycle & 1u);
   }
+
+  // The caller may ring the command doorbell immediately after this returns.
+  xhci_dma_write_barrier();
 }
 
 // Context structures (xHCI 6.2). Layout here is for CSZ=0 (32-byte contexts).
@@ -377,6 +380,8 @@ typedef struct {
 uint32_t g_ctx_size = 32;
 
 void xhci_ring_doorbell_ep(uint32_t slot_id, uint32_t dci) {
+  // Publish queued endpoint TRBs before notifying the controller.
+  xhci_dma_write_barrier();
   doorbell_regs[slot_id] = dci;
 }
 void xhci_print_u32_dec(uint32_t v) {
@@ -728,6 +733,8 @@ xhci_trb_t *xhci_alloc_tr_ring(void) {
 xhci_device_state_t g_devs[256];
 
 static void xhci_ring_doorbell_ep0(uint32_t slot_id) {
+  // Publish the complete control TD before ringing EP0.
+  xhci_dma_write_barrier();
   // Doorbell target is DCI. For EP0, DCI=1.
   doorbell_regs[slot_id] = 1;
 }
@@ -740,12 +747,15 @@ static void xhci_ep0_ring_push(xhci_device_state_t *dev,
 
   dev->ep0_index++;
   if (dev->ep0_index == 255) {
+    // Publish preceding control TRBs before handing over the Link TRB.
+    xhci_dma_write_barrier();
+    dev->ep0_ring[255].control ^= 1u;
+    if (dev->ep0_ring[255].control & (1u << 1))
+      dev->ep0_cycle ^= 1u;
     dev->ep0_index = 0;
-    dev->ep0_cycle ^= 1;
-    dev->ep0_ring[255].control =
-        (dev->ep0_ring[255].control & ~1u) |
-        (uint32_t)(dev->ep0_cycle & 1u);
   }
+
+  xhci_dma_write_barrier();
 }
 
 static void xhci_print_hex16(uint16_t v) {

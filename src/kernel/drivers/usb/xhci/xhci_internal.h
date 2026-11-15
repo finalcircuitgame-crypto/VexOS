@@ -76,6 +76,15 @@ typedef struct xhci_device_state {
 extern xhci_device_state_t g_devs[256];
 extern uint32_t g_ctx_size;
 
+/*
+ * Publish DMA descriptors before updating a Link TRB or ringing an xHCI
+ * doorbell. SFENCE orders prior stores and the memory clobber prevents the
+ * compiler from moving descriptor writes across this boundary.
+ */
+static inline void xhci_dma_write_barrier(void) {
+  __asm__ volatile("sfence" ::: "memory");
+}
+
 // Helpers provided by xhci.c
 uint32_t trb_type(uint32_t control);
 uint32_t trb_cc(uint32_t status);

@@ -243,14 +243,16 @@ static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb)
 
   dev->intr_index++;
   if (dev->intr_index == 255) {
+    // Publish completed entries before exposing the Link TRB again.
+    xhci_dma_write_barrier();
+    dev->intr_ring[255].control ^= 1u;
+    if (dev->intr_ring[255].control & (1u << 1))
+      dev->intr_cycle ^= 1u;
     dev->intr_index = 0;
-    dev->intr_cycle ^= 1;
-    // Without updating the Link TRB's cycle bit, the controller follows it
-    // once, then stops consuming interrupt reports after the next ring lap.
-    dev->intr_ring[255].control =
-        (dev->intr_ring[255].control & ~1u) |
-        (uint32_t)(dev->intr_cycle & 1u);
   }
+
+  // xhci_hid_start_polling() rings the endpoint doorbell on return.
+  xhci_dma_write_barrier();
 }
 
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
