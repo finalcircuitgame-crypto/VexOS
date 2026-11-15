@@ -23,6 +23,7 @@ const char *notepad_filename(void);
 const char *notepad_text(void);
 uint32_t notepad_text_length(void);
 uint32_t notepad_scroll(void);
+uint8_t notepad_is_dirty(void);
 uint8_t notepad_handle_char(char value);
 void notepad_scroll_up(void);
 void notepad_scroll_down(void);
