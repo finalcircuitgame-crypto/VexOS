@@ -17,7 +17,9 @@ void serial_print(const char *str);
 #define PF_X 1u
 #define PF_W 2u
 #define USER_ADDRESS_LIMIT 0x0000800000000000ULL
-#define USER_STACK_TOP 0x0000000040000000ULL
+/* Keep the user stack out of the low physical-memory identity map.
+   Doom's ELF image starts at 128 GiB; syscall mmap starts at 256 GiB. */
+#define USER_STACK_TOP 0x0000003000000000ULL
 #define USER_STACK_PAGES 32u
 #define MAX_USER_IMAGE_PAGES 16384u
 
@@ -267,6 +269,19 @@ int usermode_ci_self_test(void) {
         VMM_IsUserRange((void *)(uintptr_t)test_pages[1], 1, 0))
         return 0;
 
+    /* Verify the reserved stack address does not collide with kernel mappings. */
+    void *stack_probe = PMM_AllocatePage();
+    void *stack_probe_va = (void *)(uintptr_t)(USER_STACK_TOP - PAGE_SIZE);
+    if (!stack_probe)
+        return 0;
+    if (!VMM_MapPage(stack_probe_va, stack_probe,
+                     PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+        PMM_FreePage(stack_probe);
+        return 0;
+    }
+    if (!VMM_UnmapPage(stack_probe_va, 1))
+        return 0;
+
     return 1;
 }
 #endif
@@ -415,13 +430,20 @@ void usermode_launch(const char *filename) {
     for (uint32_t i = 0; i < USER_STACK_PAGES; i++) {
         uint64_t va = stack_bottom + (uint64_t)i * PAGE_SIZE;
         void *pa = PMM_AllocatePage();
-        if (!pa || !VMM_MapPage((void *)(uintptr_t)va, pa,
-                                PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
-            if (pa) PMM_FreePage(pa);
+        if (!pa) {
             rollback_user_pages(mapped_pages, mapped_count);
             kfree(mapped_pages);
             kfree(elf_data);
-            serial_print("[USERMODE] unable to map user stack\n");
+            serial_print("[USERMODE] out of physical pages while allocating user stack\n");
+            return;
+        }
+        if (!VMM_MapPage((void *)(uintptr_t)va, pa,
+                         PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+            PMM_FreePage(pa);
+            rollback_user_pages(mapped_pages, mapped_count);
+            kfree(mapped_pages);
+            kfree(elf_data);
+            serial_print("[USERMODE] VMM rejected user stack mapping\n");
             return;
         }
         mapped_pages[mapped_count++] = va;
