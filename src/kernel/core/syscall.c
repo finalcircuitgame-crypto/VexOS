@@ -74,6 +74,19 @@ static int sys_open(const char *filename) {
     uint32_t size = 0;
     if (!simplefs_file_size(name_buf, &size)) return -1;
 
+    // Doom's FILES_DIR is "." and its IWAD search therefore opens paths
+    // such as "./freedoom1.wad". SimpleFS stores flat filenames, so strip
+    // leading "./" components before looking the file up.
+    const char *normalized = name_buf;
+    while (normalized[0] == '.' && normalized[1] == '/')
+        normalized += 2;
+    if (normalized != name_buf) {
+        uint32_t i = 0;
+        do {
+            name_buf[i] = normalized[i];
+        } while (normalized[i++] != '\0');
+    }
+
     // Keep zero-length files openable even if the allocator treats size 0 as
     // an invalid allocation request.
     void *data = kmalloc(size ? (size_t)size : 1u);
