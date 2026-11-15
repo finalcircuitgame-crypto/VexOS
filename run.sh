@@ -7,6 +7,14 @@ if ! make all; then
     exit 1
 fi
 
+# Pack the optional repository-local Doom IWAD into SimpleFS when supplied.
+if [ -f "assets/doom.wad" ]; then
+    if ! make doom-storage WAD="assets/doom.wad"; then
+        echo "Doom storage build failed; not launching QEMU."
+        exit 1
+    fi
+fi
+
 # Embed wallpaper asset into the SimpleFS storage image
 if command -v python3 >/dev/null 2>&1; then
     if [ -f "new.png" ]; then
@@ -150,10 +158,11 @@ if [ ! -f build/OVMF_VARS_4M.fd ]; then
 fi
 
 qemu-system-x86_64 \
-    -machine q35 \
+    # The normal desktop storage path uses legacy primary-channel IDE PIO.
+    -machine pc \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
-    -drive format=raw,file=dist/tiny64.img \
+    -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
     -drive if=ide,index=1,format=raw,file=dist/storage.img \
     -m 1G \
     -device qemu-xhci \
