@@ -461,11 +461,30 @@ jobs:
                           close_baseline = log.read()
                   except OSError:
                       pass
+                  # Move each absolute axis separately and give the USB tablet
+                  # time to publish a fresh HID report before pressing the button.
                   command({"execute": "input-send-event", "arguments": {"events": [
-                      {"type": "abs", "data": {"axis": "x", "value": 32400}},
+                      {"type": "abs", "data": {"axis": "x", "value": 32400}}
+                  ]}})
+                  time.sleep(0.25)
+                  command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "abs", "data": {"axis": "y", "value": 600}}
                   ]}})
-                  time.sleep(0.1)
+                  pointer_deadline = time.time() + 3
+                  while time.time() < pointer_deadline:
+                      try:
+                          with open("serial.log", encoding="utf-8", errors="replace") as log:
+                              if "[CI] USB tablet pointer reached Doom close-button area" in log.read():
+                                  break
+                      except OSError:
+                          pass
+                      time.sleep(0.05)
+                  else:
+                      raise RuntimeError(
+                          "USB tablet never moved to the Doom close-button area.\\n"
+                          + open("serial.log", encoding="utf-8", errors="replace").read()[-6000:]
+                      )
+                  time.sleep(0.2)
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": True}}
                   ]}})

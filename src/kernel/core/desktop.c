@@ -296,6 +296,7 @@ static uint8_t g_doom_tick_reported;
 static uint8_t g_doom_draw_reported;
 static uint8_t g_doom_frame_reported;
 static uint8_t g_doom_render_trace_done;
+static uint8_t g_doom_close_pointer_reported;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
 static const char *g_ring3_elf_name = "doom.elf";
@@ -305,6 +306,12 @@ int desktop_doom_app_ready(void) {
     serial_print("[DOOMWIN] Window buffer allocation failed\n");
     return 0;
   }
+  /* Shell commands are also recorded in the raw HID queue. Do not replay
+     those keystrokes into Doom's title/menu screen when Ring 3 starts. */
+  uint32_t stale_keys = input_kbd_clear_events();
+  if (stale_keys) {
+    serial_print("[DOOMWIN] Cleared stale keyboard events before launch\\n");
+  }
   int32_t discard_x = 0, discard_y = 0;
   input_pointer_take_motion(&discard_x, &discard_y);
   g_doom_mouse_captured = 0;
@@ -312,6 +319,7 @@ int desktop_doom_app_ready(void) {
   g_doom_draw_reported = 0;
   g_doom_frame_reported = 0;
   g_doom_render_trace_done = 0;
+  g_doom_close_pointer_reported = 0;
   g_app_open[APP_DOOM] = 1;
   g_start_open = 0;
   wm_raise(APP_DOOM);
@@ -1459,6 +1467,13 @@ void desktop_tick(void) {
   static uint32_t prev_buttons = 0;
   input_pointer_state_t p0 = input_pointer_get();
   g_last_ptr = p0;
+#ifdef VEXOS_CI_INPUT_TEST
+  if (g_app_open[APP_DOOM] && !g_doom_close_pointer_reported &&
+      p0.x >= (int32_t)g_bi->width - 32 && p0.y >= 0 && p0.y <= 32) {
+    g_doom_close_pointer_reported = 1;
+    serial_print("[CI] USB tablet pointer reached Doom close-button area\\n");
+  }
+#endif
 #ifdef VEXOS_CI_INPUT_TEST
   if (!g_ci_mouse_move_seen && (p0.dx != 0 || p0.dy != 0)) {
     g_ci_mouse_move_seen = 1;

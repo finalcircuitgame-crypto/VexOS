@@ -31,5 +31,6 @@ void input_kbd_push_char(char c);
 int input_kbd_pop_char(char *out);
 void input_kbd_push_event(uint8_t usage, int pressed);
 int input_kbd_pop_event(input_kbd_event_t *out);
+uint32_t input_kbd_clear_events(void);
 
 #endif

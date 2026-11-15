@@ -127,3 +127,9 @@ int input_kbd_pop_event(input_kbd_event_t *out) {
   g_kbd_event_r = (g_kbd_event_r + 1u) & KBD_EVENT_MASK;
   return 1;
 }
+
+uint32_t input_kbd_clear_events(void) {
+  uint32_t pending = (g_kbd_event_w - g_kbd_event_r) & KBD_EVENT_MASK;
+  g_kbd_event_r = g_kbd_event_w;
+  return pending;
+}
