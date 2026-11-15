@@ -288,12 +288,13 @@ static uint8_t g_ci_start_click_seen;
 #endif
 
 static uint8_t g_ring3_task_started;
-static uint8_t g_doom_window_dirty;
+static volatile uint8_t g_doom_window_dirty;
 static uint8_t g_doom_click_handled;
 static uint8_t g_doom_mouse_captured;
 static uint8_t g_doom_tick_reported;
 static uint8_t g_doom_draw_reported;
 static uint8_t g_doom_frame_reported;
+static uint8_t g_doom_render_trace_done;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
 
@@ -308,6 +309,7 @@ int desktop_doom_app_ready(void) {
   g_doom_tick_reported = 0;
   g_doom_draw_reported = 0;
   g_doom_frame_reported = 0;
+  g_doom_render_trace_done = 0;
   g_app_open[APP_DOOM] = 1;
   g_start_open = 0;
   wm_raise(APP_DOOM);
@@ -338,6 +340,7 @@ void desktop_user_app_exited(int faulted) {
   g_ring3_task_started = 0;
   g_app_open[APP_DOOM]=0;g_doom_mouse_captured=0;
   g_doom_tick_reported=0;g_doom_draw_reported=0;g_doom_frame_reported=0;
+  g_doom_render_trace_done=0;
   doom_window_app_exited();
   g_doom_window_dirty=1;g_doom_click_handled=0;g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
   if (g_ring3_task_stack) {
@@ -1984,10 +1987,18 @@ void desktop_tick(void) {
 
   if (!g_back || !g_bg) {
     // Low-memory fallback: render directly to the hardware framebuffer.
+    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
+      serial_print("[DOOMWIN] Desktop redraw using direct-framebuffer fallback\n");
     draw_background();
     draw_desktop_icons();
     draw_widgets();
+    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
+      serial_print("[DOOMWIN] Reached window draw stage (fallback)\n");
     draw_open_windows();
+    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done) {
+      serial_print("[DOOMWIN] Finished window draw stage (fallback)\n");
+      g_doom_render_trace_done = 1;
+    }
     draw_taskbar();
     draw_start_menu();
 
@@ -2017,11 +2028,22 @@ void desktop_tick(void) {
     static uint8_t g_desktop_dirty = 1;
     uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
 
+    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done && !scene_changed)
+      serial_print("[DOOMWIN] Desktop tick skipped redraw: scene not dirty\n");
+
     if (scene_changed) {
+      if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
+        serial_print("[DOOMWIN] Desktop scene redraw started\n");
       compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
       draw_widgets();
+      if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
+        serial_print("[DOOMWIN] Reached window draw stage\n");
       draw_open_windows();
+      if (g_app_open[APP_DOOM] && !g_doom_render_trace_done) {
+        serial_print("[DOOMWIN] Finished window draw stage\n");
+        g_doom_render_trace_done = 1;
+      }
       draw_taskbar();
       draw_start_menu();
       g_desktop_dirty = 0;

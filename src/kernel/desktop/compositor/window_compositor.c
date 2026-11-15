@@ -1,7 +1,10 @@
 #include "window_compositor.h"
 
+extern void serial_print(const char *str);
+
 static const uint8_t *g_visible[APP_COUNT];
 static window_compositor_draw_fn g_draw[APP_COUNT];
+static uint8_t g_doom_slot_reported;
 
 void window_compositor_init(void) {
   for (uint32_t i = 0; i < APP_COUNT; ++i) {
@@ -24,6 +27,18 @@ void window_compositor_draw(void) {
     app_id_t app = wm_app_at(i);
     if ((uint32_t)app >= APP_COUNT)
       continue;
+    if (app == APP_DOOM && !g_doom_slot_reported) {
+      g_doom_slot_reported = 1;
+      serial_print("[DOOMWIN] Compositor reached APP_DOOM slot: ");
+      if (!g_visible[app])
+        serial_print("visibility pointer is null\n");
+      else if (!*g_visible[app])
+        serial_print("window is marked hidden\n");
+      else if (!g_draw[app])
+        serial_print("draw callback is null\n");
+      else
+        serial_print("window visible and callback registered\n");
+    }
     if (!g_visible[app] || !*g_visible[app] || !g_draw[app])
       continue;
     g_draw[app]();
