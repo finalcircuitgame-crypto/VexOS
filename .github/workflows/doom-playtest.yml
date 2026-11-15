@@ -200,7 +200,7 @@ jobs:
               payload = {"execute": name}
               if arguments is not None:
                   payload["arguments"] = arguments
-              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
               while True:
                   response = read_response()
                   if "return" in response:
@@ -222,7 +222,7 @@ jobs:
               with open("serial.log", "r", encoding="utf-8", errors="replace") as log:
                   tail = log.read()[-12000:]
               raise RuntimeError(
-                  f"Timed out waiting for {description}. Serial tail:\\n{tail}"
+                  f"Timed out waiting for {description}. Serial tail:\n{tail}"
               )
 
           command("qmp_capabilities")
@@ -269,7 +269,7 @@ jobs:
           grep -Fq "[DOOMWIN] Ring 3 Doom window opened and focused" serial.log
           grep -Fq "[WADDBG] LOCAL_OPEN" serial.log
           grep -Fq "[DOOMWIN] First frame rendered by Ring 3 Doom" serial.log
-          printf '%s\\n' 'Test result: PASS - Terminal visibly opened, the shell submitted DOOM, Freedoom loaded, and the real Ring 3 process rendered a frame.' > artifacts/test-result.txt
+          printf '%s\n' 'Test result: PASS - Terminal visibly opened, the shell submitted DOOM, Freedoom loaded, and the real Ring 3 process rendered a frame.' > artifacts/test-result.txt
           echo "DOOM playtest capture complete."
           tail -n 120 serial.log
 
