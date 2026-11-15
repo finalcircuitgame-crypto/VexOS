@@ -9,6 +9,8 @@
 
 void serial_print(const char *str);
 extern uint64_t Task_Exit(uint64_t current_rsp);
+extern void usermode_cleanup_current(void);
+extern void desktop_user_app_exited(int faulted);
 extern uint64_t Timer_Ticks(void);
 extern void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
 
@@ -17,6 +19,7 @@ extern void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
 #define USER_WRITE_MAX 4096u
 #define USER_MMAP_MAX (16u * 1024u * 1024u)
 #define USER_MMAP_BASE 0x0000004000000000ULL
+#define USER_MMAP_TRACKED_PAGES 4096u
 #define USER_ADDRESS_LIMIT 0x0000800000000000ULL
 
 typedef struct {
@@ -28,6 +31,25 @@ typedef struct {
 
 static open_file_t g_files[MAX_OPEN_FILES];
 static uint64_t g_next_mmap = USER_MMAP_BASE;
+static uint64_t g_user_mmap_pages[USER_MMAP_TRACKED_PAGES];
+static uint32_t g_user_mmap_page_count;
+
+/* Release all resources owned by the current ring-3 process. */
+void syscall_process_cleanup(void) {
+    for (int fd = 3; fd < MAX_OPEN_FILES; ++fd) {
+        g_files[fd].name[0] = '\0';
+        g_files[fd].size = 0;
+        g_files[fd].cursor = 0;
+        g_files[fd].used = 0;
+    }
+
+    while (g_user_mmap_page_count > 0) {
+        uint64_t va = g_user_mmap_pages[--g_user_mmap_page_count];
+        VMM_UnmapPage((void *)(uintptr_t)va, 1);
+    }
+
+    g_next_mmap = USER_MMAP_BASE;
+}
 
 static int copy_user_string(char *dst, uint32_t dst_cap, const char *src) {
     if (!dst || dst_cap == 0 || !src) return 0;
@@ -155,6 +177,8 @@ static void *sys_mmap(void *requested_addr, uint32_t length) {
 
     uint64_t pages = ((uint64_t)length + PAGE_SIZE - 1u) / PAGE_SIZE;
     uint64_t bytes = pages * PAGE_SIZE;
+    if (pages > USER_MMAP_TRACKED_PAGES - g_user_mmap_page_count)
+        return (void *)-1;
     uint64_t vaddr = (uint64_t)(uintptr_t)requested_addr;
 
     if (vaddr == 0) {
@@ -192,6 +216,9 @@ static void *sys_mmap(void *requested_addr, uint32_t length) {
         return (void *)-1;
     }
 
+    for (uint64_t i = 0; i < pages; ++i)
+        g_user_mmap_pages[g_user_mmap_page_count++] = vaddr + i * PAGE_SIZE;
+
     if (vaddr == g_next_mmap || vaddr >= g_next_mmap)
         g_next_mmap = vaddr + bytes;
     return (void *)(uintptr_t)vaddr;
@@ -204,7 +231,9 @@ uint64_t syscall_handler(uint64_t rsp) {
     // ABI: rax = syscall number; rdi/rsi/rdx = arguments.
     switch (frame->rax) {
     case 0:
-        desktop_set_fullscreen_app_active(0);
+        usermode_cleanup_current();
+        syscall_process_cleanup();
+        desktop_user_app_exited(0);
         serial_print("[USERMODE] exiting ring3\n");
         return Task_Exit(rsp);
     case 1:
