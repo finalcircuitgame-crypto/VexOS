@@ -304,14 +304,35 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
 
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground) {
-  if (!g_font)
+  if (!g_font || !g_boot_info)
+    return;
+
+  gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
+  uint32_t clip_right = clip.x + clip.width;
+  uint32_t clip_bottom = clip.y + clip.height;
+  if (x >= clip_right || y >= clip_bottom ||
+      clip.x >= x + 8u || clip.y >= y + 8u)
+    return;
+
+  uint32_t gx_start = clip.x > x ? clip.x - x : 0u;
+  uint32_t gy_start = clip.y > y ? clip.y - y : 0u;
+  uint32_t gx_end = clip_right > x ? clip_right - x : 0u;
+  uint32_t gy_end = clip_bottom > y ? clip_bottom - y : 0u;
+  if (gx_end > 8u) gx_end = 8u;
+  if (gy_end > 8u) gy_end = 8u;
+
+  uint32_t *dst = gfx_target();
+  if (!dst)
     return;
   const uint8_t *glyph = &g_font[(uint32_t)character * 8u];
-  for (uint32_t gy = 0; gy < 8u; ++gy) {
-    uint8_t row = glyph[gy];
-    for (uint32_t gx = 0; gx < 8u; ++gx) {
-      if (row & (uint8_t)(1u << (7u - gx)))
-        gfx_put_pixel(x + gx, y + gy, foreground);
+  foreground &= 0x00FFFFFFu;
+
+  for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
+    uint8_t bits = glyph[gy];
+    uint32_t *out = &dst[(y + gy) * g_boot_info->pitch];
+    for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
+      if (bits & (uint8_t)(1u << (7u - gx)))
+        out[x + gx] = foreground;
     }
   }
 }
