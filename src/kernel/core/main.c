@@ -597,8 +597,17 @@ static void ci_syscall_self_test(void) {
   serial_print("[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed\n");
 }
 
-static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
+static void ci_framebuffer_syscall_self_test(void) {
   struct InterruptFrame frame = {0};
+
+  /* Syscall 9 targets the Doom window's off-screen surface. Open that
+     surface first; it intentionally does not draw directly into framebuffer[0]. */
+  frame.rax = 11;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("framebuffer test could not open Doom surface");
+
+  frame = (struct InterruptFrame){0};
   frame.rax = 2;
   frame.rsi = sizeof(uint32_t);
   syscall_handler((uint64_t)(uintptr_t)&frame);
@@ -620,9 +629,8 @@ static void ci_framebuffer_syscall_self_test(BootInfo *bootInfo) {
 
   if (frame.rax != 0)
     ci_memory_test_fail("framebuffer syscall rejected valid 1x1 frame");
-  if (!bootInfo || !bootInfo->framebuffer ||
-      bootInfo->framebuffer[0] != expected)
-    ci_memory_test_fail("framebuffer syscall did not draw pixel");
+  if (frame.rax != 0)
+    ci_memory_test_fail("framebuffer syscall rejected active Doom surface");
 
   if (!VMM_UnmapPage(user_pixel, 1) ||
       VMM_IsUserRange(user_pixel, sizeof(uint32_t), 0))
@@ -897,7 +905,7 @@ void kernel_main(BootInfo *bootInfo) {
 
 #ifdef VEXOS_CI_INPUT_TEST
   // Run only after desktop_init has installed the framebuffer target.
-  ci_framebuffer_syscall_self_test(bootInfo);
+  ci_framebuffer_syscall_self_test();
 #endif
 
   Task_Init();

@@ -12,7 +12,7 @@ extern uint64_t Task_Exit(uint64_t current_rsp);
 extern void usermode_cleanup_current(void);
 extern void desktop_user_app_exited(int faulted);
 extern uint64_t Timer_Ticks(void);
-extern void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
+extern int desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
 extern void xhci_poll_events(void);
 
 #define MAX_OPEN_FILES 16
@@ -322,13 +322,11 @@ uint64_t syscall_handler(uint64_t rsp) {
                              w * h * sizeof(uint32_t), 0)) {
             frame->rax = (uint64_t)-1;
         } else {
-            desktop_draw_frame((const uint32_t *)(uintptr_t)frame->rdi,
-                               (uint32_t)w, (uint32_t)h);
-            /* desktop_draw_frame marks the Doom window dirty. The normal
-               kernel desktop loop consumes that flag and runs the compositor
-               on its own stack; do not run the full desktop renderer here on
-               the small ring-3 syscall transition stack. */
-            frame->rax = 0;
+            /* Syscall 9 submits a frame to the active Doom window surface;
+               it is not a raw write to the hardware framebuffer. */
+            frame->rax = desktop_draw_frame(
+                (const uint32_t *)(uintptr_t)frame->rdi,
+                (uint32_t)w, (uint32_t)h) ? 0u : (uint64_t)-1;
         }
         break;
     }

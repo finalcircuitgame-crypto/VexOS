@@ -725,14 +725,16 @@ static void draw_desktop_icons(void);
 
 
 
-void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
-  if (doom_window_draw_frame(src, w, h)) {
+int desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
+  int accepted = doom_window_draw_frame(src, w, h);
+  if (accepted) {
     g_doom_window_dirty = 1;
     if (!g_doom_frame_reported) {
       g_doom_frame_reported = 1;
       serial_print("[DOOMWIN] First frame received from Doom\n");
     }
   }
+  return accepted;
 }
 
 static void draw_doom_window_if_open(void) {
