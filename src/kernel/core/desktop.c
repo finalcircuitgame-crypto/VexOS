@@ -717,6 +717,18 @@ static int32_t g_last_cursor_x;
 static int32_t g_last_cursor_y;
 static uint32_t g_last_cursor_buttons;
 
+/* A tiny save-under buffer lets the no-backbuffer path update only the cursor
+   instead of repainting the entire desktop on every idle frame. */
+#define DESKTOP_CURSOR_SAVE_SIZE 26u
+static uint32_t g_fallback_cursor_save[DESKTOP_CURSOR_SAVE_SIZE *
+                                       DESKTOP_CURSOR_SAVE_SIZE];
+static int32_t g_fallback_cursor_x;
+static int32_t g_fallback_cursor_y;
+static uint32_t g_fallback_cursor_width;
+static uint32_t g_fallback_cursor_height;
+static uint8_t g_fallback_cursor_valid;
+static uint8_t g_fallback_scene_dirty = 1;
+
 static void draw_background(void);
 static void draw_text_panel(void);
 static void draw_taskbar(void);
@@ -1427,6 +1439,84 @@ static void draw_cursor(int32_t x, int32_t y, uint32_t fg, uint32_t outline) {
   }
 }
 
+/* Restore the pixels captured before the previous fallback cursor draw. */
+static void desktop_fallback_cursor_restore(void) {
+  if (!g_fallback_cursor_valid || !g_bi || !g_bi->framebuffer)
+    return;
+
+  for (uint32_t row = 0; row < g_fallback_cursor_height; ++row) {
+    uint32_t *dst = &g_bi->framebuffer[
+        (uint32_t)(g_fallback_cursor_y + (int32_t)row) * g_bi->pitch +
+        (uint32_t)g_fallback_cursor_x];
+    const uint32_t *src =
+        &g_fallback_cursor_save[row * DESKTOP_CURSOR_SAVE_SIZE];
+    for (uint32_t col = 0; col < g_fallback_cursor_width; ++col)
+      dst[col] = src[col];
+  }
+  g_fallback_cursor_valid = 0;
+}
+
+/* Capture only the small rectangle touched by the 16px cursor and drag marker. */
+static void desktop_fallback_cursor_capture(int32_t cursor_x,
+                                            int32_t cursor_y) {
+  if (!g_bi || !g_bi->framebuffer || cursor_x < 0 || cursor_y < 0)
+    return;
+
+  int32_t left = cursor_x > 0 ? cursor_x - 1 : 0;
+  int32_t top = cursor_y > 0 ? cursor_y - 1 : 0;
+  if ((uint32_t)left >= g_bi->width || (uint32_t)top >= g_bi->height)
+    return;
+
+  uint32_t width = g_bi->width - (uint32_t)left;
+  uint32_t height = g_bi->height - (uint32_t)top;
+  if (width > DESKTOP_CURSOR_SAVE_SIZE)
+    width = DESKTOP_CURSOR_SAVE_SIZE;
+  if (height > DESKTOP_CURSOR_SAVE_SIZE)
+    height = DESKTOP_CURSOR_SAVE_SIZE;
+
+  g_fallback_cursor_x = left;
+  g_fallback_cursor_y = top;
+  g_fallback_cursor_width = width;
+  g_fallback_cursor_height = height;
+
+  for (uint32_t row = 0; row < height; ++row) {
+    const uint32_t *src = &g_bi->framebuffer[
+        (uint32_t)(top + (int32_t)row) * g_bi->pitch + (uint32_t)left];
+    uint32_t *dst =
+        &g_fallback_cursor_save[row * DESKTOP_CURSOR_SAVE_SIZE];
+    for (uint32_t col = 0; col < width; ++col)
+      dst[col] = src[col];
+  }
+  g_fallback_cursor_valid = 1;
+}
+
+static void desktop_draw_pointer_cursor(const input_pointer_state_t *pointer) {
+  if (!pointer)
+    return;
+
+  uint32_t foreground = 0xFFFFFFu;
+  uint32_t outline = 0x000000u;
+  if (pointer->buttons & 1u)
+    foreground = 0xFFCC00u;
+  else if (pointer->buttons & 2u)
+    foreground = 0x00CCFFu;
+
+  draw_cursor(pointer->x, pointer->y, foreground, outline);
+  if ((pointer->buttons & 1u) &&
+      (pointer->dx || pointer->dy)) {
+    int32_t marker_x = pointer->x + 18;
+    int32_t marker_y = pointer->y + 18;
+    if (marker_x < 0) marker_x = 0;
+    if (marker_y < 0) marker_y = 0;
+    gfx_draw_rect((uint32_t)marker_x, (uint32_t)marker_y,
+                  5u, 5u, 0xFFCC00u);
+    gfx_draw_rect((uint32_t)marker_x, (uint32_t)marker_y,
+                  5u, 1u, 0x000000u);
+    gfx_draw_rect((uint32_t)marker_x, (uint32_t)marker_y + 4u,
+                  5u, 1u, 0x000000u);
+  }
+}
+
 void desktop_init(BootInfo *bootInfo) {
   g_bi = bootInfo;
   compositor_init(bootInfo);
@@ -1499,6 +1589,8 @@ void desktop_init(BootInfo *bootInfo) {
   g_last_cursor_x = -1000;
   g_last_cursor_y = -1000;
   g_last_cursor_buttons = 0;
+  g_fallback_cursor_valid = 0;
+  g_fallback_scene_dirty = 1;
 
   input_init(bootInfo->width, bootInfo->height);
   terminal_init(g_bi->width, g_bi->height);
@@ -1991,60 +2083,50 @@ void desktop_tick(void) {
   }
   if(doom_window_pointer_update(p0.x,p0.y,buttons,p0.dx,p0.dy))ui_changed=1;
 
+  input_pointer_state_t pointer = input_pointer_get();
+  uint8_t cursor_changed =
+      (uint8_t)(pointer.x != g_last_cursor_x ||
+                pointer.y != g_last_cursor_y ||
+                pointer.buttons != g_last_cursor_buttons);
+
   if (!g_back || !g_bg) {
-    // Low-memory fallback: render directly to the hardware framebuffer.
-    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
-      serial_print("[DOOMWIN] Desktop redraw using direct-framebuffer fallback\n");
-    draw_background();
-    draw_desktop_icons();
-    
-    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
-      serial_print("[DOOMWIN] Reached window draw stage (fallback)\n");
-    draw_open_windows();
-    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done) {
-      serial_print("[DOOMWIN] Finished window draw stage (fallback)\n");
-      g_doom_render_trace_done = 1;
-    }
-    draw_taskbar();
-    draw_start_menu();
+    /* In fallback mode the framebuffer is the scene. Redraw it only when UI
+       state changes; cursor movement uses a 26x26 save-under rectangle. */
+    uint8_t scene_changed =
+        (uint8_t)(g_fallback_scene_dirty || ui_changed || g_tick < 2u);
 
-    input_pointer_state_t p = input_pointer_get();
-    uint32_t fg = 0xFFFFFF;
-    uint32_t outline = 0x000000;
-    if (p.buttons & 1u)
-      fg = 0xFFCC00;
-    else if (p.buttons & 2u)
-      fg = 0x00CCFF;
-    draw_cursor(p.x, p.y, fg, outline);
+    if (scene_changed) {
+      g_fallback_cursor_valid = 0;
+      if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
+        serial_print("[DOOMWIN] Desktop redraw using optimized direct framebuffer\n");
 
-    if ((p.buttons & 1u) && (p.dx || p.dy)) {
-      int32_t ix = p.x + 18;
-      int32_t iy = p.y + 18;
-      if (ix < 0) ix = 0;
-      if (iy < 0) iy = 0;
-      gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
-      gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
-      gfx_draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
+      draw_background();
+      draw_desktop_icons();
+      draw_open_windows();
+      draw_taskbar();
+      draw_start_menu();
+
+      desktop_fallback_cursor_capture(pointer.x, pointer.y);
+      desktop_draw_pointer_cursor(&pointer);
+      g_fallback_scene_dirty = 0;
+    } else if (cursor_changed) {
+      desktop_fallback_cursor_restore();
+      desktop_fallback_cursor_capture(pointer.x, pointer.y);
+      desktop_draw_pointer_cursor(&pointer);
     }
 
-    g_last_cursor_x = p.x;
-    g_last_cursor_y = p.y;
-    g_last_cursor_buttons = p.buttons;
+    g_last_cursor_x = pointer.x;
+    g_last_cursor_y = pointer.y;
+    g_last_cursor_buttons = pointer.buttons;
   } else {
     static uint8_t g_desktop_dirty = 1;
     uint8_t scene_changed = (uint8_t)(g_desktop_dirty || ui_changed || g_tick < 2u);
-
-    if (g_app_open[APP_DOOM] && !g_doom_render_trace_done && !scene_changed)
-      serial_print("[DOOMWIN] Desktop tick skipped redraw: scene not dirty\n");
 
     if (scene_changed) {
       if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
         serial_print("[DOOMWIN] Desktop scene redraw started\n");
       compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
-      
-      if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
-        serial_print("[DOOMWIN] Reached window draw stage\n");
       draw_open_windows();
       if (g_app_open[APP_DOOM] && !g_doom_render_trace_done) {
         serial_print("[DOOMWIN] Finished window draw stage\n");
@@ -2055,51 +2137,27 @@ void desktop_tick(void) {
       g_desktop_dirty = 0;
     }
 
-    input_pointer_state_t p = input_pointer_get();
-    uint8_t cursor_changed =
-        (uint8_t)(p.x != g_last_cursor_x || p.y != g_last_cursor_y ||
-                  p.buttons != g_last_cursor_buttons);
-
     if (scene_changed || cursor_changed || g_tick < 2u) {
       if (scene_changed) {
-        // Scene changes still need a complete presentation.
-        compositor_blit(g_bi->framebuffer, g_back, 0, 0, g_bi->width, g_bi->height);
+        compositor_blit(g_bi->framebuffer, g_back, 0, 0,
+                        g_bi->width, g_bi->height);
       } else {
-        // Mouse-only updates restore just the old cursor footprint, not the
-        // entire screen. The 26px region includes the cursor outline/drag marker.
         int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
         int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
         compositor_blit(g_bi->framebuffer, g_back, (uint32_t)restore_x,
-                  (uint32_t)restore_y, 26u, 26u);
+                        (uint32_t)restore_y, 26u, 26u);
       }
 
       uint32_t *saved_back = g_back;
       g_back = NULL;
       gfx_set_backbuffer(NULL);
-
-      uint32_t fg = 0xFFFFFF;
-      uint32_t outline = 0x000000;
-      if (p.buttons & 1u)
-        fg = 0xFFCC00;
-      else if (p.buttons & 2u)
-        fg = 0x00CCFF;
-      draw_cursor(p.x, p.y, fg, outline);
-
-      if ((p.buttons & 1u) && (p.dx || p.dy)) {
-        int32_t ix = p.x + 18;
-        int32_t iy = p.y + 18;
-        if (ix < 0) ix = 0;
-        if (iy < 0) iy = 0;
-        gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 5, 0xFFCC00);
-        gfx_draw_rect((uint32_t)ix, (uint32_t)iy, 5, 1, 0x000000);
-        gfx_draw_rect((uint32_t)ix, (uint32_t)iy + 4, 5, 1, 0x000000);
-      }
-
+      desktop_draw_pointer_cursor(&pointer);
       g_back = saved_back;
       gfx_set_backbuffer(g_back);
-      g_last_cursor_x = p.x;
-      g_last_cursor_y = p.y;
-      g_last_cursor_buttons = p.buttons;
+
+      g_last_cursor_x = pointer.x;
+      g_last_cursor_y = pointer.y;
+      g_last_cursor_buttons = pointer.buttons;
     }
   }
   g_tick++;
