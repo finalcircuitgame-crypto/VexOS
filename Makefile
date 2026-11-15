@@ -144,8 +144,11 @@ DOOMCORE_NAMES = dummy am_map doomdef doomstat dstrings d_event d_items d_iwad d
 DOOM_OBJS = $(addprefix $(DOOMOBJDIR)/,$(addsuffix .o,$(DOOMCORE_NAMES))) \
             $(DOOMOBJDIR)/w_wad.o \
             $(DOOMOBJDIR)/doomgeneric_vexos.o $(DOOMOBJDIR)/libc.o $(DOOMOBJDIR)/doom_start.o $(DOOMOBJDIR)/doom_entry.o
+
+# Makefile changes alter Doom compile flags; rebuild stale objects (e.g. 640x400 -> 320x200).
+$(DOOM_OBJS): Makefile
 # Doom runs at 128 GiB, leaving the 256 GiB user heap/mmap region free, outside the kernel's low identity map.
-DOOM_CFLAGS = -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -mno-red-zone -mcmodel=large -O2 -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -I$(DOOMDIR) -I$(SRCDIR)/usermode/libc
+DOOM_CFLAGS = -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -mno-red-zone -mcmodel=large -O2 -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -I$(DOOMDIR) -I$(SRCDIR)/usermode/libc
 DOOM_LDFLAGS = -nostdlib -static -no-pie -Wl,-T,$(SRCDIR)/usermode/doom/linker.ld -Wl,--build-id=none
 
 .PHONY: doom
@@ -155,6 +158,13 @@ $(DOOMDIST): $(DOOM_OBJS) $(SRCDIR)/usermode/doom/linker.ld
 	@mkdir -p $(DISTDIR)
 	$(CC) $(DOOM_LDFLAGS) $(DOOM_OBJS) -lgcc -o $@
 	@readelf -h $@ | grep -q 'EXEC'
+
+
+# Patch upstream DoomGeneric input in a generated build copy. Do not modify the submodule.
+$(DOOMOBJDIR)/i_input.o: $(DOOMDIR)/i_input.c tools/patch_doom_input.py Makefile
+	@mkdir -p $(DOOMOBJDIR)
+	python3 tools/patch_doom_input.py --source $< --output $(DOOMOBJDIR)/i_input_vexos.c
+	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/i_input_vexos.c -o $@
 
 $(DOOMOBJDIR)/%.o: $(DOOMDIR)/%.c
 	@mkdir -p $(DOOMOBJDIR)
