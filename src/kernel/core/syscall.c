@@ -88,7 +88,7 @@ static int sys_open(const char *filename) {
     if (!simplefs_file_size(name_buf, &size)) {
         serial_print("[USERMODE] file lookup failed: ");
         serial_print(name_buf);
-        serial_print("\\n");
+        serial_print("\n");
         simplefs_list();
         return -1;
     }
@@ -102,7 +102,7 @@ static int sys_open(const char *filename) {
     if (!simplefs_read_file(name_buf, data, size, &out_len) || out_len != size) {
         serial_print("[USERMODE] file read failed: ");
         serial_print(name_buf);
-        serial_print("\\n");
+        serial_print("\n");
         kfree(data);
         return -1;
     }
