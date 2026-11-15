@@ -20,10 +20,20 @@ void DG_SleepMs(uint32_t ms){uint32_t start=DG_GetTicksMs();while((uint32_t)(DG_
 int DG_ShouldClose(void){return vex_syscall0(SYS_SHOULD_CLOSE)!=0;}
 __attribute__((noreturn)) void DG_Exit(void){(void)vex_syscall0(SYS_EXIT);for(;;)__asm__ volatile("pause");}
 static void poll_mouse(void){
+ /* Consume host pointer motion so it cannot accumulate, but do not feed
+    absolute USB-tablet cursor deltas into Doom's relative mouse-look. */
  uint64_t v=vex_syscall0(SYS_MOUSE_EVENT);
- int16_t dx=(int16_t)(uint16_t)(v&0xffffu),dy=(int16_t)(uint16_t)((v>>16)&0xffffu);
  uint32_t buttons=(uint32_t)((v>>32)&7u);
- if(dx||dy||buttons!=mouse_buttons){event_t ev;ev.type=ev_mouse;ev.data1=(int)buttons;ev.data2=(int)dx;ev.data3=-(int)dy;ev.data4=0;D_PostEvent(&ev);mouse_buttons=buttons;}
+ if(buttons!=mouse_buttons){
+  event_t ev;
+  ev.type=ev_mouse;
+  ev.data1=(int)buttons;
+  ev.data2=0;
+  ev.data3=0;
+  ev.data4=0;
+  D_PostEvent(&ev);
+  mouse_buttons=buttons;
+ }
 }
 static unsigned char doom_key_from_hid(uint8_t u){
  if(u>=0x04&&u<=0x1d)return (unsigned char)('a'+u-0x04);
