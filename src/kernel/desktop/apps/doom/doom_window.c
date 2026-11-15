@@ -4,6 +4,7 @@
 #include "../../graphics/graphics.h"
 #define DOOM_W 640u
 #define DOOM_H 400u
+extern void serial_print(const char *str);
 #define DOOM_PIXELS (DOOM_W*DOOM_H)
 static uint32_t screen_w,screen_h;
 static desktop_window_t win,restore_win;
@@ -53,7 +54,10 @@ static void toggle_maximize(void){
 int doom_window_handle_click(int32_t x,int32_t y){
  if(!doom_window_contains(x,y))return 0;
  wm_raise(APP_DOOM);
- if(inside(x,y,win.x+win.w-24,win.y+5,20,20)){close_requested=1;dragging=0;}
+ if(inside(x,y,win.x+win.w-24,win.y+5,20,20)){
+  close_requested=1;dragging=0;
+  serial_print("[DOOMWIN] Close button hit\\n");
+ }
  else if(inside(x,y,win.x+win.w-46,win.y+5,20,20))toggle_maximize();
  else if(inside(x,y,win.x,win.y,win.w-68,30)){
   if(maximized){win=restore_win;maximized=0;win.x=clamp_i32(x-win.w/2,0,(int32_t)screen_w-win.w);win.y=clamp_i32(y-15,0,(int32_t)screen_h-30);}

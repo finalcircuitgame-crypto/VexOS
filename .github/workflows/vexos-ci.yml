@@ -376,7 +376,7 @@ jobs:
                   except OSError:
                       pass
                   command({"execute": "input-send-event", "arguments": {"events": [
-                      {"type": "abs", "data": {"axis": "x", "value": 32350}},
+                      {"type": "abs", "data": {"axis": "x", "value": 32400}},
                       {"type": "abs", "data": {"axis": "y", "value": 600}}
                   ]}})
                   time.sleep(0.1)
@@ -387,6 +387,7 @@ jobs:
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": False}}
                   ]}})
+                  command({"execute": "screendump", "arguments": {"filename": "artifacts/05-close-attempt.png"}})
                   close_deadline = time.time() + 5
                   close_serial = ""
                   close_delta = ""
@@ -400,12 +401,13 @@ jobs:
                           close_serial[len(close_baseline):]
                           if close_serial.startswith(close_baseline) else close_serial
                       )
-                      if "[USERMODE] exiting ring3" in close_delta:
+                      if ("[DOOMWIN] Close button hit" in close_delta and
+                              "[USERMODE] exiting ring3" in close_delta):
                           break
                       time.sleep(0.05)
                   else:
                       raise RuntimeError(
-                          "Doom close button did not return control to the desktop.\\n"
+                          "Doom close click did not reach the close handler and exit ring 3.\\n"
                           + close_delta[-6000:]
                       )
                   time.sleep(0.5)

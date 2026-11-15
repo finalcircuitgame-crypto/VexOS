@@ -1532,6 +1532,16 @@ void desktop_tick(void) {
 
   // Click handling
   if (pressed & 1u) {
+    if (g_app_open[APP_DOOM]) {
+      char click_x[12], click_y[12];
+      shell_u32_to_dec(click_x, (uint32_t)p0.x);
+      shell_u32_to_dec(click_y, (uint32_t)p0.y);
+      serial_print("[DOOMWIN] Desktop click x=");
+      serial_print(click_x);
+      serial_print(" y=");
+      serial_print(click_y);
+      serial_print("\n");
+    }
     uint32_t bar_h = 56;
     if (bar_h > g_bi->height)
       bar_h = g_bi->height;
