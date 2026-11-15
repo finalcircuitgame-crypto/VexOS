@@ -293,6 +293,16 @@ void desktop_set_fullscreen_app_active(int active) {
   g_fullscreen_app_active = active ? 1u : 0u;
 }
 
+/* Called from the kernel after a ring-3 process exits or faults. */
+void desktop_user_app_exited(int faulted) {
+  g_fullscreen_app_active = 0;
+  g_ring3_task_started = 0;
+  if (faulted)
+    shell_append("ring3: application crashed; returned to desktop\\n> ");
+  else
+    shell_append("ring3: application exited\\n> ");
+}
+
 static uint32_t shell_u32_to_dec(char out[12], uint32_t v);
 static int streq_n(const char *a, const char *b, uint32_t n);static void draw_icon_20_scaled(uint32_t x, uint32_t y, const uint32_t *pix,
                                 uint32_t scale) {
@@ -1523,6 +1533,10 @@ void desktop_init(BootInfo *bootInfo) {
 }
 
 void desktop_tick(void) {
+  /* Reap the previous process's kernel transition stack only after the
+     exception/syscall handler has switched back to this kernel task. */
+  usermode_reap_deferred();
+
   if (!g_bi || g_fullscreen_app_active)
     return;
 
