@@ -12,5 +12,6 @@ int desktop_is_setup_complete(void);
 
 void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h);
 void desktop_set_fullscreen_app_active(int active);
+void desktop_user_app_exited(int faulted);
 
 #endif
