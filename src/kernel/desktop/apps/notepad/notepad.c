@@ -338,7 +338,7 @@ void notepad_draw(const notepad_render_context_t *context) {
   gfx_draw_string((uint32_t)(x + 14), (uint32_t)(y + 41),
                   "PLAIN TEXT", 0xAAB9CFu);
   gfx_draw_string((uint32_t)(x + 112), (uint32_t)(y + 41),
-                  "UTF-8 SAFE ASCII", 0x62758F);
+                  "4096 BYTE LIMIT", 0x62758F);
   gfx_blend_round_rect((uint32_t)(x + w - 66), (uint32_t)(y + 34),
                        24u, 22u, 5u, 0x27364B, 255u);
   gfx_blend_round_rect((uint32_t)(x + w - 40), (uint32_t)(y + 34),
@@ -384,6 +384,22 @@ void notepad_draw(const notepad_render_context_t *context) {
   gfx_draw_string((uint32_t)(x + 14), status_y + 9u, count_text, 0xAAB9CFu);
   gfx_draw_string((uint32_t)(x + 14 + digits * 8u), status_y + 9u,
                   " chars", 0x71829C);
+  char line_text[12];
+  uint32_t lines = notepad_line_count();
+  uint32_t line_digits = 0;
+  char line_reverse[12];
+  do {
+    line_reverse[line_digits++] = (char)('0' + lines % 10u);
+    lines /= 10u;
+  } while (lines && line_digits < sizeof(line_reverse));
+  for (uint32_t i = 0; i < line_digits; ++i)
+    line_text[i] = line_reverse[line_digits - i - 1u];
+  line_text[line_digits] = 0;
+  uint32_t line_x = (uint32_t)(x + 14u + digits * 8u + 56u);
+  gfx_draw_string(line_x, status_y + 9u, "|", 0x536781u);
+  gfx_draw_string(line_x + 12u, status_y + 9u, line_text, 0xAAB9CFu);
+  gfx_draw_string(line_x + 12u + line_digits * 8u, status_y + 9u,
+                  " lines", 0x71829C);
   const char *status = g_dirty ? "UNSAVED CHANGES" : "ALL CHANGES SAVED";
   uint32_t status_len = 0;
   while (status[status_len])
