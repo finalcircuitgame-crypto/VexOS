@@ -2,7 +2,7 @@
 #define VEXOS_COMPOSITOR_H
 
 #include <stdint.h>
-#include "../../include/bootinfo.h"
+#include "../../../include/bootinfo.h"
 
 /* Framebuffer surface composition and presentation helpers. */
 void compositor_init(BootInfo *boot_info);
