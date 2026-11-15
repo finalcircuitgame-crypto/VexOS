@@ -84,6 +84,12 @@ jobs:
           PY
 
           python3 tools/pack_doom_storage.py --image dist/storage.img --elf dist/doom.elf --wad dist/freedoom/freedoom1.wad
+
+          # The CI kernel runs an AHCI DMA self-test in addition to the ATA/SimpleFS disk.
+          # Keep this disposable disk separate so the test cannot overwrite OS storage.
+          dd if=/dev/zero of=dist/ahci-test.img bs=1M count=16 status=none
+          test -s dist/ahci-test.img
+
           cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
           rm -f /tmp/vexos-doom-qmp.sock serial.log qemu.log
 
@@ -137,6 +143,9 @@ jobs:
             -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device ich9-ahci,id=ahci \
+            -drive if=none,id=ahci_disk,format=raw,file=dist/ahci-test.img,cache=none \
+            -device ide-hd,drive=ahci_disk,bus=ahci.0 \
             -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
             -display sdl -monitor none -serial file:serial.log \
             -qmp unix:/tmp/vexos-doom-qmp.sock,server=on,wait=off \
