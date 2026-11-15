@@ -1,4 +1,5 @@
 #include "bootinfo.h"
+#include "ahci.h"
 #include "desktop.h"
 #include "gdt.h"
 #include "heap.h"
@@ -90,6 +91,45 @@ static void ci_memory_test_fail(const char *reason) {
   serial_print(reason);
   serial_print("\n");
   for (;;) { __asm__ volatile("cli; hlt"); }
+}
+
+static void ci_ahci_self_test(void) {
+  static uint8_t write_buffer[1024] __attribute__((aligned(16)));
+  static uint8_t read_buffer[1024] __attribute__((aligned(16)));
+
+  if (!ahci_is_ready())
+    ci_memory_test_fail("AHCI controller or SATA test disk not detected");
+
+  uint64_t sectors = ahci_get_sector_count();
+  if (sectors < 32u)
+    ci_memory_test_fail("AHCI test disk is unexpectedly small");
+
+  for (uint32_t i = 0; i < sizeof(write_buffer); ++i)
+    write_buffer[i] = (uint8_t)((i * 53u + 29u) & 0xFFu);
+
+  // The CI image is a dedicated disposable SATA disk. Keep the test away
+  // from LBA 0 and the first few sectors in case metadata is added later.
+  const uint64_t test_lba = 16u;
+  if (!ahci_write_sectors(test_lba, 2u, write_buffer))
+    ci_memory_test_fail("AHCI two-sector DMA write");
+
+  for (uint32_t i = 0; i < sizeof(read_buffer); ++i)
+    read_buffer[i] = 0;
+
+  if (!ahci_read_sectors(test_lba, 2u, read_buffer))
+    ci_memory_test_fail("AHCI two-sector DMA read");
+
+  for (uint32_t i = 0; i < sizeof(write_buffer); ++i) {
+    if (read_buffer[i] != write_buffer[i])
+      ci_memory_test_fail("AHCI DMA read-after-write data mismatch");
+  }
+
+  if (ahci_read_sectors(sectors, 1u, read_buffer))
+    ci_memory_test_fail("AHCI accepted an out-of-range read");
+  if (ahci_read_sectors(0u, 0u, read_buffer))
+    ci_memory_test_fail("AHCI accepted a zero-sector read");
+
+  serial_print("[CI] AHCI SATA identify, two-sector DMA write/read, and bounds checks passed\n");
 }
 
 static void ci_memory_self_test(void) {
@@ -810,6 +850,9 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
+#ifdef VEXOS_CI_INPUT_TEST
+  ci_ahci_self_test();
+#endif
   hw_profile_update_pci_gpu();
   serial_print("[KERNEL] PCI enumeration returned\n");
 
