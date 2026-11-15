@@ -46,11 +46,19 @@ static char xhci_kbd_keycode_to_ascii(uint8_t key, uint8_t shift) {
 }
 
 void xhci_event_ring_update_erdp(void) {
+  if (!event_ring || !runtime_regs) {
+    return;
+  }
+
   uint64_t next = (uint64_t)(uintptr_t)&event_ring[event_ring_index];
   runtime_regs->interrupters[0].erdp = next | (1ULL << 3);
 }
 
 int xhci_poll_event(xhci_trb_t *out) {
+  if (!event_ring || !runtime_regs || !out) {
+    return 0;
+  }
+
   xhci_trb_t trb = event_ring[event_ring_index];
 
   if ((trb.control & 1u) != (uint32_t)event_ring_cycle) {
@@ -114,11 +122,16 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
 }
 
 void xhci_poll_events() {
-  if (!event_ring) {
+  if (!event_ring || !runtime_regs) {
     return;
   }
 
-  while (1) {
+  /*
+   * Never let a burst of USB events monopolize the desktop loop. Any events
+   * left in the ring remain pending and are consumed on the next poll pass.
+   * 64 leaves room for normal HID traffic while bounding per-tick work.
+   */
+  for (uint32_t processed = 0; processed < 64u; processed++) {
     xhci_trb_t evt;
     if (!xhci_poll_event(&evt)) {
       break;
