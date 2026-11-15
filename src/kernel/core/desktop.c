@@ -722,7 +722,6 @@ static void draw_notepad_window(const desktop_window_t *win);
 static void draw_setup_window(const desktop_window_t *win);
 static void draw_window_chrome(const desktop_window_t *win, const char *title, const char *sub_title, uint8_t is_focused, uint8_t has_scroll, uint8_t has_save);
 static void draw_desktop_icons(void);
-static void draw_widgets(void);
 
 
 
@@ -746,14 +745,37 @@ static void draw_doom_window_if_open(void) {
 
 static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
 
-static void draw_taskbar(void){
-  if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh;gfx_blend_rect(0u,y,g_bi->width,bh,0x080E18u,224u);gfx_draw_rect(0u,y,g_bi->width,1u,0x53799Cu);uint32_t sy=y+6u,sh=bh-12u;
-  gfx_blend_round_rect(8u,sy,48u,sh,10u,g_start_open?0x28588Bu:0x1A3451u,255u);gfx_draw_rect(18u,sy+10u,10u,10u,0xE8F3FFu);gfx_draw_rect(31u,sy+10u,10u,10u,0x8FC7F4u);gfx_draw_rect(18u,sy+23u,10u,10u,0x8FC7F4u);gfx_draw_rect(31u,sy+23u,10u,10u,0xE8F3FFu);
-  uint32_t sw=196u;if(sw+72u>g_bi->width)sw=g_bi->width>72u?g_bi->width-72u:1u;gfx_blend_round_rect(62u,sy,sw,sh,10u,0x111E2Du,235u);gfx_draw_rect(62u,sy,sw,1u,0x344B64u);gfx_blend_round_rect(74u,sy+13u,10u,10u,5u,0x7894AFu,255u);gfx_draw_rect(83u,sy+22u,5u,2u,0x7894AFu);gfx_draw_string(96u,sy+18u,"Search apps and files",0x91A7BEu);
-  uint32_t dw=420u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;gfx_blend_round_rect(dx,sy,dw,sh,12u,0x101C2Au,242u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);gfx_draw_rect(dx+1u,sy+sh-1u,dw-2u,1u,0x0B1420u);uint32_t ix=dx+16u,iy=sy+((sh>40u)?((sh-40u)/2u):0u);const app_id_t dock_apps[5]={APP_SHELL,APP_EXPLORER,APP_VIEWER,APP_NOTEPAD,APP_DOOM};for(uint32_t i=0;i<5u;i++){if(i<4u||g_ring3_task_started)draw_app_icon(ix,iy,40u,dock_apps[i]);ix+=50u;if(ix+56u>dx+dw)break;}
-  uint32_t rw=132u,rx=g_bi->width>rw+8u?g_bi->width-rw-8u:8u;if(rx>dx+dw+8u){gfx_blend_round_rect(rx,sy,rw,sh,10u,0x111E2Du,235u);gfx_draw_string(rx+14u,sy+10u,"VEXOS",0xE7F1FCu);gfx_draw_string(rx+14u,sy+26u,"SYSTEM READY",0x79D8A8u);}
+static uint8_t desktop_rtc_read(uint8_t reg) {
+  __asm__ volatile("outb %0, %1" : : "a"((uint8_t)(0x80u | reg)), "Nd"((uint16_t)0x70));
+  uint8_t v;__asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"((uint16_t)0x71));
+  __asm__ volatile("outb %0, %1" : : "a"((uint8_t)0), "Nd"((uint16_t)0x70));return v;
 }
-
+static uint8_t desktop_bcd(uint8_t v){return (uint8_t)(((v>>4)*10u)+(v&15u));}
+static uint8_t desktop_clock(uint8_t*h,uint8_t*m,uint8_t*d,uint8_t*mo,uint16_t*y){
+  uint8_t s1=desktop_rtc_read(0),m1=desktop_rtc_read(2),h1=desktop_rtc_read(4),d1=desktop_rtc_read(7),o1=desktop_rtc_read(8),y1=desktop_rtc_read(9),c1=desktop_rtc_read(0x32);
+  uint8_t s2=desktop_rtc_read(0),m2=desktop_rtc_read(2),h2=desktop_rtc_read(4),d2=desktop_rtc_read(7),o2=desktop_rtc_read(8),y2=desktop_rtc_read(9),c2=desktop_rtc_read(0x32);
+  if((desktop_rtc_read(0x0A)&128u)||s1!=s2||m1!=m2||h1!=h2||d1!=d2||o1!=o2||y1!=y2||c1!=c2)return 0;
+  uint8_t st=desktop_rtc_read(0x0B),pm=h2&128u;h2&=127u;
+  if(!(st&4u)){s2=desktop_bcd(s2);m2=desktop_bcd(m2);h2=desktop_bcd(h2);d2=desktop_bcd(d2);o2=desktop_bcd(o2);y2=desktop_bcd(y2);c2=desktop_bcd(c2);}
+  if(!(st&2u)){h2%=12u;if(pm)h2+=12u;}
+  *h=h2;*m=m2;*d=d2;*mo=o2;*y=(c2>=19u&&c2<=99u)?(uint16_t)(c2*100u+y2):(uint16_t)(2000u+y2);
+  return (uint8_t)(h2<24u&&m2<60u&&d2>0u&&d2<=31u&&o2>0u&&o2<=12u);
+}
+static void draw_taskbar(void){
+  if(!g_bi)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t y=g_bi->height-bh,sy=y+6u,sh=bh>12u?bh-12u:bh;
+  gfx_blend_rect(0u,y,g_bi->width,bh,0x080E18u,242u);gfx_draw_rect(0u,y,g_bi->width,1u,0x344B64u);
+  gfx_blend_round_rect(8u,sy,48u,sh,10u,g_start_open?0x28588Bu:0x172B40u,255u);gfx_draw_string(27u,sy+17u,"V",0xF0F6FCu);
+  uint32_t dw=320u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;
+  gfx_blend_round_rect(dx,sy,dw,sh,11u,0x101C2Au,245u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);
+  const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_VIEWER,APP_NOTEPAD,APP_DOOM};uint32_t ix=dx+16u,iy=sy+(sh>40u?(sh-40u)/2u:0u);
+  for(uint32_t i=0;i<5u;i++){if(i<4u||g_ring3_task_started)draw_app_icon(ix,iy,40u,apps[i]);ix+=50u;}
+  uint32_t cx=g_bi->width>120u?g_bi->width-120u:0u;gfx_blend_round_rect(cx,sy,112u,sh,9u,0x101C2Au,245u);
+  uint8_t h,m,d,mo;uint16_t yr;if(desktop_clock(&h,&m,&d,&mo,&yr)){
+    char t[6]={(char)('0'+h/10u),(char)('0'+h%10u),':',(char)('0'+m/10u),(char)('0'+m%10u),0};
+    char dt[11]={(char)('0'+mo/10u),(char)('0'+mo%10u),'/',(char)('0'+d/10u),(char)('0'+d%10u),'/',(char)('0'+yr/1000u),(char)('0'+(yr/100u)%10u),(char)('0'+(yr/10u)%10u),(char)('0'+yr%10u),0};
+    gfx_draw_string(cx+16u,sy+8u,t,0xF0F6FCu);gfx_draw_string(cx+16u,sy+29u,dt,0x9EB2C8u);
+  }else{gfx_draw_string(cx+16u,sy+8u,"--:--",0xF0F6FCu);gfx_draw_string(cx+16u,sy+29u,"--/--/----",0x9EB2C8u);}
+}
 static void draw_start_menu(void){
   if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;gfx_blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
   gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);gfx_draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);gfx_draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);gfx_draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);gfx_draw_string(x+16u,y+9u,"VEXOS",0xF0F6FCu);gfx_draw_string(x+208u,y+9u,"APPS",0x7FA0BEu);gfx_draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
@@ -765,17 +787,6 @@ static void draw_desktop_icons(void){
   if(!g_bi)return;uint32_t x=22u,y=132u,sz=42u,step=84u;const app_id_t apps[4]={APP_EXPLORER,APP_SHELL,APP_NOTEPAD,APP_VIEWER};
   for(uint32_t i=0;i<4u;i++){uint32_t iy=y+i*step;draw_app_icon(x,iy,sz,apps[i]);uint32_t len=0;const char *label=app_registry_name(apps[i]);while(label[len])len++;gfx_draw_string(x+(sz-len*8u)/2u,iy+sz+8u,label,0xF1F6FCu);}
 }
-
-static void draw_widgets(void){
-  if(!g_bi)return;uint32_t w=326u,x=g_bi->width>w+24u?g_bi->width-w-24u:8u,y=100u;
-  gfx_blend_round_rect(x,y,w,88u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x4C7194u);gfx_draw_string(x+18u,y+16u,"WORKSPACE",0x7F9AB6u);gfx_draw_string(x+18u,y+38u,"Welcome to VexOS",0xF0F6FCu);gfx_draw_string(x+18u,y+61u,"Your desktop is ready.",0xA5B9CDu);
-  gfx_blend_round_rect(x+w-66u,y+22u,42u,42u,10u,0x244B70u,255u);gfx_draw_rect(x+w-55u,y+33u,8u,8u,0xE8F3FFu);gfx_draw_rect(x+w-43u,y+33u,8u,8u,0x86BCE8u);gfx_draw_rect(x+w-55u,y+45u,8u,8u,0x86BCE8u);gfx_draw_rect(x+w-43u,y+45u,8u,8u,0xE8F3FFu);
-  y+=102u;gfx_blend_round_rect(x,y,w,142u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);gfx_draw_string(x+18u,y+16u,"SYSTEM",0x7F9AB6u);const hw_profile_t *p=hw_profile_get();uint32_t ram=p?(uint32_t)(p->ram_usable_bytes/(1024ull*1024ull)):0u;
-  gfx_draw_string(x+18u,y+42u,"CPU",0x829AB2u);char cpu[25];uint32_t ci=0;if(p){while(ci+1u<sizeof(cpu)&&p->cpu_brand[ci]){cpu[ci]=p->cpu_brand[ci];ci++;}}cpu[ci]=0;gfx_draw_string(x+66u,y+42u,cpu[0]?cpu:"Unknown processor",0xE0EAF4u);
-  char buf[16];shell_u32_to_dec(buf,ram);gfx_draw_string(x+18u,y+68u,"RAM",0x829AB2u);gfx_draw_string(x+66u,y+68u,buf,0xE0EAF4u);gfx_draw_string(x+106u,y+68u,"MB",0x829AB2u);gfx_draw_string(x+18u,y+94u,"DISPLAY",0x829AB2u);gfx_draw_string(x+90u,y+94u,(p&&p->has_pci_display)?"Graphics device detected":"Framebuffer",0xE0EAF4u);gfx_draw_rect(x+18u,y+120u,w-36u,1u,0x283D53u);
-  y+=156u;gfx_blend_round_rect(x,y,w,92u,12u,0x101D2Cu,226u);gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x3D5874u);gfx_draw_string(x+18u,y+16u,"STORAGE",0x7F9AB6u);uint32_t files=simplefs_file_count();char fb[16];shell_u32_to_dec(fb,files);gfx_draw_string(x+18u,y+40u,"Indexed files",0xA5B9CDu);gfx_draw_string(x+w-60u,y+40u,fb,0xF0F6FCu);gfx_draw_string(x+18u,y+64u,"SimpleFS volume",0x8299B2u);
-}
-
 
 static void draw_shell_window_if_open(void) {
   if (g_show_shell) draw_shell_window(terminal_window());
@@ -1380,7 +1391,7 @@ void desktop_init(BootInfo *bootInfo) {
     // Initialize the presented frame.
     compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
     draw_desktop_icons();
-    draw_widgets();
+    
     draw_open_windows();
     draw_taskbar();
     draw_start_menu();
@@ -1527,7 +1538,7 @@ void desktop_tick(void) {
       uint32_t sy = (uint32_t)tb_y + 6u;
       uint32_t sh = bar_h - 12u;
 
-      uint32_t dock_w = 420;
+      uint32_t dock_w = 320;
       if (dock_w + 32 > g_bi->width)
         dock_w = g_bi->width > 32 ? (g_bi->width - 32) : 1;
       uint32_t dock_x = (g_bi->width - dock_w) / 2u;
@@ -1790,7 +1801,7 @@ void desktop_tick(void) {
       serial_print("[DOOMWIN] Desktop redraw using direct-framebuffer fallback\n");
     draw_background();
     draw_desktop_icons();
-    draw_widgets();
+    
     if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
       serial_print("[DOOMWIN] Reached window draw stage (fallback)\n");
     draw_open_windows();
@@ -1835,7 +1846,7 @@ void desktop_tick(void) {
         serial_print("[DOOMWIN] Desktop scene redraw started\n");
       compositor_blit(g_back, g_bg, 0, 0, g_bi->width, g_bi->height);
       draw_desktop_icons();
-      draw_widgets();
+      
       if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
         serial_print("[DOOMWIN] Reached window draw stage\n");
       draw_open_windows();
