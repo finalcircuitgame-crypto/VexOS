@@ -187,6 +187,7 @@ jobs:
             "[CI] Task IRET frame and scheduler checks passed" \
             "[CI] Runtime task IRET frames validated" \
             "[CI] Successful framebuffer syscall draw passed" \
+            "[CI] Doom test surface cleanup passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
             "[AHCI] SATA disk ready; sectors=" \
@@ -311,6 +312,7 @@ jobs:
               ["m", "e", "m", "ret"],
               ["s", "p", "e", "c", "s", "ret"],
               ["r", "i", "n", "g", "3", "ret"],
+              ["d", "o", "o", "m", "ret"],
               ["n", "o", "t", "e", "p", "a", "d", "ret"],
               ["v", "e", "x"],
           ]
@@ -328,9 +330,39 @@ jobs:
               # to return control to the desktop before the next shell command.
               if sequence == ["r", "i", "n", "g", "3", "ret"]:
                   time.sleep(1.5)
+              if sequence == ["d", "o", "o", "m", "ret"]:
+                  # Verify the real Doom process, not the synthetic CI framebuffer pixel.
+                  required = ("[WADDBG] LOCAL_OPEN", "[DOOMWIN] First frame received from Doom")
+                  deadline = time.time() + 30
+                  while time.time() < deadline:
+                      try:
+                          serial = open("serial.log", encoding="utf-8", errors="replace").read()
+                      except OSError:
+                          serial = ""
+                      if all(marker in serial for marker in required):
+                          break
+                      time.sleep(0.1)
+                  else:
+                      raise RuntimeError("Real Doom did not load Freedoom and submit a frame.\\n" + serial[-12000:])
+                  time.sleep(2.0)
+                  command({"execute": "screendump", "arguments": {"filename": "artifacts/04-doom.png"}})
+                  # Close Doom through its window control so desktop tests can continue.
+                  command({"execute": "input-send-event", "arguments": {"events": [
+                      {"type": "abs", "data": {"axis": "x", "value": 64500}},
+                      {"type": "abs", "data": {"axis": "y", "value": 700}}
+                  ]}})
+                  time.sleep(0.1)
+                  command({"execute": "input-send-event", "arguments": {"events": [
+                      {"type": "btn", "data": {"button": "left", "down": True}}
+                  ]}})
+                  time.sleep(0.1)
+                  command({"execute": "input-send-event", "arguments": {"events": [
+                      {"type": "btn", "data": {"button": "left", "down": False}}
+                  ]}})
+                  time.sleep(1.5)
           # Let the desktop process the final key and redraw Notepad before capture.
           time.sleep(0.5)
-          command({"execute": "screendump", "arguments": {"filename": "artifacts/04-notepad.png"}})
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/05-notepad.png"}})
 
           # Open Files from the centered taskbar dock and capture the redesigned file manager.
           command({
@@ -355,7 +387,7 @@ jobs:
               ]}
           })
           time.sleep(0.5)
-          command({"execute": "screendump", "arguments": {"filename": "artifacts/05-files.png"}})
+          command({"execute": "screendump", "arguments": {"filename": "artifacts/06-files.png"}})
           stream.close()
           sock.close()
           print("QMP injected keyboard input, USB tablet movement, three mouse clicks, and captured five PNG screenshots.")

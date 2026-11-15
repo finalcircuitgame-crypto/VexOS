@@ -635,6 +635,9 @@ static void ci_framebuffer_syscall_self_test(void) {
     ci_memory_test_fail("framebuffer test mmap teardown");
 
   serial_print("[CI] Successful framebuffer syscall draw passed\n");
+  extern void desktop_doom_ci_test_cleanup(void);
+  desktop_doom_ci_test_cleanup();
+  serial_print("[CI] Doom test surface cleanup passed\n");
 }
 
 #endif

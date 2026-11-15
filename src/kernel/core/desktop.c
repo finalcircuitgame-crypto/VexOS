@@ -318,6 +318,23 @@ int desktop_doom_app_ready(void) {
   serial_print("[DOOMWIN] Window opened and focused\n");
   return 1;
 }
+
+#ifdef VEXOS_CI_INPUT_TEST
+/* The syscall self-test paints a known 1x1 pixel to verify the user buffer.
+   Tear down that temporary surface before the real Doom app is launched. */
+void desktop_doom_ci_test_cleanup(void) {
+  doom_window_app_exited();
+  g_app_open[APP_DOOM] = 0;
+  g_doom_mouse_captured = 0;
+  g_doom_tick_reported = 0;
+  g_doom_draw_reported = 0;
+  g_doom_frame_reported = 0;
+  g_doom_render_trace_done = 0;
+  g_doom_window_dirty = 1;
+  g_doom_click_handled = 0;
+}
+#endif
+
 int desktop_doom_input_active(void) { return g_app_open[APP_DOOM] && wm_get_focus()==APP_DOOM; }
 int desktop_doom_mouse_input_active(void) {
   if(!desktop_doom_input_active()){g_doom_mouse_captured=0;return 0;}
