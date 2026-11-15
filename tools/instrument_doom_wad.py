@@ -56,19 +56,19 @@ def inject(source: str) -> str:
     source = insert_after(
         source,
         STORE_MARKER,
-        r"^(?P<indent>[ \\t]*)lump_p->wad_file\\s*=\\s*wad_file\\s*;[ \\t]*$",
+        r"^(?P<indent>[ \t]*)lump_p->wad_file\s*=\s*wad_file\s*;[ \t]*$",
         lambda indent: (
-            f"{indent}{STORE_MARKER}\\n"
-            f"{indent}if (i == 410u) {{\\n"
-            f'{indent}    printf("[WADDBG] STORE entry=%p field=%p local=%p stored=%p sizeof=%u offsets=%u,%u,%u,%u,%u\\\\n",\\n'
-            f"{indent}           (void *)lump_p, (void *)&lump_p->wad_file, (void *)wad_file, (void *)lump_p->wad_file,\\n"
-            f"{indent}           (unsigned)sizeof(lumpinfo_t),\\n"
-            f"{indent}           (unsigned)((char *)&lump_p->wad_file - (char *)lump_p),\\n"
-            f"{indent}           (unsigned)((char *)&lump_p->position - (char *)lump_p),\\n"
-            f"{indent}           (unsigned)((char *)&lump_p->size - (char *)lump_p),\\n"
-            f"{indent}           (unsigned)((char *)&lump_p->cache - (char *)lump_p),\\n"
-            f"{indent}           (unsigned)((char *)&lump_p->next - (char *)lump_p));\\n"
-            f"{indent}}}\\n"
+            f"{indent}{STORE_MARKER}\n"
+            f"{indent}if (i == 410u) {{\n"
+            f'{indent}    printf("[WADDBG] STORE entry=%p field=%p local=%p stored=%p sizeof=%u offsets=%u,%u,%u,%u,%u\\n",\n'
+            f"{indent}           (void *)lump_p, (void *)&lump_p->wad_file, (void *)wad_file, (void *)lump_p->wad_file,\n"
+            f"{indent}           (unsigned)sizeof(lumpinfo_t),\n"
+            f"{indent}           (unsigned)((char *)&lump_p->wad_file - (char *)lump_p),\n"
+            f"{indent}           (unsigned)((char *)&lump_p->position - (char *)lump_p),\n"
+            f"{indent}           (unsigned)((char *)&lump_p->size - (char *)lump_p),\n"
+            f"{indent}           (unsigned)((char *)&lump_p->cache - (char *)lump_p),\n"
+            f"{indent}           (unsigned)((char *)&lump_p->next - (char *)lump_p));\n"
+            f"{indent}}}\n"
         ),
         "W_AddFile wad_file pointer store",
     )
@@ -76,10 +76,10 @@ def inject(source: str) -> str:
     source = insert_after(
         source,
         POSITION_MARKER,
-        r"^(?P<indent>[ \\t]*)lump_p->position\\s*=\\s*LONG\\s*\\(\\s*filerover->filepos\\s*\\)\\s*;[ \\t]*$",
+        r"^(?P<indent>[ \t]*)lump_p->position\s*=\s*LONG\s*\(\s*filerover->filepos\s*\)\s*;[ \t]*$",
         lambda indent: (
-            f"{indent}{POSITION_MARKER}\\n"
-            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_POSITION stored=%p pos=%d\\\\n\", (void *)lump_p->wad_file, lump_p->position);\\n"
+            f"{indent}{POSITION_MARKER}\n"
+            f'{indent}if (i == 410u) printf("[WADDBG] AFTER_POSITION stored=%p pos=%d\\n", (void *)lump_p->wad_file, lump_p->position);\n'
         ),
         "W_AddFile position store",
     )
@@ -87,10 +87,10 @@ def inject(source: str) -> str:
     source = insert_after(
         source,
         SIZE_MARKER,
-        r"^(?P<indent>[ \\t]*)lump_p->size\\s*=\\s*LONG\\s*\\(\\s*filerover->size\\s*\\)\\s*;[ \\t]*$",
+        r"^(?P<indent>[ \t]*)lump_p->size\s*=\s*LONG\s*\(\s*filerover->size\s*\)\s*;[ \t]*$",
         lambda indent: (
-            f"{indent}{SIZE_MARKER}\\n"
-            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_SIZE stored=%p size=%d\\\\n\", (void *)lump_p->wad_file, lump_p->size);\\n"
+            f"{indent}{SIZE_MARKER}\n"
+            f'{indent}if (i == 410u) printf("[WADDBG] AFTER_SIZE stored=%p size=%d\\n", (void *)lump_p->wad_file, lump_p->size);\n'
         ),
         "W_AddFile size store",
     )
@@ -98,10 +98,10 @@ def inject(source: str) -> str:
     source = insert_after(
         source,
         CACHE_MARKER,
-        r"^(?P<indent>[ \\t]*)lump_p->cache\\s*=\\s*NULL\\s*;[ \\t]*$",
+        r"^(?P<indent>[ \t]*)lump_p->cache\s*=\s*NULL\s*;[ \t]*$",
         lambda indent: (
-            f"{indent}{CACHE_MARKER}\\n"
-            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_CACHE stored=%p cache=%p\\\\n\", (void *)lump_p->wad_file, lump_p->cache);\\n"
+            f"{indent}{CACHE_MARKER}\n"
+            f'{indent}if (i == 410u) printf("[WADDBG] AFTER_CACHE stored=%p cache=%p\\n", (void *)lump_p->wad_file, lump_p->cache);\n'
         ),
         "W_AddFile cache store",
     )
