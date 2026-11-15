@@ -3,4 +3,8 @@
 
 void usermode_launch(void);
 
+/* Called after a ring-3 process exits or faults. */
+void usermode_cleanup_current(void);
+void usermode_reap_deferred(void);
+
 #endif
