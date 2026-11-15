@@ -29,6 +29,11 @@ static uint8_t g_show_shell;
 static input_pointer_state_t g_last_ptr;
 static uint32_t g_rand_state;
 
+static uint32_t shell_next_rand(void) {
+  g_rand_state = (g_rand_state * 1664525u) + 1013904223u;
+  return g_rand_state;
+}
+
 static desktop_window_t g_explorer_win;
 static desktop_window_t g_viewer_win;
 static uint8_t g_explorer_open;
