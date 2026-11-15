@@ -946,7 +946,7 @@ void kernel_main(BootInfo *bootInfo) {
   if (g_ConsoleReady) {
     PrintString("Starting Preemptive Multitasking...\n", 0xFFFFFF);
   }
-  serial_print("[KERNEL] Starting main loop (uncapped)...\n");
+  serial_print("[KERNEL] Starting desktop loop...\n");
 
   // Main loop - precise time-based frame rate limiter
   uint32_t target_fps = hw_tuning_get()->target_fps;
