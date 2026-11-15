@@ -12,6 +12,7 @@ static uint32_t g_kbd_w;
 
 #define KBD_EVENT_MASK 127u
 static input_kbd_event_t g_kbd_events[128];
+static uint8_t g_kbd_down[256];
 static uint32_t g_kbd_event_r;
 static uint32_t g_kbd_event_w;
 
@@ -46,6 +47,8 @@ void input_init(uint32_t screen_w, uint32_t screen_h) {
   g_kbd_w = 0;
   g_kbd_event_r = 0;
   g_kbd_event_w = 0;
+  for (uint32_t i = 0; i < 256u; ++i)
+    g_kbd_down[i] = 0;
 }
 
 void input_pointer_set_abs(int32_t x, int32_t y, uint32_t buttons) {
@@ -112,12 +115,25 @@ int input_kbd_pop_char(char *out) {
 }
 
 void input_kbd_push_event(uint8_t usage, int pressed) {
+  /* Keep the physical HID state even if the transition queue is full.
+     Doom can reconcile arrow-key state after draining queued events, so a
+     dropped key-up can never leave movement stuck indefinitely. */
+  g_kbd_down[usage] = pressed ? 1u : 0u;
+
   uint32_t next = (g_kbd_event_w + 1u) & KBD_EVENT_MASK;
   if (next == g_kbd_event_r)
     return;
   g_kbd_events[g_kbd_event_w].usage = usage;
   g_kbd_events[g_kbd_event_w].pressed = pressed ? 1u : 0u;
   g_kbd_event_w = next;
+}
+
+uint32_t input_kbd_arrow_state(void) {
+  /* USB HID keyboard usages: Right=0x4F, Left=0x50, Down=0x51, Up=0x52. */
+  return (g_kbd_down[0x4Fu] ? 1u : 0u) |
+         (g_kbd_down[0x50u] ? 2u : 0u) |
+         (g_kbd_down[0x51u] ? 4u : 0u) |
+         (g_kbd_down[0x52u] ? 8u : 0u);
 }
 
 int input_kbd_pop_event(input_kbd_event_t *out) {
