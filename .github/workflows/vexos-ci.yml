@@ -49,6 +49,24 @@ jobs:
           test -s dist/doom.elf
           readelf -h dist/doom.elf | grep -q 'EXEC'
 
+          # Fetch the official Freedoom Phase 1 release (not id Software's Doom data).
+          # Pin both the version and the published archive hash for reproducible CI.
+          FREEDOOM_VERSION=0.13.0
+          FREEDOOM_ZIP="freedoom-${FREEDOOM_VERSION}.zip"
+          FREEDOOM_URL="https://github.com/freedoom/freedoom/releases/download/v${FREEDOOM_VERSION}/${FREEDOOM_ZIP}"
+          FREEDOOM_SHA256=3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59
+          mkdir -p dist/freedoom
+          curl --fail --location --retry 3 "$FREEDOOM_URL" --output "dist/freedoom/$FREEDOOM_ZIP"
+          echo "$FREEDOOM_SHA256  dist/freedoom/$FREEDOOM_ZIP" | sha256sum --check -
+          unzip -q "dist/freedoom/$FREEDOOM_ZIP" -d dist/freedoom
+          test -s "dist/freedoom/freedoom-${FREEDOOM_VERSION}/freedoom1.wad"
+          test -s "dist/freedoom/freedoom-${FREEDOOM_VERSION}/COPYING.txt"
+          test -s "dist/freedoom/freedoom-${FREEDOOM_VERSION}/CREDITS.txt"
+          cp "dist/freedoom/freedoom-${FREEDOOM_VERSION}/freedoom1.wad" dist/freedoom/freedoom1.wad
+          cp "dist/freedoom/freedoom-${FREEDOOM_VERSION}/COPYING.txt" dist/freedoom/FREEDOOM-COPYING.txt
+          cp "dist/freedoom/freedoom-${FREEDOOM_VERSION}/CREDITS.txt" dist/freedoom/FREEDOOM-CREDITS.txt
+          echo "Prepared official Freedoom Phase 1 v${FREEDOOM_VERSION} with its license and credits."
+
           # Then rebuild with CI-only wizard/input instrumentation for QEMU tests.
           make clean
           make VEXOS_CI=1 -j2 all
@@ -102,6 +120,12 @@ jobs:
               disk.seek(9 * 512)
               disk.write(payload.ljust(1024, b"\0"))
           PY
+
+          # Add the real DoomGeneric executable and official Freedoom IWAD to SimpleFS.
+          python3 tools/pack_doom_storage.py \
+            --image dist/storage.img \
+            --elf dist/doom.elf \
+            --wad dist/freedoom/freedoom1.wad
 
           # Dedicated disposable SATA disk for the AHCI DMA self-test.
           dd if=/dev/zero of=dist/ahci-test.img bs=1M count=16 status=none
