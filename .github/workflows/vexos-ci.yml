@@ -230,6 +230,7 @@ jobs:
 
           qemu-system-x86_64 \
             -machine pc \
+            -vga std \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
@@ -251,7 +252,7 @@ jobs:
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
-            if grep -Fq "[KERNEL] Starting main loop" serial.log 2>/dev/null; then
+            if grep -Fq "[KERNEL] Starting desktop loop..." serial.log 2>/dev/null; then
               break
             fi
             if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -282,7 +283,9 @@ jobs:
             "[xHCI] Controller Running" \
             "[CI] Setup wizard skipped for automated desktop test" \
             "[KERNEL] Desktop initialized" \
-            "[KERNEL] Starting main loop"; do
+            "[KERNEL] QEMU stdvga detected; mapping two framebuffer pages" \
+            "[DISPLAY] QEMU VBE double-buffered page flipping enabled" \
+            "[KERNEL] Starting desktop loop..."; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
               cat serial.log || true

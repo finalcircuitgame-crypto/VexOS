@@ -82,6 +82,32 @@ static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
   }
 }
 
+static int pci_has_qemu_stdvga(void) {
+  /* QEMU's standard VGA adapter is PCI 1234:1111. Detect it before VMM
+     activation so its second scanout page can be identity-mapped as well. */
+  for (uint16_t bus = 0; bus < 256u; ++bus) {
+    for (uint8_t slot = 0; slot < 32u; ++slot) {
+      for (uint8_t func = 0; func < 8u; ++func) {
+        uint32_t id = pci_config_read_dword((uint8_t)bus, slot, func, 0x00u);
+        if ((uint16_t)id == 0xFFFFu)
+          continue;
+        if ((uint16_t)id == 0x1234u &&
+            (uint16_t)(id >> 16) == 0x1111u)
+          return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static uint16_t qemu_vbe_read(uint16_t index) {
+  __asm__ volatile("outw %0, %1" : : "a"(index), "Nd"((uint16_t)0x01CEu));
+  uint16_t value;
+  __asm__ volatile("inw %1, %0" : "=a"(value) : "Nd"((uint16_t)0x01CFu));
+  return value;
+}
+
+
 #include "interrupts.h"
 
 void PIC_Remap();
@@ -762,7 +788,21 @@ void kernel_main(BootInfo *bootInfo) {
   }
 
   uint64_t fb_base = (uint64_t)bootInfo->framebuffer;
-  uint64_t fb_size = (uint64_t)bootInfo->height * bootInfo->pitch * 4;
+  uint64_t fb_size = (uint64_t)bootInfo->height * bootInfo->pitch * 4ull;
+  if (pci_has_qemu_stdvga()) {
+    /* DISPI reports video memory in 64 KiB units. Only identity-map a second
+       page when the adapter reports enough real VRAM to hold both pages. */
+    uint16_t video_memory_64k = qemu_vbe_read(0x0Au);
+    uint64_t video_memory_bytes = (uint64_t)video_memory_64k * 65536ull;
+    if (fb_size <= UINT64_MAX / 2ull &&
+        video_memory_64k != 0u && video_memory_64k != 0xFFFFu &&
+        fb_size * 2ull <= video_memory_bytes) {
+      fb_size *= 2ull;
+      serial_print("[KERNEL] QEMU stdvga detected; mapping two framebuffer pages\n");
+    } else {
+      serial_print("[KERNEL] QEMU stdvga detected; one framebuffer page fits VRAM\n");
+    }
+  }
   serial_print("[KERNEL] Mapping Framebuffer...\n");
   for (uint64_t i = 0; i < fb_size; i += 4096)
     vmm_map_or_halt((void *)(fb_base + i), (void *)(fb_base + i), PAGE_WRITE);

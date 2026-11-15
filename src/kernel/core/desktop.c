@@ -1607,6 +1607,8 @@ void desktop_init(BootInfo *bootInfo) {
   }
 
   gfx_set_backbuffer(g_back);
+  if (g_back && g_bg)
+    compositor_enable_pageflip();
 
   g_last_cursor_x = -1000;
   g_last_cursor_y = -1000;
@@ -1661,18 +1663,18 @@ void desktop_init(BootInfo *bootInfo) {
     draw_open_windows();
     draw_taskbar();
     draw_start_menu();
-    {
-      input_pointer_state_t p = input_pointer_get();
-      uint32_t fg = 0xFFFFFF;
-      uint32_t outline = 0x000000;
-      if (p.buttons & 1u) {
-        fg = 0xFFCC00;
-      } else if (p.buttons & 2u) {
-        fg = 0x00CCFF;
-      }
-      draw_cursor(p.x, p.y, fg, outline);
-    }
+    input_pointer_state_t p = input_pointer_get();
     compositor_present(g_back, g_bi->width, g_bi->height);
+    gfx_set_backbuffer(compositor_frontbuffer());
+    uint32_t fg = 0xFFFFFF;
+    uint32_t outline = 0x000000;
+    if (p.buttons & 1u) {
+      fg = 0xFFCC00;
+    } else if (p.buttons & 2u) {
+      fg = 0x00CCFF;
+    }
+    draw_cursor(p.x, p.y, fg, outline);
+    gfx_set_backbuffer(g_back);
   } else {
     draw_background();
   }
@@ -2183,27 +2185,38 @@ void desktop_tick(void) {
     if (doom_partial_update && !scene_changed) {
       gfx_set_backbuffer(g_back);
       draw_doom_window_visible_content(doom_visible_height);
-      compositor_blit(g_bi->framebuffer, g_back, 1u, 31u,
-                      g_bi->width - 2u, doom_visible_height);
+      compositor_present_rect(g_back, 1u, 31u,
+                              g_bi->width - 2u, doom_visible_height);
       doom_partial_presented = 1;
     }
 
+    if (scene_changed)
+      compositor_present(g_back, g_bi->width, g_bi->height);
+
     if (scene_changed || cursor_changed || doom_partial_presented || g_tick < 2u) {
-      if (scene_changed) {
-        compositor_blit(g_bi->framebuffer, g_back, 0, 0,
-                        g_bi->width, g_bi->height);
-      } else {
+      if (!scene_changed) {
         int32_t restore_x = g_last_cursor_x > 0 ? g_last_cursor_x - 1 : 0;
         int32_t restore_y = g_last_cursor_y > 0 ? g_last_cursor_y - 1 : 0;
-        compositor_blit(g_bi->framebuffer, g_back, (uint32_t)restore_x,
-                        (uint32_t)restore_y, 26u, 26u);
+        uint32_t *restore_target = compositor_frontbuffer();
+
+        /* After a page flip, the old cursor is left on the now-hidden page.
+           Erase it there so the next flip cannot resurrect a cursor ghost. */
+        if (doom_partial_presented && compositor_pageflip_active()) {
+          uint32_t *hidden_page = compositor_backbuffer();
+          if (hidden_page)
+            compositor_blit(hidden_page, g_back, (uint32_t)restore_x,
+                            (uint32_t)restore_y, 26u, 26u);
+        } else {
+          compositor_wait_vsync();
+          compositor_blit(restore_target, g_back, (uint32_t)restore_x,
+                          (uint32_t)restore_y, 26u, 26u);
+        }
       }
 
-      uint32_t *saved_back = g_back;
-      g_back = NULL;
-      gfx_set_backbuffer(NULL);
+      /* The cursor is an overlay: draw it on the currently visible page,
+         never into the clean software scene or the hidden scanout page. */
+      gfx_set_backbuffer(compositor_frontbuffer());
       desktop_draw_pointer_cursor(&pointer);
-      g_back = saved_back;
       gfx_set_backbuffer(g_back);
 
       g_last_cursor_x = pointer.x;

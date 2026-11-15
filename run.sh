@@ -160,6 +160,7 @@ fi
 # Use the pc machine's legacy primary IDE ports for the SimpleFS PIO disk.
 qemu-system-x86_64 \
     -machine pc \
+    -vga std \
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file=build/OVMF_VARS_4M.fd \
     -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
