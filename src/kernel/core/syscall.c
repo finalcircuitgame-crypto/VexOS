@@ -313,6 +313,12 @@ uint64_t syscall_handler(uint64_t rsp) {
     case 13:
         frame->rax=desktop_doom_close_requested()?1u:0u;
         break;
+    case 14:
+        /* Refresh HID reports before returning the hardware's current
+           arrow-key state. Doom uses this to recover a dropped key-up. */
+        xhci_poll_events();
+        frame->rax = input_kbd_arrow_state();
+        break;
     case 9: {
         uint64_t w = frame->rsi;
         uint64_t h = frame->rdx;
