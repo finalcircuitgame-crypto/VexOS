@@ -23,6 +23,12 @@ static uint8_t g_search_focused;
 static char g_search[FILE_MANAGER_SEARCH_CAP];
 static uint32_t g_order[FILE_MANAGER_MAX_FILES];
 static uint32_t g_order_count;
+/* Snapshot metadata when the window opens; never issue disk reads while painting. */
+static char g_names[FILE_MANAGER_MAX_FILES][FILE_MANAGER_NAME_CAP];
+static uint32_t g_file_sizes[FILE_MANAGER_MAX_FILES];
+static uint8_t g_file_size_valid[FILE_MANAGER_MAX_FILES];
+static uint32_t g_screen_width;
+static uint32_t g_screen_height;
 static uint32_t g_visible[FILE_MANAGER_MAX_FILES];
 static uint32_t g_visible_count;
 
@@ -145,8 +151,24 @@ static void fm_draw_file_icon(uint32_t x, uint32_t y, const char *name) {
 }
 
 static int fm_get_name(uint32_t storage_index, char *out) {
+  if (!out)
+    return 0;
   out[0] = 0;
-  return simplefs_file_name_at(storage_index, out, FILE_MANAGER_NAME_CAP);
+  if (storage_index >= g_order_count || !g_names[storage_index][0])
+    return 0;
+  fm_copy(out, g_names[storage_index], FILE_MANAGER_NAME_CAP);
+  return 1;
+}
+
+static uint32_t fm_row_capacity(void) {
+  uint32_t available = g_window.h > 178 ?
+      (uint32_t)g_window.h - 178u : 0u;
+  return available / FILE_MANAGER_ROW_HEIGHT;
+}
+
+static uint32_t fm_max_scroll(void) {
+  uint32_t rows = fm_row_capacity();
+  return g_visible_count > rows ? g_visible_count - rows : 0u;
 }
 
 static void fm_rebuild_visible(void) {
@@ -160,8 +182,9 @@ static void fm_rebuild_visible(void) {
       g_visible[g_visible_count++] = g_order[i];
   }
 
-  if (g_scroll > g_visible_count)
-    g_scroll = g_visible_count;
+  uint32_t maximum_scroll = fm_max_scroll();
+  if (g_scroll > maximum_scroll)
+    g_scroll = maximum_scroll;
   if (g_selected != 0xFFFFFFFFu) {
     uint8_t found = 0;
     for (uint32_t i = 0; i < g_visible_count; i++)
@@ -176,8 +199,15 @@ static void fm_refresh(void) {
   if (g_order_count > FILE_MANAGER_MAX_FILES)
     g_order_count = FILE_MANAGER_MAX_FILES;
 
-  for (uint32_t i = 0; i < g_order_count; i++)
+  for (uint32_t i = 0; i < g_order_count; i++) {
     g_order[i] = i;
+    g_names[i][0] = 0;
+    g_file_sizes[i] = 0;
+    g_file_size_valid[i] = 0;
+    if (simplefs_file_name_at(i, g_names[i], FILE_MANAGER_NAME_CAP))
+      g_file_size_valid[i] =
+          (uint8_t)simplefs_file_size(g_names[i], &g_file_sizes[i]);
+  }
 
   /* Small bounded insertion sort: the storage index remains the stable ID. */
   for (uint32_t i = 1; i < g_order_count; i++) {
@@ -203,6 +233,8 @@ static void fm_refresh(void) {
 }
 
 void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
+  g_screen_width = screen_width;
+  g_screen_height = screen_height;
   g_open = 0;
   g_dragging = 0;
   g_drag_offset_x = 0;
@@ -241,13 +273,15 @@ void file_manager_close(void) {
 uint8_t file_manager_is_open(void) { return g_open; }
 desktop_window_t *file_manager_window(void) { return &g_window; }
 
-static void fm_draw_size(uint32_t x, uint32_t y, const char *name) {
-  uint32_t bytes = 0;
+static void fm_draw_size(uint32_t x, uint32_t y,
+                          uint32_t storage_index) {
   char size_text[16];
-  if (!simplefs_file_size(name, &bytes)) {
+  if (storage_index >= g_order_count ||
+      !g_file_size_valid[storage_index]) {
     gfx_draw_string(x, y, "--", 0x8299B1u);
     return;
   }
+  uint32_t bytes = g_file_sizes[storage_index];
 
   if (bytes < 1024u) {
     fm_u32_to_text(size_text, bytes);
@@ -422,7 +456,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                       storage_index == g_selected ? 0xFFFFFFu : 0xD7DDF0u);
       gfx_draw_string(type_x, row_y + 9u, fm_file_kind(name), 0x929DB8u);
       if (list_w > 490u)
-        fm_draw_size(size_x, row_y + 9u, name);
+        fm_draw_size(size_x, row_y + 9u, storage_index);
     }
     gfx_pop_clip();
   }
@@ -464,7 +498,7 @@ file_manager_event_t file_manager_handle_click(
     return FILE_MANAGER_EVENT_CHANGED;
   }
   if (fm_hit(px, py, x + w - 66, y + 5, 20, 20)) {
-    if (g_scroll < g_visible_count) g_scroll++;
+    if (g_scroll < fm_max_scroll()) g_scroll++;
     g_search_focused = 0;
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
@@ -516,7 +550,7 @@ file_manager_event_t file_manager_handle_click(
     uint32_t storage_index = g_visible[visible_index];
     g_selected = storage_index;
     uint32_t elapsed = tick - g_last_click_tick;
-    if (g_last_click_index == storage_index && elapsed < 25u) {
+    if (g_last_click_index == storage_index && elapsed < 45u) {
       char name[FILE_MANAGER_NAME_CAP];
       if (fm_get_name(storage_index, name) && open_file && open_file(name)) {
         g_last_click_index = 0xFFFFFFFFu;
@@ -570,10 +604,21 @@ uint8_t file_manager_handle_char(char value) {
 }
 
 void file_manager_pointer_move(int32_t x, int32_t y) {
-  if (g_dragging) {
-    g_window.x = x - g_drag_offset_x;
-    g_window.y = y - g_drag_offset_y;
-  }
+  if (!g_dragging)
+    return;
+
+  int32_t max_x = g_screen_width > (uint32_t)g_window.w ?
+      (int32_t)(g_screen_width - (uint32_t)g_window.w) : 0;
+  int32_t max_y = g_screen_height > (uint32_t)g_window.h ?
+      (int32_t)(g_screen_height - (uint32_t)g_window.h) : 0;
+  int32_t next_x = x - g_drag_offset_x;
+  int32_t next_y = y - g_drag_offset_y;
+  if (next_x < 0) next_x = 0;
+  if (next_y < 0) next_y = 0;
+  if (next_x > max_x) next_x = max_x;
+  if (next_y > max_y) next_y = max_y;
+  g_window.x = next_x;
+  g_window.y = next_y;
 }
 
 void file_manager_pointer_release(void) {
