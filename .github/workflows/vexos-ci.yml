@@ -426,9 +426,9 @@ jobs:
               if sequence == ["d", "o", "o", "m", "ret"]:
                   # Verify the real Doom process, not the synthetic CI framebuffer pixel.
                   required = (
-                      "[DOOMWIN] Window opened and focused",
+                      "[DOOMWIN] Ring 3 Doom window opened and focused",
                       "[WADDBG] LOCAL_OPEN",
-                      "[DOOMWIN] First frame received from Doom",
+                      "[DOOMWIN] First frame rendered by Ring 3 Doom",
                   )
                   deadline = time.time() + 30
                   serial = ""
