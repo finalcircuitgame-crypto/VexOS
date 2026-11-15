@@ -204,7 +204,25 @@ jobs:
               ffprobe -v error -select_streams v:0 \
                 -show_entries stream=codec_name,width,height \
                 -of default=noprint_wrappers=1 "$recording" >recording-verify.log 2>&1 && \
-              grep -Eq '^codec_name=.+
+              grep -Eq '^codec_name=.+$' recording-verify.log && \
+              grep -Eq '^width=[1-9][0-9]*$' recording-verify.log && \
+              grep -Eq '^height=[1-9][0-9]*$' recording-verify.log; then
+              recording_valid=1
+            fi
+
+            if [ "$recording_valid" -eq 1 ]; then
+              printf 'Recording status: FINALIZED AND VERIFIED\n' >> artifacts/test-result.txt
+              printf 'Recording file: %s\n' "$recording" >> artifacts/test-result.txt
+              if [ "$ffmpeg_status" -ne 0 ]; then
+                printf 'Recording note: ffmpeg exited with status %s after shutdown, but ffprobe verified the playable MP4.\n' "$ffmpeg_status" >> artifacts/test-result.txt
+              fi
+              cat recording-verify.log >> artifacts/test-result.txt
+            else
+              printf 'Recording status: FAILED VALIDATION\n' >> artifacts/test-result.txt
+              printf 'ERROR: MP4 is missing, empty, or ffprobe could not verify a video stream. ffmpeg exit status: %s\n' "$ffmpeg_status" | tee -a artifacts/test-result.txt
+              cat recording-verify.log || true
+              test_status=1
+            fi
             cat artifacts/test-result.txt
             exit "$test_status"
           }
