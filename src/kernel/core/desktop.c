@@ -304,12 +304,17 @@ int desktop_doom_app_ready(void) {
 int desktop_doom_input_active(void) { return g_app_open[APP_DOOM] && wm_get_focus()==APP_DOOM; }
 int desktop_doom_mouse_input_active(void) {
   if(!desktop_doom_input_active()){g_doom_mouse_captured=0;return 0;}
+  input_pointer_state_t p=input_pointer_get();
+  uint32_t bar_h=56u;if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
+  if(g_bi&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
   if(g_doom_mouse_captured)return 1;
-  input_pointer_state_t p=input_pointer_get();return doom_window_pointer_in_content(p.x,p.y);
+  return doom_window_pointer_in_content(p.x,p.y);
 }
 int desktop_doom_mouse_buttons_active(void) {
   if(!desktop_doom_input_active())return 0;
   input_pointer_state_t p=input_pointer_get();
+  uint32_t bar_h=56u;if(g_bi&&bar_h>g_bi->height)bar_h=g_bi->height;
+  if(g_bi&&p.y>=(int32_t)(g_bi->height-bar_h))return 0;
   return doom_window_pointer_in_content(p.x,p.y);
 }
 int desktop_doom_close_requested(void) { return doom_window_close_requested(); }
@@ -1644,8 +1649,11 @@ void desktop_tick(void) {
       bar_h = g_bi->height;
     int32_t tb_y = (int32_t)g_bi->height - (int32_t)bar_h;
 
+    // The taskbar is painted above maximized windows, so it remains interactive.
+    if (p0.y >= tb_y) g_doom_click_handled = 1;
+
     // Start button hit
-    if (!doom_window_is_maximized() && hit_test(p0.x, p0.y, 8, tb_y + 4, 52, (int32_t)bar_h - 8)) {
+    if (hit_test(p0.x, p0.y, 8, tb_y + 4, 52, (int32_t)bar_h - 8)) {
       g_start_open = (uint8_t)(g_start_open ? 0u : 1u);
 #ifdef VEXOS_CI_INPUT_TEST
       if (g_start_open && !g_ci_start_click_seen) {
@@ -1654,7 +1662,8 @@ void desktop_tick(void) {
       }
 #endif
       ui_changed = 1;
-    } else if (!doom_window_is_maximized() && g_start_open) {
+    } else if (g_start_open) {
+      g_doom_click_handled = 1;
       int32_t mx=10,mw=280,mh=168,my=tb_y-176;
       if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
         if(ry>=28&&ry<50){g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
@@ -1678,7 +1687,7 @@ void desktop_tick(void) {
     // Taskbar dock icons: click to focus/open
 
     // Taskbar dock icons: click to focus/open
-    if (!doom_window_is_maximized()) {
+    {
       uint32_t sy = (uint32_t)tb_y + 6u;
       uint32_t sh = bar_h - 12u;
 
@@ -1726,7 +1735,7 @@ void desktop_tick(void) {
       }
     }
 
-    if (g_app_open[APP_DOOM] &&
+    if (g_app_open[APP_DOOM] && !g_doom_click_handled &&
         (wm_get_focus()==APP_DOOM || !focused_window_contains(p0.x,p0.y)) &&
         doom_window_handle_click(p0.x,p0.y)) {
       g_doom_click_handled=1;

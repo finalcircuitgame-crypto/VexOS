@@ -282,8 +282,13 @@ uint64_t syscall_handler(uint64_t rsp) {
         xhci_poll_events();
         input_kbd_event_t event;
         if(!desktop_doom_input_active()) {
-            while(input_kbd_pop_event(&event)) { }
             frame->rax=0;
+            while(input_kbd_pop_event(&event)) {
+                if(!event.pressed) {
+                    frame->rax=0x10000ULL|event.usage;
+                    break;
+                }
+            }
         } else if(input_kbd_pop_event(&event)) {
             frame->rax=0x10000ULL|((uint64_t)event.pressed<<8)|event.usage;
         } else frame->rax=0;
