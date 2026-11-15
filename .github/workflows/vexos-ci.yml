@@ -545,7 +545,7 @@ jobs:
           command({
               "execute": "input-send-event",
               "arguments": {"events": [
-                  {"type": "abs", "data": {"axis": "x", "value": 13200}},
+                  {"type": "abs", "data": {"axis": "x", "value": 14500}},
                   {"type": "abs", "data": {"axis": "y", "value": 31600}}
               ]}
           })
@@ -586,6 +586,7 @@ jobs:
             "[USERMODE] exiting ring3"
             "[CI] Notepad opened by shell command"
             "[CI] Notepad accepted the full typed text vex"
+            "[CI] Files opened from taskbar dock click"
           )
           for i in $(seq 1 150); do
             all_seen=1
@@ -617,8 +618,8 @@ jobs:
             exit 1
           fi
 
-          echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, and typed command."
-          printf 'Test result: PASS - all boot and desktop interaction markers observed\\n' > artifacts/test-result.txt
+          echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, typed command, and Files dock launch."
+          printf 'Test result: PASS - boot, desktop input, Shell, Notepad, and Files interactions observed\\n' > artifacts/test-result.txt
           tail -c 5000 serial.log
 
       - name: Upload complete QEMU test evidence
