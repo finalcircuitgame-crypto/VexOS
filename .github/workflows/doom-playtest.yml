@@ -161,7 +161,7 @@ jobs:
           grep -Fq "[KERNEL] Starting main loop" serial.log || { cat serial.log; exit 1; }
 
           # QMP is used for deterministic framebuffer capture only. The CI-only
-          # desktop demo opens the actual Terminal and submits "doom" through
+          # desktop demo shows the bare desktop first, then opens Terminal and submits "doom" through
           # terminal_handle_char()/shell_run_line(), avoiding flaky host clicks.
           python3 - <<'PY'
           import json
