@@ -20,15 +20,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="dist/storage.img")
     parser.add_argument("--elf", default="dist/doom.elf")
-    parser.add_argument("--wad", required=True, help="Path to your legally obtained freedoom1.wad")
+    parser.add_argument("--wad", required=True, help="Path to an IWAD, e.g. DOOM.WAD, DOOM1.WAD, or freedoom1.wad")
     args = parser.parse_args()
 
-    sources = [("doom.elf", args.elf), ("freedoom1.wad", args.wad)]
+    sources = [("doom.elf", args.elf), ("doom.wad", args.wad)]
     for name, path in sources:
         if not os.path.isfile(path):
             parser.error(f"{name} source does not exist: {path}")
         if os.path.getsize(path) == 0:
             parser.error(f"{name} source is empty: {path}")
+
+    # Validate the IWAD header and directory bounds before modifying storage.
+    wad_size = os.path.getsize(args.wad)
+    with open(args.wad, "rb") as wad_file:
+        wad_header = wad_file.read(12)
+    if len(wad_header) != 12 or wad_header[:4] != b"IWAD":
+        parser.error(f"WAD is not an IWAD (expected IWAD header): {args.wad}")
+    lump_count, directory_offset = struct.unpack_from("<II", wad_header, 4)
+    if lump_count == 0 or directory_offset < 12 or directory_offset + lump_count * 16 > wad_size:
+        parser.error(f"IWAD directory is invalid or outside the file: {args.wad}")
 
     if not os.path.isfile(args.image):
         parser.error(f"storage image does not exist: {args.image}")
