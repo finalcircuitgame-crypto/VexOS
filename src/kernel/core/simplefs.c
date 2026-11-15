@@ -1,5 +1,6 @@
 #include "simplefs.h"
 #include "ata_pio.h"
+#include "ahci.h"
 #include <stdint.h>
 
 void serial_print(const char *str);
@@ -36,6 +37,8 @@ typedef struct {
 } __attribute__((packed)) sfs_file_t;
 
 static const ata_pio_device_t *g_dev;
+static uint8_t g_storage_ready;
+static uint8_t g_storage_uses_ahci;
 static sfs_superblock_t g_sb;
 static sfs_file_t g_table[SFS_MAX_FILES];
 
@@ -79,8 +82,24 @@ static uint32_t rd32(const uint8_t *p) {
          ((uint32_t)p[3] << 24);
 }
 
+static int storage_read_sector(uint32_t lba, void *buf) {
+  if (!g_storage_ready || !buf)
+    return 0;
+  if (g_storage_uses_ahci)
+    return ahci_read_sectors((uint64_t)lba, 1u, buf);
+  return ata_pio_read28(g_dev, lba, 1u, buf);
+}
+
+static int storage_write_sector(uint32_t lba, const void *buf) {
+  if (!g_storage_ready || !buf)
+    return 0;
+  if (g_storage_uses_ahci)
+    return ahci_write_sectors((uint64_t)lba, 1u, buf);
+  return ata_pio_write28(g_dev, lba, 1u, buf);
+}
+
 static int fat_read_sector(uint32_t lba, void *buf) {
-  return ata_pio_read28(g_dev, lba, 1, buf);
+  return storage_read_sector(lba, buf);
 }
 
 static uint32_t fat_cluster_to_lba(uint32_t cluster) {
@@ -313,10 +332,10 @@ static void str_copy(char *dst, const char *src, uint32_t maxn) {
 }
 
 static int sfs_read_sector(uint32_t lba, void *buf) {
-  return ata_pio_read28(g_dev, lba, 1, buf);
+  return storage_read_sector(lba, buf);
 }
 static int sfs_write_sector(uint32_t lba, const void *buf) {
-  return ata_pio_write28(g_dev, lba, 1, buf);
+  return storage_write_sector(lba, buf);
 }
 
 static int sfs_load_table(void) {
@@ -340,7 +359,7 @@ static int sfs_load_table(void) {
 }
 
 int simplefs_file_size(const char *name, uint32_t *out_size) {
-  if (!g_dev || !name)
+  if (!g_storage_ready || !name)
     return 0;
   if (g_kind == STORAGE_FS_FAT32) {
     uint32_t idx = 0;
@@ -427,14 +446,28 @@ int simplefs_init(void) {
   if (g_mounted)
     return 1;
 
-  if (!ata_pio_init()) {
-    serial_print("[SFS] no disk\n");
-    return 0;
+  /*
+   * Prefer legacy ATA PIO when present (the pc machine uses it for the
+   * SimpleFS disk). Q35 exposes SATA through AHCI instead, so fall back to
+   * the AHCI driver initialized during PCI enumeration.
+   */
+  g_dev = NULL;
+  g_storage_ready = 0;
+  g_storage_uses_ahci = 0;
+
+  if (ata_pio_init()) {
+    g_dev = ata_pio_get_storage_device();
+    g_storage_ready = (g_dev != NULL);
   }
 
-  g_dev = ata_pio_get_storage_device();
-  if (!g_dev) {
-    serial_print("[SFS] no storage device\n");
+  if (!g_storage_ready && ahci_is_ready()) {
+    g_storage_uses_ahci = 1;
+    g_storage_ready = 1;
+    serial_print("[SFS] using AHCI storage backend\n");
+  }
+
+  if (!g_storage_ready) {
+    serial_print("[SFS] no disk\n");
     return 0;
   }
 
@@ -592,7 +625,7 @@ int simplefs_write_file(const char *name, const void *data, uint32_t len) {
     // FAT32 write support not implemented yet.
     return 0;
   }
-  if (!g_dev || !name || !data)
+  if (!g_storage_ready || !name || !data)
     return 0;
   if (str_len32(name) == 0 || str_len32(name) >= SFS_NAME_MAX)
     return 0;
@@ -639,7 +672,7 @@ int simplefs_write_file(const char *name, const void *data, uint32_t len) {
 
 int simplefs_read_file(const char *name, void *out, uint32_t maxlen,
                        uint32_t *out_len) {
-  if (!g_dev || !name || !out)
+  if (!g_storage_ready || !name || !out)
     return 0;
 
   if (g_kind == STORAGE_FS_FAT32) {
@@ -726,7 +759,7 @@ int simplefs_read_file(const char *name, void *out, uint32_t maxlen,
 int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
                           uint32_t maxlen, uint32_t *out_len) {
   if (out_len) *out_len = 0;
-  if (!g_dev || !name || (!out && maxlen != 0) ||
+  if (!g_storage_ready || !name || (!out && maxlen != 0) ||
       g_kind != STORAGE_FS_SFS)
     return 0;
 
