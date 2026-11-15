@@ -336,10 +336,13 @@ void xhci_cmd_ring_push(const xhci_trb_t *trb) {
 
   // If we are about to step onto the Link TRB, jump back and toggle cycle.
   if (command_ring_index == (XHCI_CMD_RING_TRBS - 1)) {
-    // Producer writes to link TRB (already initialized), then toggles cycle
-    // state.
+    // The Link TRB is part of the producer ring too: keep its cycle bit in
+    // sync with the producer cycle or the controller stops at the first wrap.
     command_ring_index = 0;
     command_ring_cycle ^= 1;
+    command_ring[XHCI_CMD_RING_TRBS - 1].control =
+        (command_ring[XHCI_CMD_RING_TRBS - 1].control & ~1u) |
+        (uint32_t)(command_ring_cycle & 1u);
   }
 }
 
@@ -739,6 +742,9 @@ static void xhci_ep0_ring_push(xhci_device_state_t *dev,
   if (dev->ep0_index == 255) {
     dev->ep0_index = 0;
     dev->ep0_cycle ^= 1;
+    dev->ep0_ring[255].control =
+        (dev->ep0_ring[255].control & ~1u) |
+        (uint32_t)(dev->ep0_cycle & 1u);
   }
 }
 
