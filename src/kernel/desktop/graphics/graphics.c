@@ -248,19 +248,45 @@ void gfx_blit_scaled(const uint32_t *source, uint32_t source_width,
   if (!source || !source_width || !source_height ||
       source_stride < source_width || !width || !height)
     return;
+
   uint32_t x1, y1, x2, y2;
   if (!gfx_clip_bounds(x, y, width, height, &x1, &y1, &x2, &y2))
     return;
+
   uint32_t *dst = gfx_target();
   if (!dst)
     return;
+
+  /* Exact nearest-neighbour stepping without a 64-bit divide per pixel. */
+  const uint32_t sx_step = source_width / width;
+  const uint64_t sx_step_rem = source_width % width;
+  const uint32_t sy_step = source_height / height;
+  const uint64_t sy_step_rem = source_height % height;
+  const uint64_t y_start = (uint64_t)(y1 - y) * source_height;
+  uint32_t sy = (uint32_t)(y_start / height);
+  uint64_t sy_rem = y_start % height;
+
   for (uint32_t dy = y1; dy < y2; ++dy) {
-    uint32_t sy = (uint32_t)(((uint64_t)(dy - y) * source_height) / height);
+    uint32_t sx = (uint32_t)(((uint64_t)(x1 - x) * source_width) / width);
+    uint64_t sx_rem = ((uint64_t)(x1 - x) * source_width) % width;
     uint32_t *out = &dst[dy * g_boot_info->pitch];
     const uint32_t *in = &source[sy * source_stride];
+
     for (uint32_t dx = x1; dx < x2; ++dx) {
-      uint32_t sx = (uint32_t)(((uint64_t)(dx - x) * source_width) / width);
       out[dx] = in[sx] & 0x00FFFFFFu;
+      sx += sx_step;
+      sx_rem += sx_step_rem;
+      if (sx_rem >= width) {
+        sx_rem -= width;
+        ++sx;
+      }
+    }
+
+    sy += sy_step;
+    sy_rem += sy_step_rem;
+    if (sy_rem >= height) {
+      sy_rem -= height;
+      ++sy;
     }
   }
 }
@@ -280,24 +306,49 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
   uint32_t *dst = gfx_target();
   if (!dst)
     return;
+
+  /* Match gfx_blit_scaled's exact floor mapping using quotient/remainder
+     accumulators; this keeps alpha blending from paying per-pixel divides. */
+  const uint32_t sx_step = source_width / width;
+  const uint64_t sx_step_rem = source_width % width;
+  const uint32_t sy_step = source_height / height;
+  const uint64_t sy_step_rem = source_height % height;
+  const uint64_t y_start = (uint64_t)(y1 - y) * source_height;
+  uint32_t sy = (uint32_t)(y_start / height);
+  uint64_t sy_rem = y_start % height;
+
   for (uint32_t dy = y1; dy < y2; ++dy) {
-    uint32_t sy = (uint32_t)(((uint64_t)(dy - y) * source_height) / height);
+    uint32_t sx = (uint32_t)(((uint64_t)(x1 - x) * source_width) / width);
+    uint64_t sx_rem = ((uint64_t)(x1 - x) * source_width) % width;
     uint32_t *out = &dst[dy * g_boot_info->pitch];
+
     for (uint32_t dx = x1; dx < x2; ++dx) {
-      uint32_t sx = (uint32_t)(((uint64_t)(dx - x) * source_width) / width);
       const uint8_t *pixel =
           source + (((uint64_t)sy * source_stride + sx) * 4ull);
       uint8_t alpha = pixel[3];
-      if (!alpha)
-        continue;
+      if (alpha) {
+        uint32_t color = ((uint32_t)pixel[0] << 16) |
+                         ((uint32_t)pixel[1] << 8) |
+                         (uint32_t)pixel[2];
+        if (alpha == 255u)
+          out[dx] = color;
+        else
+          out[dx] = gfx_blend_rgb(out[dx], color, alpha);
+      }
 
-      uint32_t color = ((uint32_t)pixel[0] << 16) |
-                       ((uint32_t)pixel[1] << 8) |
-                       (uint32_t)pixel[2];
-      if (alpha == 255u)
-        out[dx] = color;
-      else
-        out[dx] = gfx_blend_rgb(out[dx], color, alpha);
+      sx += sx_step;
+      sx_rem += sx_step_rem;
+      if (sx_rem >= width) {
+        sx_rem -= width;
+        ++sx;
+      }
+    }
+
+    sy += sy_step;
+    sy_rem += sy_step_rem;
+    if (sy_rem >= height) {
+      sy_rem -= height;
+      ++sy;
     }
   }
 }
