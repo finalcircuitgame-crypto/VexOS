@@ -782,7 +782,16 @@ static void draw_taskbar(void){
   uint32_t dw=320u;if(dw+32u>g_bi->width)dw=g_bi->width>32u?g_bi->width-32u:1u;uint32_t dx=(g_bi->width-dw)/2u;
   gfx_blend_round_rect(dx,sy,dw,sh,11u,0x101C2Au,245u);gfx_draw_rect(dx+1u,sy,dw-2u,1u,0x3A526Bu);
   const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_VIEWER,APP_NOTEPAD,APP_DOOM};uint32_t ix=dx+16u,iy=sy+(sh>40u?(sh-40u)/2u:0u);
-  for(uint32_t i=0;i<5u;i++){if(i<4u||g_ring3_task_started)draw_app_icon(ix,iy,40u,apps[i]);ix+=50u;}
+  for(uint32_t i=0;i<5u;i++){
+    if(i<4u||g_ring3_task_started){
+      draw_app_icon(ix,iy,40u,apps[i]);
+      if(g_app_open[apps[i]]){
+        uint32_t indicator=wm_get_focus()==apps[i]?0x65B5FFu:0x526D88u;
+        gfx_blend_round_rect(ix+15u,iy+40u,10u,2u,1u,indicator,255u);
+      }
+    }
+    ix+=50u;
+  }
   uint32_t cx=g_bi->width>120u?g_bi->width-120u:0u;gfx_blend_round_rect(cx,sy,112u,sh,9u,0x101C2Au,245u);
   uint8_t h,m,sec,d,mo;uint16_t yr;if(desktop_clock(&h,&m,&sec,&d,&mo,&yr)){
     char t[6]={(char)('0'+h/10u),(char)('0'+h%10u),':',(char)('0'+m/10u),(char)('0'+m%10u),0};
@@ -794,7 +803,16 @@ static void draw_start_menu(void){
   if(!g_bi||!g_start_open)return;uint32_t bh=56u;if(bh>g_bi->height)bh=g_bi->height;uint32_t by=g_bi->height-bh,x=10u,w=280u,h=168u,y=by>h+8u?by-h-8u:8u;gfx_blend_round_rect(x,y,w,h,12u,0x101B2Au,250u);
   gfx_draw_rect(x+1u,y+1u,w-2u,1u,0x5A83A8u);gfx_draw_rect(x+1u,y+h-1u,w-2u,1u,0x26394Fu);gfx_draw_rect(x+1u,y+1u,1u,h-2u,0x354B63u);gfx_draw_rect(x+w-2u,y+1u,1u,h-2u,0x26394Fu);gfx_draw_string(x+16u,y+9u,"VEXOS",0xF0F6FCu);gfx_draw_string(x+208u,y+9u,"APPS",0x7FA0BEu);gfx_draw_rect(x+14u,y+22u,w-28u,1u,0x2B4057u);
   const app_id_t apps[6]={APP_SHELL,APP_EXPLORER,APP_NOTEPAD,APP_VIEWER,APP_SETUP,APP_DOOM};
-  for(uint32_t i=0;i<6u;i++){uint32_t ry=y+28u+i*22u;if((i&1u)==0u)gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);draw_app_icon(x+17u,ry+1u,19u,apps[i]);gfx_draw_string(x+46u,ry+7u,app_registry_name(apps[i]),0xDCE8F4u);if(i==0u)gfx_draw_string(x+232u,ry+7u,">",0x75A8D4u);}
+  for(uint32_t i=0;i<6u;i++){
+    uint32_t ry=y+28u+i*22u;
+    if((i&1u)==0u)
+      gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x17283Bu,160u);
+    if(apps[i]==wm_get_focus())
+      gfx_blend_round_rect(x+10u,ry,w-20u,21u,4u,0x24496Au,220u);
+    draw_app_icon(x+17u,ry+1u,19u,apps[i]);
+    gfx_draw_string(x+46u,ry+7u,app_registry_name(apps[i]),0xDCE8F4u);
+    if(i==0u)gfx_draw_string(x+232u,ry+7u,">",0x75A8D4u);
+  }
 }
 
 static void draw_desktop_icons(void){
