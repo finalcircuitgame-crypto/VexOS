@@ -288,6 +288,8 @@ static uint8_t g_ci_start_click_seen;
 
 static uint8_t g_ring3_task_started;
 static uint8_t g_fullscreen_app_active;
+static void *g_ring3_task_stack;
+static void *g_deferred_ring3_task_stack;
 
 void desktop_set_fullscreen_app_active(int active) {
   g_fullscreen_app_active = active ? 1u : 0u;
@@ -297,6 +299,10 @@ void desktop_set_fullscreen_app_active(int active) {
 void desktop_user_app_exited(int faulted) {
   g_fullscreen_app_active = 0;
   g_ring3_task_started = 0;
+  if (g_ring3_task_stack) {
+    g_deferred_ring3_task_stack = g_ring3_task_stack;
+    g_ring3_task_stack = NULL;
+  }
   if (faulted)
     shell_append("ring3: application crashed; returned to desktop\\n> ");
   else
@@ -580,6 +586,7 @@ static void launch_ring3_task(void) {
   }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
+  g_ring3_task_stack = stack;
   Task_Create(ring3_task_entry, stack_top);
 }
 
@@ -1536,6 +1543,10 @@ void desktop_tick(void) {
   /* Reap the previous process's kernel transition stack only after the
      exception/syscall handler has switched back to this kernel task. */
   usermode_reap_deferred();
+  if (g_deferred_ring3_task_stack) {
+    kfree(g_deferred_ring3_task_stack);
+    g_deferred_ring3_task_stack = NULL;
+  }
 
   if (!g_bi || g_fullscreen_app_active)
     return;
