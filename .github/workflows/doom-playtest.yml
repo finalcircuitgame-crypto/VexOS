@@ -178,7 +178,7 @@ jobs:
           greeting = json.loads(stream.readline())
           if "QMP" not in greeting: raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
           def command(payload):
-              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
               while True:
                   response = json.loads(stream.readline())
                   if "return" in response: return response["return"]
@@ -203,12 +203,12 @@ jobs:
           sock.connect("/tmp/vexos-doom-qmp.sock")
           stream = sock.makefile("r", encoding="utf-8")
           json.loads(stream.readline())
-          sock.sendall((json.dumps({"execute":"qmp_capabilities"}) + "\\r\\n").encode())
+          sock.sendall((json.dumps({"execute":"qmp_capabilities"}) + "\r\n").encode())
           while True:
               msg=json.loads(stream.readline())
               if "return" in msg: break
               if "error" in msg: raise RuntimeError(msg["error"])
-          sock.sendall((json.dumps({"execute":"screendump","arguments":{"filename":"artifacts/02-doom-launching.ppm"}}) + "\\r\\n").encode())
+          sock.sendall((json.dumps({"execute":"screendump","arguments":{"filename":"artifacts/02-doom-launching.ppm"}}) + "\r\n").encode())
           while True:
               msg=json.loads(stream.readline())
               if "return" in msg: break
