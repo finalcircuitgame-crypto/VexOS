@@ -1989,25 +1989,25 @@ static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
     "Ready"
   };
 
-  draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
+  gfx_draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
   gfx_draw_string(32, 32, step_titles[g_fullscreen_setup_step], 0xFFFFFF);
-  draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
+  gfx_draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
 
   uint32_t bar_y = 80;
   uint32_t bar_w = screen_w - 64;
   uint32_t step_w = bar_w / 5u;
-  draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
+  gfx_draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
   for (uint32_t i = 0; i < 5u; ++i) {
     uint32_t cx = 32u + i * step_w;
     uint32_t color = (i <= g_fullscreen_setup_step) ? 0x22C55E : 0x303040;
-    draw_rect(cx + 2u, bar_y + 2u, step_w - 4u, 4u, color);
+    gfx_draw_rect(cx + 2u, bar_y + 2u, step_w - 4u, 4u, color);
   }
 
   uint32_t content_y = 120u;
   uint32_t content_h = screen_h > 240u ? screen_h - 240u : 1u;
   gfx_blend_rect(32, content_y, screen_w - 64u, content_h, 0x0F141C, 220);
-  draw_rect(32, content_y, screen_w - 64u, 1u, 0x2A3140);
-  draw_rect(32, content_y + content_h - 1u, screen_w - 64u, 1u, 0x0B0E14);
+  gfx_draw_rect(32, content_y, screen_w - 64u, 1u, 0x2A3140);
+  gfx_draw_rect(32, content_y + content_h - 1u, screen_w - 64u, 1u, 0x0B0E14);
 
   uint32_t text_x = 56u;
   uint32_t text_y = content_y + 32u;
@@ -2043,17 +2043,17 @@ static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
 
   uint32_t btn_y = screen_h > 72u ? screen_h - 72u : 0u;
   if (g_fullscreen_setup_step > 0u) {
-    draw_rect(32, btn_y, 100u, 32u, 0x2A3140);
+    gfx_draw_rect(32, btn_y, 100u, 32u, 0x2A3140);
     gfx_draw_string(64, btn_y + 12u, "Back", 0xFFFFFF);
   } else {
-    draw_rect(32, btn_y, 100u, 32u, 0x1A1F2A);
+    gfx_draw_rect(32, btn_y, 100u, 32u, 0x1A1F2A);
     gfx_draw_string(64, btn_y + 12u, "Back", 0x505050);
   }
 
   const char *button_text = (g_fullscreen_setup_step == 4u) ? "Finish" : "Next";
   uint32_t button_color = (g_fullscreen_setup_step == 4u) ? 0x22C55E : 0x2244AA;
   uint32_t button_x = screen_w - 132u;
-  draw_rect(button_x, btn_y, 100u, 32u, button_color);
+  gfx_draw_rect(button_x, btn_y, 100u, 32u, button_color);
   gfx_draw_string(button_x + 28u, btn_y + 12u, button_text, 0xFFFFFF);
 }
 
