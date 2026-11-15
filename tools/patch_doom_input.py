@@ -51,7 +51,7 @@ def main() -> int:
     patched = source.replace(OLD, NEW, 1)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     try:
-        args.output.write_text(patched, encoding="utf-8", newline="\n")
+        args.output.write_text(patched, encoding="utf-8")
     except OSError as exc:
         print(f"patch_doom_input: cannot write {args.output}: {exc}", file=sys.stderr)
         return 1
