@@ -59,8 +59,11 @@ def main():
         table = bytearray(image.read(table_bytes))
 
         entries = []
+        entries_per_sector = SECTOR // ENTRY_SIZE
         for i in range(MAX_FILES):
-            off = i * ENTRY_SIZE
+            # Match the kernel's per-sector table layout. Each 45-byte entry
+            # must fit wholly inside one 512-byte sector (11 entries/sector).
+            off = (i // entries_per_sector) * SECTOR + (i % entries_per_sector) * ENTRY_SIZE
             used = table[off]
             name = bytes(table[off+1:off+1+NAME_MAX]).split(b"\0", 1)[0].decode("ascii", "ignore")
             start, size, _reserved = struct.unpack_from("<III", table, off+1+NAME_MAX)
@@ -80,7 +83,7 @@ def main():
             image.seek(start * SECTOR)
             image.write(data + bytes(sectors * SECTOR - len(data)))
             name_bytes = name.encode("ascii") + bytes(NAME_MAX - len(name))
-            off = slot * ENTRY_SIZE
+            off = (slot // entries_per_sector) * SECTOR + (slot % entries_per_sector) * ENTRY_SIZE
             entry = struct.pack("<B32sIII", 1, name_bytes, start, len(data), 0)
             table[off:off+ENTRY_SIZE] = entry
             if existing is None:
