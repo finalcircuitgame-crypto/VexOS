@@ -279,7 +279,7 @@ uint64_t syscall_handler(uint64_t rsp) {
         frame->rax = desktop_doom_app_ready() ? 0u : (uint64_t)-1;
         break;
     case 10: {
-        xhci_poll_events();
+        /* The kernel desktop task owns xHCI event-ring polling. */
         input_kbd_event_t event;
         if(!desktop_doom_input_active()) {
             frame->rax=0;
@@ -295,7 +295,7 @@ uint64_t syscall_handler(uint64_t rsp) {
         break;
     }
     case 12: {
-        xhci_poll_events();
+        /* Read the input state collected by the desktop task's xHCI poll. */
         input_pointer_state_t pointer=input_pointer_get();
         int32_t dx=0,dy=0;
         input_pointer_take_motion(&dx,&dy);

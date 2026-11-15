@@ -280,8 +280,8 @@ static void shell_append(const char *s);
 
 // External functions
 void xhci_poll_events(void);
-#ifdef VEXOS_CI_INPUT_TEST
 extern void serial_print(const char *str);
+#ifdef VEXOS_CI_INPUT_TEST
 static uint8_t g_ci_keyboard_input_seen;
 static uint8_t g_ci_mouse_move_seen;
 static uint8_t g_ci_start_click_seen;
@@ -291,15 +291,29 @@ static uint8_t g_ring3_task_started;
 static uint8_t g_doom_window_dirty;
 static uint8_t g_doom_click_handled;
 static uint8_t g_doom_mouse_captured;
+static uint8_t g_doom_tick_reported;
+static uint8_t g_doom_draw_reported;
+static uint8_t g_doom_frame_reported;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
 
 int desktop_doom_app_ready(void) {
-  if (!doom_window_open()) return 0;
-  int32_t discard_x=0,discard_y=0;
-  input_pointer_take_motion(&discard_x,&discard_y);
-  g_doom_mouse_captured=0;g_app_open[APP_DOOM]=1;g_start_open=0;
-  wm_raise(APP_DOOM);g_doom_window_dirty=1;return 1;
+  if (!doom_window_open()) {
+    serial_print("[DOOMWIN] Window buffer allocation failed\n");
+    return 0;
+  }
+  int32_t discard_x = 0, discard_y = 0;
+  input_pointer_take_motion(&discard_x, &discard_y);
+  g_doom_mouse_captured = 0;
+  g_doom_tick_reported = 0;
+  g_doom_draw_reported = 0;
+  g_doom_frame_reported = 0;
+  g_app_open[APP_DOOM] = 1;
+  g_start_open = 0;
+  wm_raise(APP_DOOM);
+  g_doom_window_dirty = 1;
+  serial_print("[DOOMWIN] Window opened and focused\n");
+  return 1;
 }
 int desktop_doom_input_active(void) { return g_app_open[APP_DOOM] && wm_get_focus()==APP_DOOM; }
 int desktop_doom_mouse_input_active(void) {
@@ -322,7 +336,9 @@ int desktop_doom_close_requested(void) { return doom_window_close_requested(); }
 /* Called from the kernel after a ring-3 process exits or faults. */
 void desktop_user_app_exited(int faulted) {
   g_ring3_task_started = 0;
-  g_app_open[APP_DOOM]=0;g_doom_mouse_captured=0;doom_window_app_exited();
+  g_app_open[APP_DOOM]=0;g_doom_mouse_captured=0;
+  g_doom_tick_reported=0;g_doom_draw_reported=0;g_doom_frame_reported=0;
+  doom_window_app_exited();
   g_doom_window_dirty=1;g_doom_click_handled=0;g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
   if (g_ring3_task_stack) {
     g_deferred_ring3_task_stack = g_ring3_task_stack;
@@ -908,8 +924,22 @@ static void draw_widgets(void);
 
 
 
-void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
-  if (doom_window_draw_frame(src,w,h)) g_doom_window_dirty=1;
+void desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h) {
+  if (doom_window_draw_frame(src, w, h)) {
+    g_doom_window_dirty = 1;
+    if (!g_doom_frame_reported) {
+      g_doom_frame_reported = 1;
+      serial_print("[DOOMWIN] First frame received from Doom\n");
+    }
+  }
+}
+
+static void draw_doom_window_if_open(void) {
+  if (!g_doom_draw_reported && g_app_open[APP_DOOM]) {
+    g_doom_draw_reported = 1;
+    serial_print("[DOOMWIN] Compositor is drawing the Doom window\n");
+  }
+  doom_window_draw();
 }
 
 static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
@@ -1467,7 +1497,7 @@ void desktop_init(BootInfo *bootInfo) {
   window_compositor_register(APP_VIEWER, &g_app_open[APP_VIEWER], draw_viewer_window_if_open);
   window_compositor_register(APP_NOTEPAD, &g_app_open[APP_NOTEPAD], draw_notepad_window_if_open);
   window_compositor_register(APP_SETUP, &g_app_open[APP_SETUP], draw_setup_window_if_open);
-  window_compositor_register(APP_DOOM, &g_app_open[APP_DOOM], doom_window_draw);
+  window_compositor_register(APP_DOOM, &g_app_open[APP_DOOM], draw_doom_window_if_open);
   doom_window_init(bootInfo->width,bootInfo->height);
   wm_raise(APP_SHELL);
 
@@ -1595,6 +1625,10 @@ void desktop_tick(void) {
   prev_buttons = buttons;
 
   uint8_t ui_changed = 0;
+  if (g_app_open[APP_DOOM] && !g_doom_tick_reported) {
+    g_doom_tick_reported = 1;
+    serial_print("[DOOMWIN] Desktop task sees the open Doom window\n");
+  }
   if(g_doom_window_dirty){ui_changed=1;g_doom_window_dirty=0;}
   g_doom_click_handled=0;
 
