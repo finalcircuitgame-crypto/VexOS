@@ -324,10 +324,10 @@ uint64_t syscall_handler(uint64_t rsp) {
         } else {
             desktop_draw_frame((const uint32_t *)(uintptr_t)frame->rdi,
                                (uint32_t)w, (uint32_t)h);
-            /* Present the submitted frame through the normal desktop compositor.
-               This syscall runs with interrupts disabled, so desktop state cannot
-               be re-entered by the PIT scheduler while it is being updated. */
-            desktop_tick();
+            /* desktop_draw_frame marks the Doom window dirty. The normal
+               kernel desktop loop consumes that flag and runs the compositor
+               on its own stack; do not run the full desktop renderer here on
+               the small ring-3 syscall transition stack. */
             frame->rax = 0;
         }
         break;
