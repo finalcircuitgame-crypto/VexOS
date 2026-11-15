@@ -533,8 +533,20 @@ char* strcpy(char* dest, const char* src) {
 
 char* strncpy(char* dest, const char* src, size_t n) {
     char* d = dest;
-    while(n && (*d++ = *src++)) n--;
-    while(n--) *d++ = 0;
+
+    // Copy at most n bytes. Count the copied null terminator as one byte too;
+    // otherwise the padding loop writes one byte past the requested length.
+    while (n > 0 && *src != '\0') {
+        *d++ = *src++;
+        n--;
+    }
+
+    // Pad the remaining bytes with nulls, without ever exceeding n.
+    while (n > 0) {
+        *d++ = '\0';
+        n--;
+    }
+
     return dest;
 }
 
