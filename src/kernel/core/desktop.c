@@ -751,14 +751,14 @@ static uint8_t desktop_rtc_read(uint8_t reg) {
   __asm__ volatile("outb %0, %1" : : "a"((uint8_t)0), "Nd"((uint16_t)0x70));return v;
 }
 static uint8_t desktop_bcd(uint8_t v){return (uint8_t)(((v>>4)*10u)+(v&15u));}
-static uint8_t desktop_clock(uint8_t*h,uint8_t*m,uint8_t*d,uint8_t*mo,uint16_t*y){
+static uint8_t desktop_clock(uint8_t*h,uint8_t*m,uint8_t*sec,uint8_t*d,uint8_t*mo,uint16_t*y){
   uint8_t s1=desktop_rtc_read(0),m1=desktop_rtc_read(2),h1=desktop_rtc_read(4),d1=desktop_rtc_read(7),o1=desktop_rtc_read(8),y1=desktop_rtc_read(9),c1=desktop_rtc_read(0x32);
   uint8_t s2=desktop_rtc_read(0),m2=desktop_rtc_read(2),h2=desktop_rtc_read(4),d2=desktop_rtc_read(7),o2=desktop_rtc_read(8),y2=desktop_rtc_read(9),c2=desktop_rtc_read(0x32);
   if((desktop_rtc_read(0x0A)&128u)||s1!=s2||m1!=m2||h1!=h2||d1!=d2||o1!=o2||y1!=y2||c1!=c2)return 0;
   uint8_t st=desktop_rtc_read(0x0B),pm=h2&128u;h2&=127u;
   if(!(st&4u)){s2=desktop_bcd(s2);m2=desktop_bcd(m2);h2=desktop_bcd(h2);d2=desktop_bcd(d2);o2=desktop_bcd(o2);y2=desktop_bcd(y2);c2=desktop_bcd(c2);}
   if(!(st&2u)){h2%=12u;if(pm)h2+=12u;}
-  *h=h2;*m=m2;*d=d2;*mo=o2;*y=(c2>=19u&&c2<=99u)?(uint16_t)(c2*100u+y2):(uint16_t)(2000u+y2);
+  *h=h2;*m=m2;*sec=s2;*d=d2;*mo=o2;*y=(c2>=19u&&c2<=99u)?(uint16_t)(c2*100u+y2):(uint16_t)(2000u+y2);
   return (uint8_t)(h2<24u&&m2<60u&&d2>0u&&d2<=31u&&o2>0u&&o2<=12u);
 }
 static void draw_taskbar(void){
@@ -770,7 +770,7 @@ static void draw_taskbar(void){
   const app_id_t apps[5]={APP_SHELL,APP_EXPLORER,APP_VIEWER,APP_NOTEPAD,APP_DOOM};uint32_t ix=dx+16u,iy=sy+(sh>40u?(sh-40u)/2u:0u);
   for(uint32_t i=0;i<5u;i++){if(i<4u||g_ring3_task_started)draw_app_icon(ix,iy,40u,apps[i]);ix+=50u;}
   uint32_t cx=g_bi->width>120u?g_bi->width-120u:0u;gfx_blend_round_rect(cx,sy,112u,sh,9u,0x101C2Au,245u);
-  uint8_t h,m,d,mo;uint16_t yr;if(desktop_clock(&h,&m,&d,&mo,&yr)){
+  uint8_t h,m,sec,d,mo;uint16_t yr;if(desktop_clock(&h,&m,&sec,&d,&mo,&yr)){
     char t[6]={(char)('0'+h/10u),(char)('0'+h%10u),':',(char)('0'+m/10u),(char)('0'+m%10u),0};
     char dt[11]={(char)('0'+mo/10u),(char)('0'+mo%10u),'/',(char)('0'+d/10u),(char)('0'+d%10u),'/',(char)('0'+yr/1000u),(char)('0'+(yr/100u)%10u),(char)('0'+(yr/10u)%10u),(char)('0'+yr%10u),0};
     gfx_draw_string(cx+16u,sy+8u,t,0xF0F6FCu);gfx_draw_string(cx+16u,sy+29u,dt,0x9EB2C8u);
@@ -1438,6 +1438,15 @@ void desktop_tick(void) {
   prev_buttons = buttons;
 
   uint8_t ui_changed = 0;
+  static uint8_t last_clock_second = 255u;
+  uint8_t clock_h, clock_m, clock_second, clock_day, clock_month;
+  uint16_t clock_year;
+  if (desktop_clock(&clock_h, &clock_m, &clock_second, &clock_day,
+                    &clock_month, &clock_year) &&
+      clock_second != last_clock_second) {
+    last_clock_second = clock_second;
+    ui_changed = 1;
+  }
   if (g_app_open[APP_DOOM] && !g_doom_tick_reported) {
     g_doom_tick_reported = 1;
     serial_print("[DOOMWIN] Desktop task sees the open Doom window\n");
