@@ -28,7 +28,7 @@ jobs:
       - name: Install toolchain and VM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm
 
       - name: Verify UEFI toolchain paths
         run: |
@@ -143,7 +143,7 @@ jobs:
           rm -f artifacts/*.png /tmp/vexos-qmp.sock serial.log qemu.log
 
           export DISPLAY=:99
-          Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp >xvfb.log 2>&1 &
+          Xvfb "$DISPLAY" -screen 0 1920x800x24 -nolisten tcp >xvfb.log 2>&1 &
           xvfb_pid=$!
           sleep 0.5
           if ! kill -0 "$xvfb_pid" 2>/dev/null; then
@@ -152,9 +152,16 @@ jobs:
             exit 1
           fi
 
+          touch serial.log
+          # Put the serial console beside the 1280x800 guest display so kernel
+          # initialization and boot diagnostics are visible in the MP4 itself.
+          xterm -geometry 80x48+1280+0 -fa Monospace -fs 10 -e bash -lc 'tail -n +1 -F serial.log' >serial-viewer.log 2>&1 &
+          serial_viewer_pid=$!
+          export SDL_VIDEO_WINDOW_POS=0,0
+
           recording="artifacts/vexos-ci-run-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}.mp4"
           ffmpeg -hide_banner -loglevel info -y \
-            -f x11grab -framerate 30 -video_size 1280x800 -i "$DISPLAY+0,0" \
+            -f x11grab -framerate 30 -video_size 1920x800 -i "$DISPLAY+0,0" \
             -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
             -movflags +faststart "$recording" >recording.log 2>&1 &
           ffmpeg_pid=$!
@@ -180,6 +187,7 @@ jobs:
             else
               ffmpeg_status=1
             fi
+            kill "$serial_viewer_pid" 2>/dev/null || true
             kill "$xvfb_pid" 2>/dev/null
             wait "$xvfb_pid" 2>/dev/null
             if [ "$test_status" -eq 0 ]; then
