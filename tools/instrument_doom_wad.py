@@ -16,6 +16,7 @@ import sys
 ASSIGN_MARKER = "/* VEXOS_WAD_DIAG_ASSIGN */"
 AFTER_FREE_MARKER = "/* VEXOS_WAD_DIAG_AFTER_FREE */"
 READ_MARKER = "/* VEXOS_WAD_DIAG_READ */"
+OPEN_LOCAL_MARKER = "/* VEXOS_WAD_DIAG_OPEN_LOCAL */"
 
 
 def insert_after(source: str, marker: str, pattern: str, code_builder, label: str) -> str:
@@ -36,13 +37,27 @@ def inject(source: str) -> str:
     # some places and spaces in others.
     source = insert_after(
         source,
+        OPEN_LOCAL_MARKER,
+        r"^(?P<indent>[ \t]*)wad_file\s*=\s*W_OpenFile\s*\(\s*filename\s*\)\s*;[ \t]*$",
+        lambda indent: (
+            f"{indent}{OPEN_LOCAL_MARKER}\n"
+            f'{indent}printf("[WADDBG] LOCAL_OPEN wad_file=%p class=%p length=%u\\n",\n'
+            f"{indent}       (void *)wad_file,\n"
+            f"{indent}       (void *)(wad_file ? wad_file->file_class : NULL),\n"
+            f"{indent}       wad_file ? wad_file->length : 0u);\n"
+        ),
+        "W_AddFile local W_OpenFile result",
+    )
+
+    source = insert_after(
+        source,
         ASSIGN_MARKER,
         r"^(?P<indent>[ \t]*)strncpy\s*\(\s*lump_p->name\s*,\s*filerover->name\s*,\s*8\s*\)\s*;[ \t]*$",
         lambda indent: (
             f"{indent}{ASSIGN_MARKER}\n"
             f"{indent}if (i == 410u) {{\n"
             f'{indent}    printf("[WADDBG] ASSIGN lump=%u entry=%p wad=%p class=%p pos=%d size=%d\\n",\n'
-            f"{indent}           i, (void *)lump_p, (void *)lump_p->wad_file,\n"
+            f"{indent}           i, (void *)lump_p, (void *)wad_file, (void *)lump_p->wad_file,\n"
             f"{indent}           (void *)(lump_p->wad_file ? lump_p->wad_file->file_class : NULL),\n"
             f"{indent}           lump_p->position, lump_p->size);\n"
             f"{indent}}}\n"
