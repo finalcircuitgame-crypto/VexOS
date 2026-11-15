@@ -1524,7 +1524,7 @@ void desktop_tick(void) {
     clock_changed = 1;
     ui_changed = 1;
   }
-#ifdef VEXOS_CI_INPUT_TEST
+#ifdef VEXOS_CI_DOOM_DEMO
   /*
    * The DOOM capture runs in a headless CI guest, where synthetic host mouse
    * clicks are backend-dependent. Stage the demo on real RTC second changes:
