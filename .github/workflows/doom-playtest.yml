@@ -1,0 +1,239 @@
+name: VexOS DOOM Playtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/doom-playtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  doom-playtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out VexOS and Doom submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build and QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm unzip
+
+      - name: Build VexOS and Doom
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2 all
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+
+          make clean
+          make VEXOS_CI=1 -j2 all
+          make doom
+          test -s dist/doom.elf
+          readelf -h dist/doom.elf | grep -q 'EXEC'
+
+          FREEDOOM_VERSION=0.13.0
+          FREEDOOM_ZIP="freedoom-${FREEDOOM_VERSION}.zip"
+          FREEDOOM_URL="https://github.com/freedoom/freedoom/releases/download/v${FREEDOOM_VERSION}/${FREEDOOM_ZIP}"
+          FREEDOOM_SHA256=3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59
+          mkdir -p dist/freedoom
+          curl --fail --location --retry 3 "$FREEDOOM_URL" --output "dist/freedoom/$FREEDOOM_ZIP"
+          echo "$FREEDOOM_SHA256  dist/freedoom/$FREEDOOM_ZIP" | sha256sum --check -
+          unzip -q "dist/freedoom/$FREEDOOM_ZIP" -d dist/freedoom
+          FREEDOOM_DIR="dist/freedoom/freedoom-${FREEDOOM_VERSION}"
+          test -s "$FREEDOOM_DIR/freedoom1.wad"
+          cp "$FREEDOOM_DIR/freedoom1.wad" dist/freedoom/freedoom1.wad
+
+      - name: Boot VexOS, launch DOOM, and record playtest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS_TEMPLATE=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -s "$OVMF_CODE"
+          test -s "$OVMF_VARS_TEMPLATE"
+
+          # Seed the same small SimpleFS test file used by the regular CI run.
+          python3 - <<'PY'
+          import struct
+          image = "dist/storage.img"
+          payload = bytes((i * 37 + 11) & 0xFF for i in range(700))
+          superblock = struct.pack("<8I", 0x31465353, 1, 1, 8, 9, 11, 1, 0)
+          table = bytearray(8 * 512)
+          entry = struct.pack("<B32sIII", 1, b"ci.txt".ljust(32, b"\\0"), 9, len(payload), 0)
+          table[:len(entry)] = entry
+          with open(image, "r+b") as disk:
+              disk.seek(0)
+              disk.write(superblock)
+              disk.write(bytes(512 - len(superblock)))
+              disk.seek(512)
+              disk.write(table)
+              disk.seek(9 * 512)
+              disk.write(payload.ljust(1024, b"\\0"))
+          PY
+
+          python3 tools/pack_doom_storage.py --image dist/storage.img --elf dist/doom.elf --wad dist/freedoom/freedoom1.wad
+          cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
+          rm -f /tmp/vexos-doom-qmp.sock serial.log qemu.log
+
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1920x800x24 -nolisten tcp >xvfb.log 2>&1 &
+          xvfb_pid=$!
+          sleep 0.5
+          kill -0 "$xvfb_pid"
+
+          touch serial.log
+          xterm -geometry 80x48+1280+0 -fa Monospace -fs 10 -e bash -lc 'tail -n +1 -F serial.log' >serial-viewer.log 2>&1 &
+          serial_viewer_pid=$!
+          export SDL_VIDEO_WINDOW_POS=0,0
+
+          recording="artifacts/vexos-doom-playtest-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}.mp4"
+          ffmpeg -hide_banner -loglevel info -y \\
+            -f x11grab -framerate 30 -video_size 1920x800 -i "$DISPLAY+0,0" \\
+            -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \\
+            -movflags +faststart "$recording" >recording.log 2>&1 &
+          ffmpeg_pid=$!
+          sleep 1
+          kill -0 "$ffmpeg_pid"
+
+          qemu_pid=""
+          cleanup() {
+            status=$?
+            trap - EXIT
+            set +e
+            if [ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2>/dev/null; then kill "$qemu_pid"; fi
+            if [ -n "$qemu_pid" ]; then wait "$qemu_pid" 2>/dev/null; fi
+            kill -INT "$ffmpeg_pid" 2>/dev/null
+            wait "$ffmpeg_pid"
+            ffmpeg_status=$?
+            kill "$serial_viewer_pid" "$xvfb_pid" 2>/dev/null
+            wait "$xvfb_pid" 2>/dev/null
+            if [ -s "$recording" ] && ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 "$recording" >artifacts/video-info.txt 2>&1; then
+              printf 'MP4 recording: VERIFIED\\n' >> artifacts/test-result.txt
+              printf 'Recording: %s\\n' "$recording" >> artifacts/test-result.txt
+              cat artifacts/video-info.txt >> artifacts/test-result.txt
+            else
+              printf 'MP4 recording: FAILED VALIDATION (ffmpeg exit %s)\\n' "$ffmpeg_status" >> artifacts/test-result.txt
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          qemu-system-x86_64 \\
+            -machine pc -m 512M \\
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \\
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \\
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \\
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \\
+            -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \\
+            -display sdl -monitor none -serial file:serial.log \\
+            -qmp unix:/tmp/vexos-doom-qmp.sock,server=on,wait=off \\
+            -no-reboot -no-shutdown >qemu.log 2>&1 &
+          qemu_pid=$!
+
+          echo "Waiting for VexOS desktop..."
+          for i in $(seq 1 240); do
+            if grep -Fq "[KERNEL] Starting main loop" serial.log; then break; fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then cat serial.log; cat qemu.log; exit 1; fi
+            sleep 0.25
+          done
+          grep -Fq "[KERNEL] Starting main loop" serial.log || { cat serial.log; exit 1; }
+
+          # Capture the desktop, then issue the Doom shell command over QMP.
+          python3 - <<'PY'
+          import json, socket, time
+          path = "/tmp/vexos-doom-qmp.sock"
+          deadline = time.time() + 15
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          while True:
+              try:
+                  sock.connect(path)
+                  break
+              except (FileNotFoundError, ConnectionRefusedError):
+                  if time.time() >= deadline: raise
+                  time.sleep(0.1)
+          stream = sock.makefile("r", encoding="utf-8")
+          greeting = json.loads(stream.readline())
+          if "QMP" not in greeting: raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
+          def command(payload):
+              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              while True:
+                  response = json.loads(stream.readline())
+                  if "return" in response: return response["return"]
+                  if "error" in response: raise RuntimeError(response["error"])
+          command({"execute":"qmp_capabilities"})
+          command({"execute":"screendump","arguments":{"filename":"artifacts/01-desktop.png"}})
+          for key in ["d","o","o","m","ret"]:
+              command({"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":key}],"hold-time":100}})
+              time.sleep(0.3)
+          time.sleep(1)
+          command({"execute":"screendump","arguments":{"filename":"artifacts/02-doom-launching.png"}})
+          stream.close()
+          sock.close()
+          PY
+
+          echo "Waiting for the real Doom window and first rendered frame..."
+          for i in $(seq 1 300); do
+            if grep -Fq "[DOOMWIN] First frame received from Doom" serial.log && grep -Fq "[WADDBG] LOCAL_OPEN" serial.log; then break; fi
+            sleep 0.1
+          done
+          grep -Fq "[DOOMWIN] Window opened and focused" serial.log
+          grep -Fq "[WADDBG] LOCAL_OPEN" serial.log
+          grep -Fq "[DOOMWIN] First frame received from Doom" serial.log
+
+          # Let the game run, capturing separate checkpoints during the playtest.
+          python3 - <<'PY'
+          import json, socket, time
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          deadline = time.time() + 15
+          while True:
+              try:
+                  sock.connect("/tmp/vexos-doom-qmp.sock"); break
+              except (FileNotFoundError, ConnectionRefusedError):
+                  if time.time() >= deadline: raise
+                  time.sleep(0.1)
+          stream = sock.makefile("r", encoding="utf-8")
+          json.loads(stream.readline())
+          def command(payload):
+              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              while True:
+                  msg=json.loads(stream.readline())
+                  if "return" in msg: return
+                  if "error" in msg: raise RuntimeError(msg["error"])
+          command({"execute":"qmp_capabilities"})
+          for name, delay in [("03-doom-10s.png",10),("04-doom-25s.png",15),("05-doom-40s.png",15),("06-doom-55s.png",15)]:
+              time.sleep(delay)
+              command({"execute":"screendump","arguments":{"filename":"artifacts/"+name}})
+          stream.close(); sock.close()
+          PY
+
+          grep -Fq "[DOOMWIN] First frame received from Doom" serial.log
+          printf 'Test result: PASS - VexOS booted and Doom opened with a rendered frame.\\n' > artifacts/test-result.txt
+          echo "DOOM playtest capture complete."
+          tail -n 100 serial.log
+
+      - name: Upload DOOM playtest screenshots, MP4, and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vexos-doom-playtest-${{ github.run_number }}-${{ github.run_id }}
+          path: |
+            artifacts/
+            serial.log
+            qemu.log
+            xvfb.log
+            recording.log
+          if-no-files-found: warn
+          retention-days: 14
