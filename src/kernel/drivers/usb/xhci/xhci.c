@@ -726,7 +726,8 @@ xhci_trb_t *xhci_alloc_tr_ring(void) {
   // Link TRB at end
   ring[255].data = (uint64_t)(uintptr_t)ring;
   ring[255].status = 0;
-  ring[255].control = make_trb_control(TRB_TYPE_LINK, 1) | (1u << 1);
+  // C=0 keeps the Link TRB unavailable until the producer reaches it.
+  ring[255].control = make_trb_control(TRB_TYPE_LINK, 0) | (1u << 1);
   return ring;
 }
 
@@ -1173,9 +1174,10 @@ void xhci_init(uint64_t mmio_phys) {
   // Link TRB at end points back to ring start, toggles cycle
   command_ring[XHCI_CMD_RING_TRBS - 1].data = (uint64_t)(uintptr_t)command_ring;
   command_ring[XHCI_CMD_RING_TRBS - 1].status = 0;
-  // cycle=1 (initial), type=LINK, TC=1 (bit1)
+  // C=0 initially; command_ring_cycle/CRCR.RCS start at 1. TC=1 toggles both
+  // consumer and producer cycle states when this Link TRB is traversed.
   command_ring[XHCI_CMD_RING_TRBS - 1].control =
-      make_trb_control(TRB_TYPE_LINK, 1) | (1u << 1);
+      make_trb_control(TRB_TYPE_LINK, 0) | (1u << 1);
 
   command_ring_index = 0;
   command_ring_cycle = 1;
