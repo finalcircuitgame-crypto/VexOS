@@ -111,13 +111,13 @@ jobs:
           rm -f artifacts/*.png /tmp/vexos-qmp.sock serial.log qemu.log
 
           xvfb-run -a qemu-system-x86_64 \
-            -machine q35 \
+            -machine pc \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
-            -device ich9-ahci,id=ahci,bus=pcie.0 \
+            -device ich9-ahci,id=ahci \
             -drive if=none,id=ahci_disk,format=raw,file=dist/ahci-test.img,cache=none \
             -device ide-hd,drive=ahci_disk,bus=ahci.0 \
             -device qemu-xhci,id=xhci \
