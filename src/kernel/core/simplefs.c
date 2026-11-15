@@ -712,6 +712,47 @@ int simplefs_read_file(const char *name, void *out, uint32_t maxlen,
   return 0;
 }
 
+
+/* Read a bounded file range without allocating the entire file in the kernel. */
+int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
+                          uint32_t maxlen, uint32_t *out_len) {
+  if (out_len) *out_len = 0;
+  if (!g_dev || !name || (!out && maxlen != 0) ||
+      g_kind != STORAGE_FS_SFS)
+    return 0;
+
+  uint32_t idx = 0;
+  if (!sfs_find(name, &idx))
+    return 0;
+
+  uint32_t file_size = g_table[idx].size_bytes;
+  if (offset >= file_size || maxlen == 0)
+    return 1;
+
+  uint32_t remaining = file_size - offset;
+  uint32_t wanted = maxlen < remaining ? maxlen : remaining;
+  uint32_t copied = 0;
+  uint8_t sector[SFS_SECTOR_SIZE];
+  uint8_t *dst = (uint8_t *)out;
+
+  while (copied < wanted) {
+    uint32_t absolute = offset + copied;
+    uint32_t sector_index = absolute / SFS_SECTOR_SIZE;
+    uint32_t sector_offset = absolute % SFS_SECTOR_SIZE;
+    if (!sfs_read_sector(g_table[idx].start_lba + sector_index, sector))
+      return 0;
+    uint32_t chunk = SFS_SECTOR_SIZE - sector_offset;
+    if (chunk > wanted - copied)
+      chunk = wanted - copied;
+    for (uint32_t i = 0; i < chunk; ++i)
+      dst[copied + i] = sector[sector_offset + i];
+    copied += chunk;
+  }
+
+  if (out_len) *out_len = copied;
+  return 1;
+}
+
 int simplefs_is_mounted(void) {
   return g_kind != STORAGE_FS_NONE;
 }
