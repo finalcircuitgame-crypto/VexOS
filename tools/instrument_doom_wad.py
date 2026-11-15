@@ -17,6 +17,10 @@ ASSIGN_MARKER = "/* VEXOS_WAD_DIAG_ASSIGN */"
 AFTER_FREE_MARKER = "/* VEXOS_WAD_DIAG_AFTER_FREE */"
 READ_MARKER = "/* VEXOS_WAD_DIAG_READ */"
 OPEN_LOCAL_MARKER = "/* VEXOS_WAD_DIAG_OPEN_LOCAL */"
+STORE_MARKER = "/* VEXOS_WAD_DIAG_STORE */"
+POSITION_MARKER = "/* VEXOS_WAD_DIAG_POSITION */"
+SIZE_MARKER = "/* VEXOS_WAD_DIAG_SIZE */"
+CACHE_MARKER = "/* VEXOS_WAD_DIAG_CACHE */"
 
 
 def insert_after(source: str, marker: str, pattern: str, code_builder, label: str) -> str:
@@ -47,6 +51,59 @@ def inject(source: str) -> str:
             f"{indent}       wad_file ? wad_file->length : 0u);\n"
         ),
         "W_AddFile local W_OpenFile result",
+    )
+
+    source = insert_after(
+        source,
+        STORE_MARKER,
+        r"^(?P<indent>[ \\t]*)lump_p->wad_file\\s*=\\s*wad_file\\s*;[ \\t]*$",
+        lambda indent: (
+            f"{indent}{STORE_MARKER}\\n"
+            f"{indent}if (i == 410u) {{\\n"
+            f'{indent}    printf("[WADDBG] STORE entry=%p field=%p local=%p stored=%p sizeof=%u offsets=%u,%u,%u,%u,%u\\\\n",\\n'
+            f"{indent}           (void *)lump_p, (void *)&lump_p->wad_file, (void *)wad_file, (void *)lump_p->wad_file,\\n"
+            f"{indent}           (unsigned)sizeof(lumpinfo_t),\\n"
+            f"{indent}           (unsigned)((char *)&lump_p->wad_file - (char *)lump_p),\\n"
+            f"{indent}           (unsigned)((char *)&lump_p->position - (char *)lump_p),\\n"
+            f"{indent}           (unsigned)((char *)&lump_p->size - (char *)lump_p),\\n"
+            f"{indent}           (unsigned)((char *)&lump_p->cache - (char *)lump_p),\\n"
+            f"{indent}           (unsigned)((char *)&lump_p->next - (char *)lump_p));\\n"
+            f"{indent}}}\\n"
+        ),
+        "W_AddFile wad_file pointer store",
+    )
+
+    source = insert_after(
+        source,
+        POSITION_MARKER,
+        r"^(?P<indent>[ \\t]*)lump_p->position\\s*=\\s*LONG\\s*\\(\\s*filerover->filepos\\s*\\)\\s*;[ \\t]*$",
+        lambda indent: (
+            f"{indent}{POSITION_MARKER}\\n"
+            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_POSITION stored=%p pos=%d\\\\n\", (void *)lump_p->wad_file, lump_p->position);\\n"
+        ),
+        "W_AddFile position store",
+    )
+
+    source = insert_after(
+        source,
+        SIZE_MARKER,
+        r"^(?P<indent>[ \\t]*)lump_p->size\\s*=\\s*LONG\\s*\\(\\s*filerover->size\\s*\\)\\s*;[ \\t]*$",
+        lambda indent: (
+            f"{indent}{SIZE_MARKER}\\n"
+            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_SIZE stored=%p size=%d\\\\n\", (void *)lump_p->wad_file, lump_p->size);\\n"
+        ),
+        "W_AddFile size store",
+    )
+
+    source = insert_after(
+        source,
+        CACHE_MARKER,
+        r"^(?P<indent>[ \\t]*)lump_p->cache\\s*=\\s*NULL\\s*;[ \\t]*$",
+        lambda indent: (
+            f"{indent}{CACHE_MARKER}\\n"
+            f"{indent}if (i == 410u) printf(\"[WADDBG] AFTER_CACHE stored=%p cache=%p\\\\n\", (void *)lump_p->wad_file, lump_p->cache);\\n"
+        ),
+        "W_AddFile cache store",
     )
 
     source = insert_after(
