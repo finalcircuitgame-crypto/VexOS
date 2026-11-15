@@ -40,6 +40,7 @@ static sfs_superblock_t g_sb;
 static sfs_file_t g_table[SFS_MAX_FILES];
 
 static storage_fs_kind_t g_kind = STORAGE_FS_NONE;
+static uint8_t g_mounted;
 
 // ---------------- FAT32 (minimal, root-dir, short names, read-only) ---------
 
@@ -420,6 +421,12 @@ static int sfs_format(void) {
 }
 
 int simplefs_init(void) {
+  /* Mounting is a one-time operation. Re-running ATA IDENTIFY after the
+     AHCI controller and runtime interrupts are active can stall the desktop;
+     callers may safely request initialization more than once. */
+  if (g_mounted)
+    return 1;
+
   if (!ata_pio_init()) {
     serial_print("[SFS] no disk\n");
     return 0;
@@ -435,6 +442,7 @@ int simplefs_init(void) {
   if (fat_mount_and_scan_root()) {
     g_kind = STORAGE_FS_FAT32;
     serial_print("[FAT32] mounted\n");
+    g_mounted = 1;
     return 1;
   }
   g_kind = STORAGE_FS_SFS;
@@ -458,6 +466,7 @@ int simplefs_init(void) {
     serial_print("[SFS] mounted\n");
   }
 
+  g_mounted = 1;
   return 1;
 }
 
