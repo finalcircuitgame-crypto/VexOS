@@ -18,7 +18,7 @@ Run:
 
     make
 
-The normal build produces the UEFI boot image and kernel only.
+The normal build produces `dist/BOOTX64.EFI`, `dist/kernel.elf`, the bootable FAT image `dist/tiny64.img`, and the separate persistent data image `dist/storage.img`.
 
 DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is **not**
 built by the kernel Makefile: VexOS still needs a platform backend for
@@ -32,6 +32,14 @@ no-op placeholder, not a working port.
 run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into the SimpleFS storage image if that file exists.
 
     ./run.sh
+
+## Current status and limitations
+
+- The GitHub Actions pipeline builds the normal kernel, the separate DoomGeneric ELF, and the CI-instrumented kernel, then boots VexOS in QEMU and exercises desktop input and applications.
+- The first-boot screen is a **non-destructive welcome guide**. It does not partition, format, or install to any disk.
+- AHCI support targets SATA controllers. NVMe support is not implemented, and the AHCI driver has not yet been qualified on the user's physical laptop.
+- The current boot image is a development image, not a Windows replacement or a dual-boot installer. Do not use it to repartition or overwrite an internal drive.
+- A successful QEMU test does not guarantee compatibility with every laptop's firmware, graphics hardware, storage controller, keyboard, or touchpad.
 
 ## Notes & warnings
 - Large binary artifacts (dist/tiny64.img, dist/storage.img) exceed GitHub recommended sizes; consider using git-lfs or excluding build artifacts from the repository.
