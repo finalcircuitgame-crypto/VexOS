@@ -335,17 +335,16 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                 (uint32_t)(w - 2), 38u, 0x191F33u);
   gfx_blend_round_rect((uint32_t)(x + 12), (uint32_t)(y + 38),
                        (uint32_t)(w - 24), 24u, 6u, 0x101626u, 255u);
-  gfx_draw_string((uint32_t)(x + 22), (uint32_t)(y + 46), "<",
-                  0x9C91E8u);
-  gfx_draw_string((uint32_t)(x + 42), (uint32_t)(y + 46), ">",
-                  0x697590u);
-  gfx_draw_rect((uint32_t)(x + 62), (uint32_t)(y + 43), 1u, 14u,
+  gfx_draw_rect((uint32_t)(x + 22), (uint32_t)(y + 43), 1u, 14u,
                 0x35405B);
-  gfx_draw_string((uint32_t)(x + 76), (uint32_t)(y + 46),
+  gfx_draw_string((uint32_t)(x + 34), (uint32_t)(y + 46),
                   "VexOS  /  Storage  /  Root", 0xDCE0F2u);
 
   uint32_t search_width = w > 600 ? 154u : 110u;
   uint32_t search_x = (uint32_t)(x + w) - search_width - 22u;
+  gfx_blend_round_rect(search_x - 30u, (uint32_t)(y + 38), 24u,
+                       24u, 6u, 0x202B3Eu, 255u);
+  gfx_draw_string(search_x - 23u, (uint32_t)(y + 46), "R", 0x9EDCC5u);
   gfx_blend_round_rect(search_x, (uint32_t)(y + 38), search_width,
                        24u, 6u, 0x101626u, 255u);
   gfx_draw_string(search_x + 9u, (uint32_t)(y + 46),
@@ -366,21 +365,21 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   gfx_draw_rect((uint32_t)(x + 10), body_y + 1u, 2u,
                 body_h > 2u ? body_h - 2u : 1u, 0x796BDAu);
   gfx_draw_string((uint32_t)(x + 22), body_y + 14u,
-                  "QUICK ACCESS", 0x8F9AB6u);
+                  "LOCATIONS", 0x8F9AB6u);
   gfx_blend_round_rect((uint32_t)(x + 16), body_y + 32u,
                        128u, 27u, 5u, 0x302B50u, 255u);
   gfx_draw_rect((uint32_t)(x + 20), body_y + 40u, 3u, 11u, 0x9A88FFu);
   gfx_draw_string((uint32_t)(x + 34), body_y + 41u,
-                  "Storage", 0xF1F0FFu);
+                  "Root", 0xF1F0FFu);
   gfx_draw_string((uint32_t)(x + 22), body_y + 78u,
-                  "DEVICES", 0x8F9AB6u);
+                  "FILESYSTEM", 0x8F9AB6u);
   gfx_blend_round_rect((uint32_t)(x + 18), body_y + 91u,
                        124u, 26u, 5u, 0x1A2438u, 255u);
   gfx_draw_rect((uint32_t)(x + 24), body_y + 100u, 10u, 8u, 0x67DDB5u);
   gfx_draw_string((uint32_t)(x + 42), body_y + 100u,
-                  "VexOS disk", 0xCAD2E7u);
+                  "SimpleFS", 0xCAD2E7u);
   gfx_draw_string((uint32_t)(x + 24), body_y + 126u,
-                  "Root volume", 0x7E8BA8u);
+                  "Local files", 0x7E8BA8u);
 
   /* Main file list surface */
   uint32_t list_x = (uint32_t)x + 160u;
@@ -388,14 +387,14 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   gfx_blend_round_rect(list_x, body_y, list_w, body_h,
                        7u, 0x111929u, 255u);
   gfx_draw_string(list_x + 14u, body_y + 12u,
-                  "Storage", 0xF0F1FCu);
+                  "Root", 0xF0F1FCu);
   gfx_draw_string(list_x + 14u, body_y + 30u,
-                  "Files on this device", 0x8995B1u);
+                  "Saved on this VexOS volume", 0x8995B1u);
   if (list_w > 340u) {
     gfx_blend_round_rect(list_x + list_w - 112u, body_y + 10u,
                          98u, 20u, 6u, 0x202B3Eu, 255u);
     gfx_draw_string(list_x + list_w - 101u, body_y + 16u,
-                    "LOCAL DISK", 0x8DDCC0u);
+                    "SIMPLEFS", 0x8DDCC0u);
   }
 
   uint32_t header_y = body_y + 50u;
@@ -450,9 +449,12 @@ void file_manager_draw(const file_manager_render_context_t *context) {
       }
 
       fm_draw_file_icon(list_x + 14u, row_y + 3u, name);
-      if (fm_name_length(name) > 34u)
-        name[34] = 0;
-      gfx_draw_string(list_x + 42u, row_y + 9u, name,
+      uint32_t name_x = list_x + 42u;
+      uint32_t max_name_chars = type_x > name_x + 12u ?
+          (type_x - name_x - 12u) / 8u : 1u;
+      if (fm_name_length(name) > max_name_chars)
+        name[max_name_chars] = 0;
+      gfx_draw_string(name_x, row_y + 9u, name,
                       storage_index == g_selected ? 0xFFFFFFu : 0xD7DDF0u);
       gfx_draw_string(type_x, row_y + 9u, fm_file_kind(name), 0x929DB8u);
       if (list_w > 490u)
@@ -470,7 +472,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                       selected_name, 0xB4A8FFu);
   } else {
     gfx_draw_string((uint32_t)(x + 174), (uint32_t)(y + h - 18),
-                    "VexOS Storage", 0x8995B1u);
+                    "SimpleFS volume", 0x8995B1u);
   }
   gfx_draw_string((uint32_t)(x + w - 150), (uint32_t)(y + h - 18),
                   "Double-click to open", 0x8995B1u);
@@ -514,7 +516,15 @@ file_manager_event_t file_manager_handle_click(
   }
 
   uint32_t search_width = w > 600 ? 154u : 110u;
-  int32_t search_x = x + w - (int32_t)search_width - 22;
+  int32_t search_x = (uint32_t)(x + w) - (int32_t)search_width - 22;
+  if (fm_hit(px, py, search_x - 30, y + 38, 24, 24)) {
+    g_scroll = 0;
+    g_selected = 0xFFFFFFFFu;
+    g_last_click_index = 0xFFFFFFFFu;
+    fm_refresh();
+    wm_raise(APP_EXPLORER);
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
   if (fm_hit(px, py, search_x, y + 38, (int32_t)search_width, 24)) {
     g_search_focused = 1;
     wm_raise(APP_EXPLORER);
