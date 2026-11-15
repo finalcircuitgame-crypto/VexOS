@@ -139,7 +139,7 @@ DOOMCORE_NAMES = dummy am_map doomdef doomstat dstrings d_event d_items d_iwad d
 DOOM_OBJS = $(addprefix $(DOOMOBJDIR)/,$(addsuffix .o,$(DOOMCORE_NAMES))) \
             $(DOOMOBJDIR)/w_wad.o \
             $(DOOMOBJDIR)/doomgeneric_vexos.o $(DOOMOBJDIR)/libc.o $(DOOMOBJDIR)/doom_start.o $(DOOMOBJDIR)/doom_entry.o
-# Doom runs at 256 GiB in the user address space, outside the kernel's low identity map.
+# Doom runs at 128 GiB, leaving the 256 GiB user heap/mmap region free, outside the kernel's low identity map.
 DOOM_CFLAGS = -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -mno-red-zone -mcmodel=large -O2 -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=640 -DDOOMGENERIC_RESY=400 -I$(DOOMDIR) -I$(SRCDIR)/usermode/libc
 DOOM_LDFLAGS = -nostdlib -static -no-pie -Wl,-T,$(SRCDIR)/usermode/doom/linker.ld -Wl,--build-id=none
 
