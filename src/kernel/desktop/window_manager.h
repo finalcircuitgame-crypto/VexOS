@@ -16,7 +16,8 @@ typedef enum {
   APP_VIEWER = 2,
   APP_NOTEPAD = 3,
   APP_SETUP = 4,
-  APP_COUNT = 5
+  APP_DOOM = 5,
+  APP_COUNT = 6
 } app_id_t;
 
 /* Internal desktop window-order/focus service. */

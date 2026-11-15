@@ -5,7 +5,8 @@ static const desktop_app_info_t g_apps[APP_COUNT] = {
   { APP_EXPLORER, "Files" },
   { APP_VIEWER, "Viewer" },
   { APP_NOTEPAD, "Notepad" },
-  { APP_SETUP, "Setup" }
+  { APP_SETUP, "Setup" },
+  { APP_DOOM, "Doom" }
 };
 
 static uint8_t g_registry_ready;

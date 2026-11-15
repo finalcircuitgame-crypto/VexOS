@@ -35,6 +35,10 @@ static uint64_t g_next_mmap = USER_MMAP_BASE;
 static uint64_t g_user_mmap_pages[USER_MMAP_TRACKED_PAGES];
 static uint32_t g_user_mmap_page_count;
 
+static int16_t clamp_mouse_axis(int32_t v) {
+    if(v>32767)return 32767;if(v<-32768)return -32768;return (int16_t)v;
+}
+
 /* Release all resources owned by the current ring-3 process. */
 void syscall_process_cleanup(void) {
     for (int fd = 3; fd < MAX_OPEN_FILES; ++fd) {
@@ -269,26 +273,38 @@ uint64_t syscall_handler(uint64_t rsp) {
         frame->rax = input_kbd_pop_char(&c) ? (uint64_t)(uint8_t)c : 0;
         break;
     }
-    // Returns 0 when empty, otherwise bit 16 marks a valid event,
-    // bit 8 is pressed/released, and bits 0..7 contain the HID usage.
+    // Keyboard events use bit 16 as valid, bit 8 as pressed/released,
+    // and bits 0..7 as the USB HID usage.
     case 11:
-        desktop_set_fullscreen_app_active(1);
-        frame->rax = 0;
+        frame->rax = desktop_doom_app_ready() ? 0u : (uint64_t)-1;
         break;
     case 10: {
-        // The ring-3 app replaces the desktop task while it is running, so
-        // the normal kernel main loop no longer polls xHCI. Poll here before
-        // draining the event queue; otherwise key-up reports never arrive
-        // and Doom can leave a key logically held forever.
         xhci_poll_events();
-
         input_kbd_event_t event;
-        if (input_kbd_pop_event(&event))
-            frame->rax = 0x10000ULL | ((uint64_t)event.pressed << 8) | event.usage;
-        else
-            frame->rax = 0;
+        if(!desktop_doom_input_active()) {
+            while(input_kbd_pop_event(&event)) { }
+            frame->rax=0;
+        } else if(input_kbd_pop_event(&event)) {
+            frame->rax=0x10000ULL|((uint64_t)event.pressed<<8)|event.usage;
+        } else frame->rax=0;
         break;
     }
+    case 12: {
+        xhci_poll_events();
+        input_pointer_state_t pointer=input_pointer_get();
+        int32_t dx=0,dy=0;
+        input_pointer_take_motion(&dx,&dy);
+        uint32_t buttons=0;
+        if(desktop_doom_mouse_input_active()) buttons=pointer.buttons&7u;
+        else {dx=0;dy=0;}
+        frame->rax=(uint64_t)(uint16_t)clamp_mouse_axis(dx)|
+                   ((uint64_t)(uint16_t)clamp_mouse_axis(dy)<<16)|
+                   ((uint64_t)buttons<<32);
+        break;
+    }
+    case 13:
+        frame->rax=desktop_doom_close_requested()?1u:0u;
+        break;
     case 9: {
         uint64_t w = frame->rsi;
         uint64_t h = frame->rdx;

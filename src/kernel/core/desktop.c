@@ -74,6 +74,7 @@ static uint32_t g_explorer_last_click_index;
 #include "../desktop/apps/notepad/notepad.h"
 #include "../desktop/apps/terminal/terminal.h"
 #include "../desktop/apps/terminal/shell_commands.h"
+#include "../desktop/apps/doom/doom_window.h"
 
 static uint8_t g_app_open[APP_COUNT];
 
@@ -287,18 +288,32 @@ static uint8_t g_ci_start_click_seen;
 #endif
 
 static uint8_t g_ring3_task_started;
-static uint8_t g_fullscreen_app_active;
+static uint8_t g_doom_window_dirty;
+static uint8_t g_doom_click_handled;
+static uint8_t g_doom_mouse_captured;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
 
-void desktop_set_fullscreen_app_active(int active) {
-  g_fullscreen_app_active = active ? 1u : 0u;
+int desktop_doom_app_ready(void) {
+  if (!doom_window_open()) return 0;
+  int32_t discard_x=0,discard_y=0;
+  input_pointer_take_motion(&discard_x,&discard_y);
+  g_doom_mouse_captured=0;g_app_open[APP_DOOM]=1;g_start_open=0;
+  wm_raise(APP_DOOM);g_doom_window_dirty=1;return 1;
 }
+int desktop_doom_input_active(void) { return g_app_open[APP_DOOM] && wm_get_focus()==APP_DOOM; }
+int desktop_doom_mouse_input_active(void) {
+  if(!desktop_doom_input_active()){g_doom_mouse_captured=0;return 0;}
+  if(g_doom_mouse_captured)return 1;
+  input_pointer_state_t p=input_pointer_get();return doom_window_pointer_in_content(p.x,p.y);
+}
+int desktop_doom_close_requested(void) { return doom_window_close_requested(); }
 
 /* Called from the kernel after a ring-3 process exits or faults. */
 void desktop_user_app_exited(int faulted) {
-  g_fullscreen_app_active = 0;
   g_ring3_task_started = 0;
+  g_app_open[APP_DOOM]=0;g_doom_mouse_captured=0;doom_window_app_exited();
+  g_doom_window_dirty=1;g_doom_click_handled=0;g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
   if (g_ring3_task_stack) {
     g_deferred_ring3_task_stack = g_ring3_task_stack;
     g_ring3_task_stack = NULL;
@@ -883,19 +898,7 @@ static void draw_widgets(void);
 
 
 void desktop_draw_frame(const uint32_t* src, uint32_t w, uint32_t h) {
-  if (!g_bi || !src) return;
-  // A userspace framebuffer client owns the display after its first frame.
-  // Otherwise the desktop compositor would overwrite every game frame.
-  uint32_t* dst = g_bi->framebuffer;
-  uint32_t copy_w = (w > g_bi->width) ? g_bi->width : w;
-  uint32_t copy_h = (h > g_bi->height) ? g_bi->height : h;
-  for (uint32_t yy = 0; yy < copy_h; yy++) {
-    uint32_t *drow = &dst[yy * g_bi->pitch];
-    const uint32_t *srow = &src[yy * w];
-    for (uint32_t xx = 0; xx < copy_w; xx++) {
-      drow[xx] = srow[xx];
-    }
-  }
+  if (doom_window_draw_frame(src,w,h)) g_doom_window_dirty=1;
 }
 
 static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
@@ -957,6 +960,20 @@ static int hit_test(int32_t px, int32_t py, int32_t x, int32_t y, int32_t w,
   if (px >= (x + w) || py >= (y + h))
     return 0;
   return 1;
+}
+
+static int focused_window_contains(int32_t x,int32_t y) {
+ const desktop_window_t *w=NULL;
+ switch(wm_get_focus()) {
+  case APP_SHELL: if(g_show_shell) w=terminal_window(); break;
+  case APP_EXPLORER: if(g_explorer_open) w=&g_explorer_win; break;
+  case APP_VIEWER: if(g_viewer_open) w=&g_viewer_win; break;
+  case APP_NOTEPAD: if(g_app_open[APP_NOTEPAD]) w=notepad_window(); break;
+  case APP_SETUP: if(g_setup_open) w=&g_setup_win; break;
+  case APP_DOOM: return doom_window_contains(x,y);
+  default: break;
+ }
+ return w ? hit_test(x,y,w->x,w->y,w->w,w->h) : 0;
 }
 
 static uint32_t shell_u32_to_dec(char out[12], uint32_t v) {
@@ -1439,6 +1456,8 @@ void desktop_init(BootInfo *bootInfo) {
   window_compositor_register(APP_VIEWER, &g_app_open[APP_VIEWER], draw_viewer_window_if_open);
   window_compositor_register(APP_NOTEPAD, &g_app_open[APP_NOTEPAD], draw_notepad_window_if_open);
   window_compositor_register(APP_SETUP, &g_app_open[APP_SETUP], draw_setup_window_if_open);
+  window_compositor_register(APP_DOOM, &g_app_open[APP_DOOM], doom_window_draw);
+  doom_window_init(bootInfo->width,bootInfo->height);
   wm_raise(APP_SHELL);
 
   g_setup_dragging = 0;
@@ -1548,7 +1567,7 @@ void desktop_tick(void) {
     g_deferred_ring3_task_stack = NULL;
   }
 
-  if (!g_bi || g_fullscreen_app_active)
+  if (!g_bi)
     return;
 
   static uint32_t prev_buttons = 0;
@@ -1565,6 +1584,8 @@ void desktop_tick(void) {
   prev_buttons = buttons;
 
   uint8_t ui_changed = 0;
+  if(g_doom_window_dirty){ui_changed=1;g_doom_window_dirty=0;}
+  g_doom_click_handled=0;
 
   uint32_t kbd_budget = 32;
   while (kbd_budget--) {
@@ -1618,7 +1639,7 @@ void desktop_tick(void) {
     int32_t tb_y = (int32_t)g_bi->height - (int32_t)bar_h;
 
     // Start button hit
-    if (hit_test(p0.x, p0.y, 8, tb_y + 4, 52, (int32_t)bar_h - 8)) {
+    if (!doom_window_is_maximized() && hit_test(p0.x, p0.y, 8, tb_y + 4, 52, (int32_t)bar_h - 8)) {
       g_start_open = (uint8_t)(g_start_open ? 0u : 1u);
 #ifdef VEXOS_CI_INPUT_TEST
       if (g_start_open && !g_ci_start_click_seen) {
@@ -1627,7 +1648,7 @@ void desktop_tick(void) {
       }
 #endif
       ui_changed = 1;
-    } else if (g_start_open) {
+    } else if (!doom_window_is_maximized() && g_start_open) {
       int32_t mx=10,mw=280,mh=168,my=tb_y-176;
       if(hit_test(p0.x,p0.y,mx,my,mw,mh)){int32_t ry=p0.y-my;
         if(ry>=28&&ry<50){g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
@@ -1644,14 +1665,14 @@ void desktop_tick(void) {
     }
 
     // Desktop shortcuts launch their matching applications.
-    if(!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
+    if(!doom_window_is_maximized()&&!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
       if(i==0u){if(simplefs_init()){g_explorer_open=1;g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
       else if(i==1u){g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);}else if(i==2u){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);}else{g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);}ui_changed=1;break;}}}
 
     // Taskbar dock icons: click to focus/open
 
     // Taskbar dock icons: click to focus/open
-    {
+    if (!doom_window_is_maximized()) {
       uint32_t sy = (uint32_t)tb_y + 6u;
       uint32_t sh = bar_h - 12u;
 
@@ -1697,8 +1718,16 @@ void desktop_tick(void) {
       }
     }
 
+    if (g_app_open[APP_DOOM] &&
+        (wm_get_focus()==APP_DOOM || !focused_window_contains(p0.x,p0.y)) &&
+        doom_window_handle_click(p0.x,p0.y)) {
+      g_doom_click_handled=1;
+      g_doom_mouse_captured=doom_window_pointer_in_content(p0.x,p0.y)?1u:0u;
+      ui_changed=1;
+    }
+
     // Explorer window interactions
-    if (g_explorer_open) {
+    if (g_explorer_open && !g_doom_click_handled) {
       int32_t wx = g_explorer_win.x;
       int32_t wy = g_explorer_win.y;
       int32_t ww = g_explorer_win.w;
@@ -1760,7 +1789,7 @@ void desktop_tick(void) {
       }
     }
 
-    if (g_viewer_open) {
+    if (g_viewer_open && !g_doom_click_handled) {
       int32_t wx = g_viewer_win.x;
       int32_t wy = g_viewer_win.y;
       int32_t ww = g_viewer_win.w;
@@ -1791,7 +1820,7 @@ void desktop_tick(void) {
     }
 
     // Notepad owns click handling, save operations, and window dragging.
-    if (g_app_open[APP_NOTEPAD]) {
+    if (g_app_open[APP_NOTEPAD] && !g_doom_click_handled) {
       notepad_click_result_t result = notepad_handle_click(p0.x, p0.y);
       if (result == NOTEPAD_CLICK_CLOSE) { g_app_open[APP_NOTEPAD] = 0; ui_changed = 1; }
       else if (result == NOTEPAD_CLICK_SAVE_OK) { shell_append("notepad: saved\n> "); ui_changed = 1; }
@@ -1802,7 +1831,7 @@ void desktop_tick(void) {
     }
 
     // Setup Wizard interactions
-    if (g_setup_open) {
+    if (g_setup_open && !g_doom_click_handled) {
       int32_t wx = g_setup_win.x;
       int32_t wy = g_setup_win.y;
       int32_t ww = g_setup_win.w;
@@ -1865,7 +1894,7 @@ void desktop_tick(void) {
     }
   }
 
-  if (pressed & 1u) if (g_show_shell) {terminal_click_result_t r=terminal_handle_click(p0.x,p0.y);if(r==TERMINAL_CLICK_CLOSE){g_show_shell=0;ui_changed=1;}else if(r==TERMINAL_CLICK_FOCUS){wm_raise(APP_SHELL);ui_changed=1;}}
+  if ((pressed & 1u) && g_show_shell && !g_doom_click_handled) {terminal_click_result_t r=terminal_handle_click(p0.x,p0.y);if(r==TERMINAL_CLICK_CLOSE){g_show_shell=0;ui_changed=1;}else if(r==TERMINAL_CLICK_FOCUS){wm_raise(APP_SHELL);ui_changed=1;}}
 
   if (!(buttons & 1u)) {
     g_explorer_dragging = 0;
@@ -1900,6 +1929,7 @@ void desktop_tick(void) {
     g_setup_win.y = p0.y - g_setup_drag_off_y;
     ui_changed = 1;
   }
+  if(doom_window_pointer_update(p0.x,p0.y,buttons,p0.dx,p0.dy))ui_changed=1;
 
   if (!g_back || !g_bg) {
     // Low-memory fallback: render directly to the hardware framebuffer.

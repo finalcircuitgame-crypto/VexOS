@@ -3,6 +3,8 @@
 static input_pointer_state_t g_ptr;
 static uint32_t g_w;
 static uint32_t g_h;
+static int32_t g_pending_dx;
+static int32_t g_pending_dy;
 
 static char g_kbd_q[256];
 static uint32_t g_kbd_r;
@@ -21,6 +23,13 @@ static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
   return v;
 }
 
+static int32_t saturating_add_i32(int32_t a, int32_t b) {
+  int64_t sum = (int64_t)a + (int64_t)b;
+  if (sum > INT32_MAX) return INT32_MAX;
+  if (sum < INT32_MIN) return INT32_MIN;
+  return (int32_t)sum;
+}
+
 void input_init(uint32_t screen_w, uint32_t screen_h) {
   g_w = screen_w;
   g_h = screen_h;
@@ -30,6 +39,8 @@ void input_init(uint32_t screen_w, uint32_t screen_h) {
   g_ptr.dy = 0;
   g_ptr.buttons = 0;
   g_ptr.is_absolute = 0;
+  g_pending_dx = 0;
+  g_pending_dy = 0;
 
   g_kbd_r = 0;
   g_kbd_w = 0;
@@ -38,10 +49,13 @@ void input_init(uint32_t screen_w, uint32_t screen_h) {
 }
 
 void input_pointer_set_abs(int32_t x, int32_t y, uint32_t buttons) {
-  g_ptr.dx = x - g_ptr.x;
-  g_ptr.dy = y - g_ptr.y;
-  g_ptr.x = clamp_i32(x, 0, (int32_t)g_w - 1);
-  g_ptr.y = clamp_i32(y, 0, (int32_t)g_h - 1);
+  int32_t nx = clamp_i32(x, 0, (int32_t)g_w - 1);
+  int32_t ny = clamp_i32(y, 0, (int32_t)g_h - 1);
+  int32_t dx = nx - g_ptr.x, dy = ny - g_ptr.y;
+  g_ptr.dx = dx; g_ptr.dy = dy;
+  g_ptr.x = nx; g_ptr.y = ny;
+  g_pending_dx = saturating_add_i32(g_pending_dx, dx);
+  g_pending_dy = saturating_add_i32(g_pending_dy, dy);
   g_ptr.buttons = buttons;
   g_ptr.is_absolute = 1;
 }
@@ -59,15 +73,22 @@ void input_pointer_set_abs_scaled(int32_t x, int32_t y, int32_t x_max,
 }
 
 void input_pointer_add_rel(int32_t dx, int32_t dy, uint32_t buttons) {
-  g_ptr.dx = dx;
-  g_ptr.dy = dy;
+  g_ptr.dx = dx; g_ptr.dy = dy;
   g_ptr.x = clamp_i32(g_ptr.x + dx, 0, (int32_t)g_w - 1);
   g_ptr.y = clamp_i32(g_ptr.y + dy, 0, (int32_t)g_h - 1);
+  g_pending_dx = saturating_add_i32(g_pending_dx, dx);
+  g_pending_dy = saturating_add_i32(g_pending_dy, dy);
   g_ptr.buttons = buttons;
   g_ptr.is_absolute = 0;
 }
 
 input_pointer_state_t input_pointer_get(void) { return g_ptr; }
+
+void input_pointer_take_motion(int32_t *dx, int32_t *dy) {
+  if (dx) *dx = g_pending_dx;
+  if (dy) *dy = g_pending_dy;
+  g_pending_dx = 0; g_pending_dy = 0;
+}
 
 void input_kbd_push_char(char c) {
   uint32_t next = (g_kbd_w + 1u) & 0xFFu;
