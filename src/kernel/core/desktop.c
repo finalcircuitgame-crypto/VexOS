@@ -1516,12 +1516,46 @@ void desktop_tick(void) {
   static uint8_t last_clock_second = 255u;
   uint8_t clock_h, clock_m, clock_second, clock_day, clock_month;
   uint16_t clock_year;
+  uint8_t clock_changed = 0;
   if (desktop_clock(&clock_h, &clock_m, &clock_second, &clock_day,
                     &clock_month, &clock_year) &&
       clock_second != last_clock_second) {
     last_clock_second = clock_second;
+    clock_changed = 1;
     ui_changed = 1;
   }
+#ifdef VEXOS_CI_INPUT_TEST
+  /*
+   * The DOOM capture runs in a headless CI guest, where synthetic host mouse
+   * clicks are backend-dependent. Stage the demo on real RTC second changes:
+   * open the normal terminal window, type through terminal_handle_char(), and
+   * submit through shell_run_line(). This is compiled only into CI builds.
+   */
+  static uint8_t ci_demo_stage;
+  static uint8_t ci_demo_char_index;
+  static const char ci_demo_command[] = "doom";
+  if (clock_changed) {
+    if (ci_demo_stage == 0u) {
+      g_show_shell = 1;
+      g_app_open[APP_SHELL] = 1;
+      wm_raise(APP_SHELL);
+      ci_demo_stage = 1u;
+      serial_print("[CI] Terminal opened by automated desktop playtest\n");
+      ui_changed = 1;
+    } else if (ci_demo_stage == 1u && ci_demo_char_index < 4u) {
+      if (terminal_handle_char(ci_demo_command[ci_demo_char_index])) {
+        ci_demo_char_index++;
+        ui_changed = 1;
+      }
+      if (ci_demo_char_index == 4u)
+        ci_demo_stage = 2u;
+    } else if (ci_demo_stage == 2u) {
+      shell_run_line();
+      ci_demo_stage = 3u;
+      ui_changed = 1;
+    }
+  }
+#endif
   if (g_app_open[APP_DOOM] && !g_doom_tick_reported) {
     g_doom_tick_reported = 1;
     serial_print("[DOOMWIN] Desktop task sees the open Doom window\n");
