@@ -448,6 +448,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                       list_w - 10u, 25u, 0x151F30u);
       }
 
+      const char *kind = fm_file_kind(name);
       fm_draw_file_icon(list_x + 14u, row_y + 3u, name);
       uint32_t name_x = list_x + 42u;
       uint32_t max_name_chars = type_x > name_x + 12u ?
@@ -456,7 +457,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
         name[max_name_chars] = 0;
       gfx_draw_string(name_x, row_y + 9u, name,
                       storage_index == g_selected ? 0xFFFFFFu : 0xD7DDF0u);
-      gfx_draw_string(type_x, row_y + 9u, fm_file_kind(name), 0x929DB8u);
+      gfx_draw_string(type_x, row_y + 9u, kind, 0x929DB8u);
       if (list_w > 490u)
         fm_draw_size(size_x, row_y + 9u, storage_index);
     }
