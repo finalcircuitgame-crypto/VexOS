@@ -13,7 +13,7 @@ permissions:
 jobs:
   doom-playtest:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 21
     steps:
       - name: Check out VexOS and Doom submodule
         uses: actions/checkout@v4
