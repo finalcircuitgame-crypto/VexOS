@@ -99,9 +99,9 @@ jobs:
           export SDL_VIDEO_WINDOW_POS=0,0
 
           recording="artifacts/vexos-doom-playtest-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}.mp4"
-          ffmpeg -hide_banner -loglevel info -y \\
-            -f x11grab -framerate 30 -video_size 1920x800 -i "$DISPLAY+0,0" \\
-            -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \\
+          ffmpeg -hide_banner -loglevel info -y \
+            -f x11grab -framerate 30 -video_size 1920x800 -i "$DISPLAY+0,0" \
+            -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
             -movflags +faststart "$recording" >recording.log 2>&1 &
           ffmpeg_pid=$!
           sleep 1
@@ -120,26 +120,26 @@ jobs:
             kill "$serial_viewer_pid" "$xvfb_pid" 2>/dev/null
             wait "$xvfb_pid" 2>/dev/null
             if [ -s "$recording" ] && ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1 "$recording" >artifacts/video-info.txt 2>&1; then
-              printf 'MP4 recording: VERIFIED\\n' >> artifacts/test-result.txt
-              printf 'Recording: %s\\n' "$recording" >> artifacts/test-result.txt
+              printf 'MP4 recording: VERIFIED\n' >> artifacts/test-result.txt
+              printf 'Recording: %s\n' "$recording" >> artifacts/test-result.txt
               cat artifacts/video-info.txt >> artifacts/test-result.txt
             else
-              printf 'MP4 recording: FAILED VALIDATION (ffmpeg exit %s)\\n' "$ffmpeg_status" >> artifacts/test-result.txt
+              printf 'MP4 recording: FAILED VALIDATION (ffmpeg exit %s)\n' "$ffmpeg_status" >> artifacts/test-result.txt
               status=1
             fi
             exit "$status"
           }
           trap cleanup EXIT
 
-          qemu-system-x86_64 \\
-            -machine pc -m 512M \\
-            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \\
-            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \\
-            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \\
-            -drive if=ide,index=1,format=raw,file=dist/storage.img \\
-            -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \\
-            -display sdl -monitor none -serial file:serial.log \\
-            -qmp unix:/tmp/vexos-doom-qmp.sock,server=on,wait=off \\
+          qemu-system-x86_64 \
+            -machine pc -m 512M \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
+            -display sdl -monitor none -serial file:serial.log \
+            -qmp unix:/tmp/vexos-doom-qmp.sock,server=on,wait=off \
             -no-reboot -no-shutdown >qemu.log 2>&1 &
           qemu_pid=$!
 
@@ -168,7 +168,7 @@ jobs:
           greeting = json.loads(stream.readline())
           if "QMP" not in greeting: raise RuntimeError(f"Unexpected QMP greeting: {greeting}")
           def command(payload):
-              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
               while True:
                   response = json.loads(stream.readline())
                   if "return" in response: return response["return"]
@@ -207,7 +207,7 @@ jobs:
           stream = sock.makefile("r", encoding="utf-8")
           json.loads(stream.readline())
           def command(payload):
-              sock.sendall((json.dumps(payload) + "\\r\\n").encode())
+              sock.sendall((json.dumps(payload) + "\r\n").encode())
               while True:
                   msg=json.loads(stream.readline())
                   if "return" in msg: return
@@ -220,7 +220,7 @@ jobs:
           PY
 
           grep -Fq "[DOOMWIN] First frame received from Doom" serial.log
-          printf 'Test result: PASS - VexOS booted and Doom opened with a rendered frame.\\n' > artifacts/test-result.txt
+          printf 'Test result: PASS - VexOS booted and Doom opened with a rendered frame.\n' > artifacts/test-result.txt
           echo "DOOM playtest capture complete."
           tail -n 100 serial.log
 
