@@ -80,10 +80,15 @@ isr\vec\()_stub:
     pushq $0
     pushq $\vec
     PUSH_GPRS
+    /* Keep the complete exception frame intact while C decides whether the
+       fault came from ring 3. A recoverable user fault returns a different
+       saved kernel-task frame in RAX. */
     mov %rsp, %rdi
+    andq $-16, %rsp
     call exception_handler
-    cli
-    hlt
+    mov %rax, %rsp
+    POP_GPRS
+    iretq
 .endm
 
 .macro ISR_ERR vec
@@ -91,10 +96,13 @@ isr\vec\()_stub:
 isr\vec\()_stub:
     pushq $\vec
     PUSH_GPRS
+    /* Error-code exceptions use the same saved-frame return convention. */
     mov %rsp, %rdi
+    andq $-16, %rsp
     call exception_handler
-    cli
-    hlt
+    mov %rax, %rsp
+    POP_GPRS
+    iretq
 .endm
 
 irq0_stub:
