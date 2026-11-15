@@ -1972,157 +1972,110 @@ void desktop_tick(void) {
 }
 
 // ============================================================================
-// Fullscreen Setup Wizard (Boot-to-First-Run Mode)
+// First-boot welcome guide. This is intentionally non-destructive: VexOS does
+// not yet have a real disk partitioner or installer, so this guide never
+// claims to partition, format, or install to a drive.
 // ============================================================================
 
 static uint8_t g_fullscreen_setup_step = 0;
-static uint8_t g_fullscreen_setup_disk_ready = 0;
-static uint8_t g_fullscreen_setup_partition_done = 0;
-static uint8_t g_fullscreen_setup_format_done = 0;
 static uint8_t g_setup_complete = 0;
 
 static void draw_fullscreen_setup_step(uint32_t screen_w, uint32_t screen_h) {
-  const char *step_titles[] = {
+  static const char *step_titles[] = {
     "Welcome to VexOS",
-    "Detect Disk",
-    "Create Partition",
-    "Format Filesystem",
-    "Verify Installation",
-    "Setup Complete"
+    "Storage Support",
+    "Keyboard and Mouse",
+    "Installation Status",
+    "Ready"
   };
 
-  // Dark background
-  gfx_draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
-
-  // Title at top
+  draw_rect(0, 0, screen_w, screen_h, 0x0A0D14);
   gfx_draw_string(32, 32, step_titles[g_fullscreen_setup_step], 0xFFFFFF);
-  gfx_draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
+  draw_rect(32, 52, screen_w - 64, 2, 0x2A3140);
 
-  // Progress bar
   uint32_t bar_y = 80;
   uint32_t bar_w = screen_w - 64;
-  uint32_t step_w = bar_w / 6u;
-  gfx_draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
-  for (uint32_t i = 0; i < 6; i++) {
-    uint32_t cx = 32 + i * step_w;
+  uint32_t step_w = bar_w / 5u;
+  draw_rect(32, bar_y, bar_w, 8, 0x1A1F2A);
+  for (uint32_t i = 0; i < 5u; ++i) {
+    uint32_t cx = 32u + i * step_w;
     uint32_t color = (i <= g_fullscreen_setup_step) ? 0x22C55E : 0x303040;
-    gfx_draw_rect(cx + 2, bar_y + 2, step_w - 4, 4, color);
+    draw_rect(cx + 2u, bar_y + 2u, step_w - 4u, 4u, color);
   }
 
-  // Content area background
-  uint32_t content_y = 120;
-  uint32_t content_h = screen_h - 240;
-  gfx_blend_rect(32, content_y, screen_w - 64, content_h, 0x0F141C, 220);
-  gfx_draw_rect(32, content_y, screen_w - 64, 1, 0x2A3140);
-  gfx_draw_rect(32, content_y + content_h - 1, screen_w - 64, 1, 0x0B0E14);
+  uint32_t content_y = 120u;
+  uint32_t content_h = screen_h > 240u ? screen_h - 240u : 1u;
+  gfx_blend_rect(32, content_y, screen_w - 64u, content_h, 0x0F141C, 220);
+  draw_rect(32, content_y, screen_w - 64u, 1u, 0x2A3140);
+  draw_rect(32, content_y + content_h - 1u, screen_w - 64u, 1u, 0x0B0E14);
 
-  // Step content
-  uint32_t text_x = 56;
-  uint32_t text_y = content_y + 32;
+  uint32_t text_x = 56u;
+  uint32_t text_y = content_y + 32u;
   switch (g_fullscreen_setup_step) {
-    case 0: // Welcome
-      gfx_draw_string(text_x, text_y, "Welcome to VexOS Setup!", 0xFFFFFF);
-      gfx_draw_string(text_x, text_y + 32, "This wizard will guide you through:", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 56, "  - Disk detection", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 76, "  - Partition creation", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 96, "  - Filesystem formatting", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 136, "Click 'Next' to begin...", 0x22C55E);
+    case 0:
+      gfx_draw_string(text_x, text_y, "Welcome to VexOS.", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 32u, "This is an early x86_64 operating-system build.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 56u, "It currently boots from a UEFI disk image.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 96u, "This guide will not modify any drive.", 0x22C55E);
       break;
-    case 1: // Detect
-      gfx_draw_string(text_x, text_y, "Detecting storage devices...", 0xFFFFFF);
-      if (g_fullscreen_setup_disk_ready) {
-        gfx_draw_string(text_x, text_y + 40, "Status: Disk detected and ready", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 64, "Device: RAM Disk (1 MiB)", 0xD0D6E0);
-        gfx_draw_string(text_x, text_y + 84, "Sector size: 512 bytes", 0xD0D6E0);
-      } else {
-        gfx_draw_string(text_x, text_y + 40, "Status: Scanning for devices...", 0xFFB000);
-      }
+    case 1:
+      gfx_draw_string(text_x, text_y, "VexOS currently uses SimpleFS for data files.", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 32u, "AHCI support is being developed for SATA drives.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 56u, "NVMe support is not implemented yet.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 96u, "Storage support depends on the controller.", 0xFFB000);
       break;
-    case 2: // Partition
-      gfx_draw_string(text_x, text_y, "Creating MBR partition...", 0xFFFFFF);
-      if (g_fullscreen_setup_partition_done) {
-        gfx_draw_string(text_x, text_y + 40, "Status: Partition created successfully", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 64, "Partition: Primary (FAT16 LBA)", 0xD0D6E0);
-        gfx_draw_string(text_x, text_y + 84, "Start LBA: 1", 0xD0D6E0);
-      } else {
-        gfx_draw_string(text_x, text_y + 40, "Status: Waiting to create partition...", 0xD0D6E0);
-      }
+    case 2:
+      gfx_draw_string(text_x, text_y, "USB input is handled by the xHCI driver.", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 32u, "Keyboard and pointer compatibility varies", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 56u, "between firmware and physical hardware.", 0xD0D6E0);
       break;
-    case 3: // Format
-      gfx_draw_string(text_x, text_y, "Formatting partition...", 0xFFFFFF);
-      if (g_fullscreen_setup_format_done) {
-        gfx_draw_string(text_x, text_y + 40, "Status: Format complete", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 64, "Filesystem: FAT16", 0xD0D6E0);
-        gfx_draw_string(text_x, text_y + 84, "Volume label: VEXOS", 0xD0D6E0);
-      } else {
-        gfx_draw_string(text_x, text_y + 40, "Status: Waiting to format...", 0xD0D6E0);
-      }
+    case 3:
+      gfx_draw_string(text_x, text_y, "A real disk installer is not implemented yet.", 0xFFFFFF);
+      gfx_draw_string(text_x, text_y + 32u, "This build cannot safely partition or format", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 56u, "an internal drive or install alongside Windows.", 0xD0D6E0);
+      gfx_draw_string(text_x, text_y + 104u, "No disks will be changed by this setup guide.", 0x22C55E);
       break;
-    case 4: // Verify
-      gfx_draw_string(text_x, text_y, "Verifying installation...", 0xFFFFFF);
-      if (g_fullscreen_setup_format_done) {
-        gfx_draw_string(text_x, text_y + 40, "MBR Signature: 0x55AA (Valid)", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 60, "BPB Structure: Valid", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 80, "FAT Tables: Initialized", 0x22C55E);
-        gfx_draw_string(text_x, text_y + 100, "Root Directory: Ready", 0x22C55E);
-      }
-      break;
-    case 5: // Complete
-      gfx_draw_string(text_x, text_y, "Setup Complete!", 0x22C55E);
-      gfx_draw_string(text_x, text_y + 40, "Your VexOS installation is ready.", 0xFFFFFF);
-      gfx_draw_string(text_x, text_y + 80, "The system will now boot to the desktop.", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 100, "You can run Setup again anytime from the", 0xD0D6E0);
-      gfx_draw_string(text_x, text_y + 120, "Start menu or by typing 'setup' in Shell.", 0xD0D6E0);
+    case 4:
+      gfx_draw_string(text_x, text_y, "The VexOS desktop is ready to start.", 0x22C55E);
+      gfx_draw_string(text_x, text_y + 40u, "Click Finish to continue to the desktop.", 0xFFFFFF);
       break;
   }
 
-  // Navigation buttons at bottom
-  uint32_t btn_y = screen_h - 72;
-
-  // Back button (disabled on step 0)
-  if (g_fullscreen_setup_step > 0) {
-    gfx_draw_rect(32, btn_y, 100, 32, 0x2A3140);
-    gfx_draw_string(64, btn_y + 12, "Back", 0xFFFFFF);
+  uint32_t btn_y = screen_h > 72u ? screen_h - 72u : 0u;
+  if (g_fullscreen_setup_step > 0u) {
+    draw_rect(32, btn_y, 100u, 32u, 0x2A3140);
+    gfx_draw_string(64, btn_y + 12u, "Back", 0xFFFFFF);
   } else {
-    gfx_draw_rect(32, btn_y, 100, 32, 0x1A1F2A);
-    gfx_draw_string(64, btn_y + 12, "Back", 0x505050);
+    draw_rect(32, btn_y, 100u, 32u, 0x1A1F2A);
+    gfx_draw_string(64, btn_y + 12u, "Back", 0x505050);
   }
 
-  // Next/Finish button
-  const char *btn_text = (g_fullscreen_setup_step == 5) ? "Finish" : "Next";
-  uint32_t btn_color = (g_fullscreen_setup_step == 5) ? 0x22C55E : 0x2244AA;
-  uint32_t btn_x = screen_w - 132;
-  gfx_draw_rect(btn_x, btn_y, 100, 32, btn_color);
-  gfx_draw_string(btn_x + 28, btn_y + 12, btn_text, 0xFFFFFF);
+  const char *button_text = (g_fullscreen_setup_step == 4u) ? "Finish" : "Next";
+  uint32_t button_color = (g_fullscreen_setup_step == 4u) ? 0x22C55E : 0x2244AA;
+  uint32_t button_x = screen_w - 132u;
+  draw_rect(button_x, btn_y, 100u, 32u, button_color);
+  gfx_draw_string(button_x + 28u, btn_y + 12u, button_text, 0xFFFFFF);
 }
 
-
-// Run the fullscreen setup wizard (blocking until complete)
 void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
+  if (!bootInfo || !bootInfo->framebuffer || !bootInfo->width || !bootInfo->height)
+    return;
+
   g_bi = bootInfo;
   compositor_init(bootInfo);
   gfx_init(bootInfo, NULL, _binary_CGA_F08_start);
   g_setup_complete = 0;
   g_fullscreen_setup_step = 0;
-  g_fullscreen_setup_disk_ready = 0;
-  g_fullscreen_setup_partition_done = 0;
-  g_fullscreen_setup_format_done = 0;
-
-  // Initialize input
   input_init(bootInfo->width, bootInfo->height);
 
   uint32_t screen_w = bootInfo->width;
   uint32_t screen_h = bootInfo->height;
   uint32_t *fb = bootInfo->framebuffer;
-
-  // Allocate local backbuffer to prevent screen flickering
   uint32_t *wizard_back = NULL;
   if (bootInfo->pitch && bootInfo->height) {
-    uint64_t pixels = (uint64_t)bootInfo->pitch * (uint64_t)bootInfo->height;
-    uint64_t bytes = pixels * 4u;
-    if (bytes <= 0xFFFFFFFFu) {
+    uint64_t bytes = (uint64_t)bootInfo->pitch * (uint64_t)bootInfo->height * 4u;
+    if (bytes <= 0xFFFFFFFFu)
       wizard_back = (uint32_t *)kmalloc((uint32_t)bytes);
-    }
   }
 
   uint8_t running = 1;
@@ -2131,86 +2084,60 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
   input_pointer_state_t last_p = {0};
 
   while (running) {
-    // Poll input
     xhci_poll_events();
     input_pointer_state_t p = input_pointer_get();
 
-    // Only redraw if something changed (mouse moved, button pressed, etc)
     if (needs_redraw || p.x != last_p.x || p.y != last_p.y || p.buttons != last_p.buttons) {
-      if (wizard_back) {
-        g_back = wizard_back;
-      } else {
-        g_back = fb;
-      }
+      g_back = wizard_back ? wizard_back : fb;
       gfx_set_backbuffer(g_back);
-
       draw_fullscreen_setup_step(screen_w, screen_h);
 
-      // Draw cursor
-      uint32_t cursor_fg = 0xFFFFFF;
-      if (p.buttons & 1u) cursor_fg = 0xFFCC00;
-      else if (p.buttons & 2u) cursor_fg = 0x00CCFF;
-      for (int i = -8; i <= 8; i++) {
-        if (p.y + i < (int)screen_h) gfx_put_pixel(p.x, p.y + i, cursor_fg);
-        if (p.x + i < (int)screen_w) gfx_put_pixel(p.x + i, p.y, cursor_fg);
+      uint32_t cursor_color = (p.buttons & 1u) ? 0xFFCC00u :
+                             ((p.buttons & 2u) ? 0x00CCFFu : 0xFFFFFFu);
+      for (int32_t i = -8; i <= 8; ++i) {
+        if (p.y + i >= 0 && p.y + i < (int32_t)screen_h)
+          gfx_put_pixel((uint32_t)p.x, (uint32_t)(p.y + i), cursor_color);
+        if (p.x + i >= 0 && p.x + i < (int32_t)screen_w)
+          gfx_put_pixel((uint32_t)(p.x + i), (uint32_t)p.y, cursor_color);
       }
 
-      if (wizard_back) {
+      if (wizard_back)
         compositor_blit(fb, wizard_back, 0, 0, screen_w, screen_h);
-      }
-
       needs_redraw = 0;
       last_p = p;
     }
 
-    // Yield to prevent 100% CPU usage
-    for (volatile int i = 0; i < 1000000; i++);
+    for (volatile uint32_t i = 0; i < 100000u; ++i) {
+      __asm__ volatile("" ::: "memory");
+    }
 
-    // Handle button clicks
     if ((p.buttons & 1u) && !btn_pressed) {
       btn_pressed = 1;
-
-      // Check Next/Finish button
-      uint32_t btn_x = screen_w - 132;
-      uint32_t btn_y = screen_h - 72;
-      if (p.x >= btn_x && p.x < btn_x + 100 &&
-          p.y >= btn_y && p.y < btn_y + 32) {
-        if (g_fullscreen_setup_step == 5) {
-          // Finish - exit wizard
+      uint32_t button_y = screen_h > 72u ? screen_h - 72u : 0u;
+      uint32_t button_x = screen_w - 132u;
+      if (p.x >= (int32_t)button_x && p.x < (int32_t)(button_x + 100u) &&
+          p.y >= (int32_t)button_y && p.y < (int32_t)(button_y + 32u)) {
+        if (g_fullscreen_setup_step == 4u) {
           running = 0;
           g_setup_complete = 1;
         } else {
-          // Advance and perform action
-          switch (g_fullscreen_setup_step) {
-            case 0: g_fullscreen_setup_disk_ready = 1; break;
-            case 1: g_fullscreen_setup_partition_done = 1; break;
-            case 2: g_fullscreen_setup_format_done = 1; break;
-            case 3: /* format done */ break;
-            case 4: /* verify done */ break;
-          }
           g_fullscreen_setup_step++;
           needs_redraw = 1;
         }
-      }
-
-      // Check Back button
-      if (g_fullscreen_setup_step > 0 &&
-          p.x >= 32 && p.x < 132 &&
-          p.y >= btn_y && p.y < btn_y + 32) {
+      } else if (g_fullscreen_setup_step > 0u &&
+                 p.x >= 32 && p.x < 132 &&
+                 p.y >= (int32_t)button_y && p.y < (int32_t)(button_y + 32u)) {
         g_fullscreen_setup_step--;
         needs_redraw = 1;
       }
     }
 
-    if (!(p.buttons & 1u)) {
+    if (!(p.buttons & 1u))
       btn_pressed = 0;
-    }
-
   }
 
-  if (wizard_back) {
+  if (wizard_back)
     kfree(wizard_back);
-  }
   g_back = NULL;
   gfx_set_backbuffer(NULL);
 }
