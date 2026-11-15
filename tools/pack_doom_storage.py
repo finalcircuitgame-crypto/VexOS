@@ -76,7 +76,12 @@ def main():
             if slot is None:
                 parser.error("SimpleFS file table is full")
             sectors = math.ceil(len(data) / SECTOR)
-            start = next_lba
+            # Reuse an existing allocation when the replacement still fits.
+            # Otherwise append safely and leave the old extent untouched.
+            if existing is not None and len(data) <= entries[slot][3]:
+                start = entries[slot][2]
+            else:
+                start = next_lba
             end = (start + sectors) * SECTOR
             if end > image_size:
                 parser.error(f"not enough storage space for {name} ({len(data)} bytes needed)")
@@ -89,7 +94,8 @@ def main():
             if existing is None:
                 count += 1
             entries[slot] = (1, name, start, len(data))
-            next_lba += sectors
+            if existing is None or start == next_lba:
+                next_lba += sectors
             print(f"Packed {name}: {len(data):,} bytes at LBA {start} (table slot {slot})")
 
         image.seek(table_lba * SECTOR)
