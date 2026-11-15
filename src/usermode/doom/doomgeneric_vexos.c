@@ -55,14 +55,16 @@ static unsigned char doom_key_from_hid(uint8_t usage) {
     if (usage == 0x29) return KEY_ESCAPE;
     if (usage == 0x2a) return KEY_BACKSPACE;
     if (usage == 0x2b) return KEY_TAB;
-    if (usage == 0x2c) return ' ';
+    if (usage == 0x2c) return KEY_USE;
     if (usage == 0x2d) return KEY_MINUS;
     if (usage == 0x2e) return KEY_EQUALS;
+    if (usage >= 0x3a && usage <= 0x45)
+        return (unsigned char)(KEY_F1 + (usage - 0x3a));
     if (usage == 0x4f) return KEY_RIGHTARROW;
     if (usage == 0x50) return KEY_LEFTARROW;
     if (usage == 0x51) return KEY_DOWNARROW;
     if (usage == 0x52) return KEY_UPARROW;
-    if (usage == 0xe0 || usage == 0xe4) return KEY_RCTRL;
+    if (usage == 0xe0 || usage == 0xe4) return KEY_FIRE;
     if (usage == 0xe2 || usage == 0xe6) return KEY_RALT;
     if (usage == 0xe1 || usage == 0xe5) return KEY_RSHIFT;
     return 0;
