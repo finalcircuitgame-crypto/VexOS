@@ -769,6 +769,19 @@ static void draw_doom_window_if_open(void) {
   doom_window_draw();
 }
 
+/* A maximized, focused Doom window covers the desktop except for the taskbar.
+   Redraw only its visible content rectangle while new game frames arrive. */
+static void draw_doom_window_visible_content(uint32_t visible_height) {
+  if (!g_bi || g_bi->width <= 2u || !visible_height)
+    return;
+  gfx_reset_clip();
+  if (gfx_push_clip(1u, 31u, g_bi->width - 2u, visible_height)) {
+    draw_doom_window_if_open();
+    gfx_pop_clip();
+  }
+  gfx_reset_clip();
+}
+
 static void draw_shell_window(const desktop_window_t *win){terminal_render_context_t ctx={.window=win,.tick=g_tick,.focused=(uint8_t)(wm_get_focus()==APP_SHELL),.draw_chrome=draw_window_chrome};terminal_draw(&ctx);}
 
 static uint8_t desktop_rtc_read(uint8_t reg) {
@@ -1762,7 +1775,8 @@ void desktop_tick(void) {
     g_doom_tick_reported = 1;
     serial_print("[DOOMWIN] Desktop task sees the open Doom window\n");
   }
-  if(g_doom_window_dirty){ui_changed=1;g_doom_window_dirty=0;}
+  uint8_t doom_frame_changed = g_doom_window_dirty;
+  if (doom_frame_changed) g_doom_window_dirty = 0;
   g_doom_click_handled=0;
 
   uint32_t kbd_budget = 32;
@@ -2098,13 +2112,32 @@ void desktop_tick(void) {
                 pointer.y != g_last_cursor_y ||
                 pointer.buttons != g_last_cursor_buttons);
 
+  uint32_t doom_visible_bottom =
+      (g_bi->height > 56u) ? (g_bi->height - 56u) : 0u;
+  uint32_t doom_visible_height =
+      (doom_visible_bottom > 31u) ? (doom_visible_bottom - 31u) : 0u;
+  uint8_t doom_partial_update = (uint8_t)(
+      doom_frame_changed && g_app_open[APP_DOOM] &&
+      wm_get_focus() == APP_DOOM && doom_window_is_maximized() &&
+      !g_start_open && !ui_changed && doom_visible_height > 0u &&
+      g_bi->width > 2u);
+
+  /* Any non-Doom reason to redraw keeps the normal full-scene path. */
+  if (doom_frame_changed && !doom_partial_update)
+    ui_changed = 1;
+
   if (!g_back || !g_bg) {
     /* In fallback mode the framebuffer is the scene. Redraw it only when UI
        state changes; cursor movement uses a 26x26 save-under rectangle. */
     uint8_t scene_changed =
         (uint8_t)(g_fallback_scene_dirty || ui_changed || g_tick < 2u);
 
-    if (scene_changed) {
+    if (doom_partial_update && !scene_changed) {
+      desktop_fallback_cursor_restore();
+      draw_doom_window_visible_content(doom_visible_height);
+      desktop_fallback_cursor_capture(pointer.x, pointer.y);
+      desktop_draw_pointer_cursor(&pointer);
+    } else if (scene_changed) {
       g_fallback_cursor_valid = 0;
       if (g_app_open[APP_DOOM] && !g_doom_render_trace_done)
         serial_print("[DOOMWIN] Desktop redraw using optimized direct framebuffer\n");
@@ -2146,7 +2179,16 @@ void desktop_tick(void) {
       g_desktop_dirty = 0;
     }
 
-    if (scene_changed || cursor_changed || g_tick < 2u) {
+    uint8_t doom_partial_presented = 0;
+    if (doom_partial_update && !scene_changed) {
+      gfx_set_backbuffer(g_back);
+      draw_doom_window_visible_content(doom_visible_height);
+      compositor_blit(g_bi->framebuffer, g_back, 1u, 31u,
+                      g_bi->width - 2u, doom_visible_height);
+      doom_partial_presented = 1;
+    }
+
+    if (scene_changed || cursor_changed || doom_partial_presented || g_tick < 2u) {
       if (scene_changed) {
         compositor_blit(g_bi->framebuffer, g_back, 0, 0,
                         g_bi->width, g_bi->height);
