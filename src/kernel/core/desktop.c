@@ -1584,6 +1584,15 @@ void desktop_init(BootInfo *bootInfo) {
     }
   }
 
+  /* If either half of the double buffer failed, return the partial
+     allocation so fallback rendering has a consistent framebuffer target. */
+  if (!g_back || !g_bg) {
+    if (g_back) kfree(g_back);
+    if (g_bg) kfree(g_bg);
+    g_back = NULL;
+    g_bg = NULL;
+  }
+
   gfx_set_backbuffer(g_back);
 
   g_last_cursor_x = -1000;
