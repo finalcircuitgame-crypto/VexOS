@@ -18,6 +18,7 @@ static uint64_t g_page_pixels;
 #define VBE_INDEX_ENABLE             0x04u
 #define VBE_INDEX_VIRT_WIDTH         0x06u
 #define VBE_INDEX_VIRT_HEIGHT        0x07u
+#define VBE_INDEX_X_OFFSET           0x08u
 #define VBE_INDEX_Y_OFFSET           0x09u
 #define VBE_INDEX_VIDEO_MEMORY_64K   0x0Au
 
@@ -157,12 +158,13 @@ int compositor_enable_pageflip(void) {
   vbe_write(VBE_INDEX_VIRT_WIDTH, (uint16_t)g_boot_info->pitch);
   uint16_t virtual_width = vbe_read(VBE_INDEX_VIRT_WIDTH);
   uint16_t virtual_height = vbe_read(VBE_INDEX_VIRT_HEIGHT);
-  if (virtual_width < g_boot_info->pitch ||
+  if (virtual_width != g_boot_info->pitch ||
       virtual_height < (uint32_t)g_boot_info->height * 2u) {
     serial_print("[DISPLAY] QEMU VGA rejected the requested virtual framebuffer size\n");
     return 0;
   }
 
+  vbe_write(VBE_INDEX_X_OFFSET, 0u);
   vbe_write(VBE_INDEX_Y_OFFSET, 0u);
   g_page_pixels = page_pixels;
   g_active_page = 0;
