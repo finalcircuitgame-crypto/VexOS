@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+void xhci_poll_events(void);
+
 /* xHCI polling is shared by the desktop and user-mode input syscalls.
    Keep the event-ring walk atomic against the PIT task switch. */
 static void xhci_poll_events_atomic(void) {
@@ -37,7 +39,6 @@ void PrintString(const char *str, uint32_t color);
 void SetupGDT();
 void SetupIDT();
 void PMM_FreePages(void *addr, uint64_t count);
-void xhci_poll_events();
 
 // Serial Port output
 static inline void outb(uint16_t port, uint8_t val) {
