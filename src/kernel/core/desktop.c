@@ -1797,6 +1797,9 @@ void desktop_tick(void) {
               file_manager_open();
               g_app_open[APP_EXPLORER] = 1;
               wm_raise(APP_EXPLORER);
+#ifdef VEXOS_CI_INPUT_TEST
+              serial_print("[CI] Files opened from taskbar dock click\n");
+#endif
             } else {
               shell_append("fs init failed\n> ");
             }
