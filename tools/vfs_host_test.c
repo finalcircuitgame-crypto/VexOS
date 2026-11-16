@@ -79,8 +79,10 @@ int simplefs_write_file(const char *name, const void *data, uint32_t len) {
             if (!files[j].used) { i = (int)j; break; }
     }
     if (i < 0) return 0;
+    size_t name_len = strlen(name);
+    if (name_len >= sizeof(files[i].name)) return 0;
     memset(&files[i], 0, sizeof(files[i]));
-    strncpy(files[i].name, name, sizeof(files[i].name) - 1u);
+    memcpy(files[i].name, name, name_len + 1u);
     if (len) memcpy(files[i].data, data, len);
     files[i].size = len;
     files[i].used = 1;
