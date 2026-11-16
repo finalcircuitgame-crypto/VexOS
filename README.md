@@ -9,7 +9,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 
 ## Development roadmap
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan. The VFS foundation supports hierarchical paths, open-node lifetime tracking, and create/unlink operations on SFS1. Normal storage mounting is non-destructive: unknown or damaged volumes are rejected rather than automatically formatted.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan. The VFS foundation supports hierarchical paths, open-node lifetime tracking, and create/unlink operations on SFS1. Normal storage mounting is non-destructive: unknown or damaged volumes are rejected rather than automatically formatted. The File Manager and Notepad use VFS, and the dedicated VFS CI workflow runs host-side API regressions alongside the existing QEMU storage tests. See [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md) for VFS behavior and [`docs/PROCESS_ISOLATION.md`](docs/PROCESS_ISOLATION.md) for the current ring-3 isolation guarantees and limitations.
 
 SFS2 has checksummed metadata, VFS path/stat/directory/ranged-read support, and an optional 32-record redo journal. Journal-enabled images support transactional nested-file create/replace/unlink, automatically creating missing parent directories, with files up to 16 MiB. Journal replay runs before metadata validation, and CI injects failures at every replacement-transaction write boundary. Legacy SFS2 images without a journal remain read-only. The offline host utility in [`tools/sfs2_image.py`](tools/sfs2_image.py) formats journal-enabled images, verifies metadata, and migrates supported SFS1 images into separate SFS2 images. It refuses to overwrite existing output files unless `--force` is explicitly supplied.
 

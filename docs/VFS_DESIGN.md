@@ -72,7 +72,9 @@ The CI QEMU test harness now checks:
 - Rejection of write/unlink while a file is open, and successful unlink after the final close.
 - Empty-file create, parent-is-file rejection, and root-file creation rejection.
 
-The latest CI run must be checked against the exact PR head before this work is considered validated. A dedicated FAT32 fixture is still outstanding.
+A host-side regression target now compiles the production `src/kernel/core/vfs.c` with only its interrupt-control lock wrapper replaced by host-safe locking. The fake SimpleFS backend is deliberately limited to storage behavior; path normalization, node references, namespace checks, file handles, seek, and directory iteration are the real kernel VFS code. It checks mount idempotence, normalization and traversal rejection, nested paths, stat, create/read/replace/unlink, independent offsets, seek bounds, open-file mutation protection, immediate-child iteration, retryable small buffers, and implicit-directory lifetime. The existing QEMU boot test continues to exercise the VFS against real SFS1/SFS2 storage backends.
+
+The host suite is supplemental, not a substitute for QEMU storage testing: it does not model disk faults, journal recovery, FAT32, interrupt scheduling, or physical hardware. A dedicated FAT32 fixture is still outstanding.
 
 ## Remaining work
 

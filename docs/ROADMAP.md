@@ -51,6 +51,7 @@ Implemented:
 - Added FAT32 ranged reads by following the file's cluster chain. FAT32 remains root-only, short-name, and read-only.
 - Updated File Manager for folder navigation and the shell `fs` command for root directory listing.
 - Added CI coverage for nested paths, implicit directories, directory enumeration, independent opens, create/unlink, and open-node lifetime rules.
+- Added a host-side VFS API regression suite that compiles the production VFS implementation and exercises path normalization, read/write/create/unlink, independent offsets, seek, open-handle protection, directory iteration, and error paths; the existing QEMU test continues to validate real storage backends.
 - Added ring-3 create, whole-file replacement write, unlink, stat, directory-open, and directory-read syscalls with bounded kernel copies and user-buffer validation.
 - Preserved the existing SFS1 disk layout and existing file names.
 

@@ -1,0 +1,39 @@
+name: VFS CI
+
+on:
+  push:
+    branches: [main, feature/vfs-runtime-integration]
+    paths:
+      - "src/include/vfs.h"
+      - "src/include/simplefs.h"
+      - "src/kernel/core/vfs.c"
+      - "tools/vfs_host_test.c"
+      - ".github/workflows/vfs-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/include/vfs.h"
+      - "src/include/simplefs.h"
+      - "src/kernel/core/vfs.c"
+      - "tools/vfs_host_test.c"
+      - ".github/workflows/vfs-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vfs-host-runtime:
+    name: VFS API runtime regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Compile the production VFS implementation with host-safe locks
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -DVFS_HOST_TEST -Isrc/include \
+            src/kernel/core/vfs.c tools/vfs_host_test.c \
+            -o /tmp/vexos-vfs-tests
+      - name: Run VFS API regression tests
+        run: /tmp/vexos-vfs-tests
