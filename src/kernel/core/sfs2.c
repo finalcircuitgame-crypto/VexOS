@@ -996,11 +996,13 @@ int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
 
 
 #ifdef VEXOS_CI_INPUT_TEST
-static uint8_t g_sfs2_test_disk[16u][SFS2_SECTOR_SIZE];
+static uint8_t g_sfs2_test_disk[64u][SFS2_SECTOR_SIZE];
 static uint64_t g_sfs2_test_fail_write_lba = UINT64_MAX;
+static uint32_t g_sfs2_test_write_calls;
+static uint32_t g_sfs2_test_fail_write_call;
 
 static int sfs2_test_read(uint64_t lba, void *sector) {
-    if (!sector || lba >= 16u)
+    if (!sector || lba >= 64u)
         return 0;
     const uint8_t *src = g_sfs2_test_disk[lba];
     uint8_t *dst = (uint8_t *)sector;
@@ -1010,7 +1012,11 @@ static int sfs2_test_read(uint64_t lba, void *sector) {
 }
 
 static int sfs2_test_write(uint64_t lba, const void *sector) {
-    if (!sector || lba >= 16u || lba == g_sfs2_test_fail_write_lba)
+    if (!sector || lba >= 64u || lba == g_sfs2_test_fail_write_lba)
+        return 0;
+    ++g_sfs2_test_write_calls;
+    if (g_sfs2_test_fail_write_call &&
+        g_sfs2_test_write_calls == g_sfs2_test_fail_write_call)
         return 0;
     const uint8_t *src = (const uint8_t *)sector;
     for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
@@ -1151,16 +1157,16 @@ int sfs2_ci_mount_read_test(void) {
     sb.version = SFS2_VERSION;
     sb.header_size = sizeof(sb);
     sb.sector_size = SFS2_SECTOR_SIZE;
-    sb.volume_sectors = 16u;
+    sb.volume_sectors = 64u;
     sb.generation = 2u;
     sb.journal_lba = 1u;
-    sb.journal_sectors = 9u;
-    sb.bitmap_lba = 10u;
+    sb.journal_sectors = 33u;
+    sb.bitmap_lba = 34u;
     sb.bitmap_sectors = 1u;
-    sb.inode_table_lba = 11u;
-    sb.inode_table_sectors = 1u;
-    sb.inode_capacity = 4u;
-    sb.data_lba = 12u;
+    sb.inode_table_lba = 35u;
+    sb.inode_table_sectors = 2u;
+    sb.inode_capacity = 8u;
+    sb.data_lba = 37u;
     sb.root_inode = 1u;
     sb.checksum = sfs2_checksum(&sb, sizeof(sb),
         (uint32_t)offsetof(sfs2_superblock_t, checksum));
@@ -1172,7 +1178,7 @@ int sfs2_ci_mount_read_test(void) {
     inode.inode_id = 1u;
     inode.type = SFS2_INODE_DIRECTORY;
     sfs2_test_finish_inode(&inode);
-    sfs2_test_store_inode_at(11u, 0u, &inode);
+    sfs2_test_store_inode_at(35u, 0u, &inode);
 
     sfs2_zero(&inode, sizeof(inode));
     inode.inode_id = 2u;
@@ -1185,7 +1191,7 @@ int sfs2_ci_mount_read_test(void) {
     inode.data_lba = 12u;
     inode.data_sectors = 1u;
     sfs2_test_finish_inode(&inode);
-    sfs2_test_store_inode_at(11u, 1u, &inode);
+    sfs2_test_store_inode_at(35u, 1u, &inode);
 
     sfs2_zero(&inode, sizeof(inode));
     inode.inode_id = 3u;
@@ -1193,10 +1199,10 @@ int sfs2_ci_mount_read_test(void) {
     inode.type = SFS2_INODE_DIRECTORY;
     inode.name[0] = 'd'; inode.name[1] = 'i'; inode.name[2] = 'r';
     sfs2_test_finish_inode(&inode);
-    sfs2_test_store_inode_at(11u, 2u, &inode);
+    sfs2_test_store_inode_at(35u, 2u, &inode);
 
-    g_sfs2_test_disk[10][0] = 0x01u;
-    g_sfs2_test_disk[12][0] = 'J';
+    g_sfs2_test_disk[34][0] = 0x01u;
+    g_sfs2_test_disk[37][0] = 'J';
 
     uint8_t *journal_data = g_sfs2_test_disk[2];
     journal_data[0] = 0xA5u;
@@ -1207,8 +1213,8 @@ int sfs2_ci_mount_read_test(void) {
     journal.state = SFS2_JOURNAL_COMMITTED;
     journal.record_count = 2u;
     journal.sequence = 7u;
-    journal.targets[0] = 15u;
-    journal.targets[1] = 14u;
+    journal.targets[0] = 63u;
+    journal.targets[1] = 62u;
     journal.data_checksums[0] = sfs2_checksum(
         journal_data, SFS2_SECTOR_SIZE, SFS2_SECTOR_SIZE - 4u);
     journal.data_checksums[1] = sfs2_checksum(
@@ -1221,14 +1227,14 @@ int sfs2_ci_mount_read_test(void) {
 
     sfs2_zero(&volume, sizeof(volume));
     /* Simulate power loss after the first home-sector replay write. */
-    g_sfs2_test_fail_write_lba = 14u;
-    if (sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 16u))
+    g_sfs2_test_fail_write_lba = 62u;
+    if (sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u))
         return 0;
     g_sfs2_test_fail_write_lba = UINT64_MAX;
-    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 16u))
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u))
         return 0;
-    if (g_sfs2_test_disk[15][0] != 0xA5u ||
-        g_sfs2_test_disk[14][0] != 0x5Au ||
+    if (g_sfs2_test_disk[63][0] != 0xA5u ||
+        g_sfs2_test_disk[62][0] != 0x5Au ||
         !sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
     if (!sfs2_stat_path(&volume, "/journal", &info))
