@@ -288,6 +288,20 @@ static uint8_t g_ci_mouse_move_seen;
 static uint8_t g_ci_start_click_seen;
 #endif
 
+/* Task creation and process registration must be atomic with respect
+   to the PIT scheduler. A newly READY task must never run before its
+   process metadata (including its private CR3 and RSP0) is published. */
+static uint64_t desktop_irq_save_disable(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+  return flags;
+}
+
+static void desktop_irq_restore(uint64_t flags) {
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
 static uint8_t g_ring3_task_started;
 static volatile uint8_t g_doom_window_dirty;
 static uint8_t g_doom_click_handled;
@@ -465,8 +479,10 @@ static void launch_ring3_task(const char *filename) {
   }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
+  uint64_t irq_flags = desktop_irq_save_disable();
   int32_t task_id = Task_Create(ring3_task_entry, stack_top);
   if (task_id < 0) {
+    desktop_irq_restore(irq_flags);
     kfree(stack);
     g_ring3_task_started = 0;
     shell_append("ring3: scheduler has no free task slot\\n");
@@ -475,14 +491,17 @@ static void launch_ring3_task(const char *filename) {
 
   if (!Process_RegisterTask("Doom", (uint32_t)task_id, stack)) {
     Task_Discard((uint32_t)task_id);
+    desktop_irq_restore(irq_flags);
     kfree(stack);
     g_ring3_task_started = 0;
     shell_append("ring3: process table is full\\n");
     return;
   }
 
+  /* Publish the task's owning stack and ID before re-enabling timer IRQs. */
   g_ring3_task_stack = stack;
   g_ring3_task_id = task_id;
+  desktop_irq_restore(irq_flags);
 }
 
 static void draw_window_chrome(const desktop_window_t *win,
