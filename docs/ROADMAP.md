@@ -35,9 +35,9 @@ Remaining:
 
 ## 3. Virtual File System (VFS)
 
-**Status: Initial VFS layer implemented; filesystem-tree functionality remains**
+**Status: VFS v1 integrated with syscalls and desktop consumers; filesystem-tree functionality remains**
 
-The existing SimpleFS persistent storage remains the first backend. VFS v1 now provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode open/read syscalls now resolve files through VFS. The existing SimpleFS disk format is unchanged.
+The existing SimpleFS persistent storage remains the first backend. VFS v1 provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode file descriptors own VFS handles with independent offsets. The desktop viewer, wallpaper loader, ELF launcher, shell file listing, File Manager, and Notepad now use VFS rather than calling SimpleFS directly. The existing SimpleFS disk format is unchanged.
 
 Milestones:
 Completed in VFS v1:
@@ -47,14 +47,14 @@ Completed in VFS v1:
 - Added per-open VFS file handles with independent offsets, seek, close, and descriptor cleanup on process exit.
 - Routed user-mode open/read/seek/close syscalls through VFS; each process retains its own descriptor table.
 - Added CI checks for existing-file lookup, absolute/relative paths, traversal/nested-path rejection, write/read, ranged reads, and independent opens.
+- Routed desktop file viewing, wallpaper loading, ELF loading, shell listing, File Manager enumeration, and Notepad load/save through VFS.
+- Kept direct SimpleFS operations behind the VFS backend, apart from explicit storage-layer regression fixtures in the kernel test harness.
 
 Remaining milestones:
-1. Add explicit vnode/open-file objects and reference/lifetime rules.
+1. Add explicit vnode/open-file objects and reference/lifetime rules for shared kernel consumers.
 2. Implement directory nodes and hierarchical paths; `/docs/readme.txt` is not supported by the current flat backend.
-3. Move desktop and shell file consumers from direct SimpleFS calls to VFS.
-4. Expand process descriptors to reference VFS open-file objects, retaining independent offsets and safe cleanup.
-5. Add create/unlink semantics and comprehensive error/concurrency tests.
-6. Add FAT32 as a separate backend after the VFS contract stabilizes.
+3. Add explicit create/unlink APIs and comprehensive error/concurrency tests.
+4. Add FAT32 as a separate backend after the VFS contract stabilizes.
 
 Acceptance criteria:
 - Existing persistent files remain readable and writable without changing their on-disk format.
@@ -110,7 +110,7 @@ Milestones:
 Milestones:
 - Keep the desktop and window/compositor responsibilities separated from kernel policy.
 - Login/session startup and user configuration.
-- File manager backed by VFS.
+- Complete the VFS-backed File Manager and Notepad experience, including directory navigation and safe file operations.
 - Audio, graphics acceleration, power management, and laptop input support.
 - Non-destructive installer with explicit disk selection and confirmation.
 - Bootloader installation, recovery environment, and safe system updates.
@@ -126,4 +126,4 @@ Milestones:
 
 ## Immediate next objective
 
-Complete the VFS inventory and introduce the VFS abstraction over the existing SimpleFS backend without changing the on-disk format. Do not start FAT32 until existing SimpleFS callers are routed through VFS and regression tests pass.
+Implement reference-counted VFS node/open-file lifetime rules and hierarchical directories without changing the existing on-disk format. Do not start FAT32 until directory semantics, error handling, and concurrency tests are stable.
