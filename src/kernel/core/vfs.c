@@ -56,7 +56,9 @@ int vfs_init(void) {
 }
 
 int vfs_is_mounted(void) {
-    return g_vfs_mounted != 0 && simplefs_is_mounted();
+    if (!g_vfs_mounted)
+        return vfs_init();
+    return simplefs_is_mounted();
 }
 
 int vfs_stat(const char *path, vfs_stat_t *out) {
