@@ -320,6 +320,11 @@ static void ci_address_space_self_test(void) {
                                PAGE_USER | PAGE_WRITE | PAGE_PRESENT))
     ci_memory_test_fail("same virtual address mapping in separate spaces");
 
+  if (VMM_AddressSpaceMapPage(space_a,
+          (void *)(test_va + PAGE_SIZE), page_a,
+          PAGE_USER | PAGE_WRITE | PAGE_PRESENT))
+    ci_memory_test_fail("duplicate owned user frame alias accepted");
+
   if (!VMM_AddressSpaceIsUserRange(space_a, (void *)test_va, PAGE_SIZE, 1) ||
       !VMM_AddressSpaceIsUserRange(space_b, (void *)test_va, PAGE_SIZE, 1))
     ci_memory_test_fail("address-space user range validation");
