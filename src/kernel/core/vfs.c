@@ -52,18 +52,31 @@ static volatile uint32_t g_mount_lock;
    local interrupts before taking a lock so PIT preemption cannot switch to a
    second task that spins forever on a lock held by the preempted task. */
 static uint64_t vfs_lock(volatile uint32_t *lock) {
+#ifdef VFS_HOST_TEST
+    /* Host regression tests exercise the exact VFS implementation without
+       executing privileged interrupt-control instructions. */
+    while (__sync_lock_test_and_set(lock, 1u)) {
+        __asm__ volatile("pause");
+    }
+    return 0;
+#else
     uint64_t irq_flags;
     __asm__ volatile("pushfq; popq %0; cli" : "=r"(irq_flags) :: "memory");
     while (__sync_lock_test_and_set(lock, 1u)) {
         __asm__ volatile("pause");
     }
     return irq_flags;
+#endif
 }
 
 static void vfs_unlock(volatile uint32_t *lock, uint64_t irq_flags) {
     __sync_lock_release(lock);
+#ifndef VFS_HOST_TEST
     if (irq_flags & (1ull << 9))
         __asm__ volatile("sti" ::: "memory");
+#else
+    (void)irq_flags;
+#endif
 }
 
 #define VFS_LOCK(lock) uint64_t lock##_irq_flags = vfs_lock(&(lock))
