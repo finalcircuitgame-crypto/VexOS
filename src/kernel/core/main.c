@@ -545,6 +545,18 @@ static void ci_syscall_self_test(void) {
       vfs_dir_read(&docs_dir, entry_name, sizeof(entry_name), &entry_stat) != 0 ||
       !vfs_dir_close(&docs_dir))
     ci_memory_test_fail("VFS child directory enumeration");
+  vfs_dir_t retry_dir = {0};
+  if (!vfs_dir_open(&retry_dir, "/docs") ||
+      vfs_dir_read(&retry_dir, entry_name, 2u, &entry_stat) != -1 ||
+      vfs_dir_read(&retry_dir, entry_name, sizeof(entry_name), &entry_stat) != 1 ||
+      entry_name[0] != 'r' || entry_name[1] != 'e' ||
+      entry_name[2] != 'a' || entry_name[3] != 'd' ||
+      entry_name[4] != 'm' || entry_name[5] != 'e' ||
+      entry_name[6] != '.' || entry_name[7] != 't' ||
+      entry_name[8] != 'x' || entry_name[9] != 't' ||
+      entry_name[10] != '\0' || !vfs_dir_close(&retry_dir))
+    ci_memory_test_fail("VFS directory buffer retry");
+  serial_print("[CI] VFS directory buffer retry passed\\n");
 
   serial_print("[CI] VFS hierarchical paths and directory iteration passed\\n");
 
