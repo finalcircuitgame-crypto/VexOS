@@ -688,6 +688,28 @@ jobs:
           printf 'Test result: PASS - boot, desktop input, Shell, Notepad, and Files interactions observed\\n' > artifacts/test-result.txt
           tail -c 5000 serial.log
 
+      - name: Symbolize kernel fault on QEMU failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ -s dist/kernel.elf ]]; then
+            cp dist/kernel.elf artifacts/kernel.elf
+            nm -n dist/kernel.elf > artifacts/kernel-symbols.txt
+            fault_rip="$(grep -Eo 'rip=[[:xdigit:]]+' serial.log 2>/dev/null | tail -n 1 | cut -d= -f2 || true)"
+            if [[ -n "$fault_rip" ]]; then
+              {
+                echo "Kernel fault RIP: 0x$fault_rip"
+                addr2line -e dist/kernel.elf -f -C "0x$fault_rip" || true
+              } | tee artifacts/kernel-fault-symbol.txt
+              address="$(printf '%d' "0x$fault_rip")"
+              start=$((address > 96 ? address - 96 : 0))
+              end=$((address + 128))
+              objdump -d -Mintel --start-address="$start" --stop-address="$end" dist/kernel.elf \
+                > artifacts/kernel-fault-disassembly.txt || true
+            fi
+          fi
+
       - name: Upload complete QEMU test evidence
         if: always()
         uses: actions/upload-artifact@v4
