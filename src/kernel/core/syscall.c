@@ -26,9 +26,7 @@ extern void xhci_poll_events(void);
 
 typedef struct {
     int used;
-    char name[USER_FILENAME_MAX];
-    uint32_t size;
-    uint32_t cursor;
+    vfs_file_t file;
 } open_file_t;
 
 typedef struct {
@@ -125,71 +123,57 @@ static int sys_open(const char *filename) {
     }
     if (fd < 0) return -1;
 
-    vfs_stat_t stat;
-    if (!vfs_stat(name_buf, &stat) || stat.type != VFS_NODE_FILE) {
-        serial_print("[USERMODE] VFS lookup failed: ");
+    if (!vfs_open(&state->files[fd].file, name_buf)) {
+        serial_print("[USERMODE] VFS open failed: ");
         serial_print(name_buf);
-        serial_print("\n");
+        serial_print("\\n");
         return -1;
     }
-    uint32_t size = stat.size;
-
-    // Keep descriptors lightweight: stream large assets on demand.
     state->files[fd].used = 1;
-    for (uint32_t i = 0; i < USER_FILENAME_MAX; ++i)
-        state->files[fd].name[i] = name_buf[i];
-    state->files[fd].size = size;
-    state->files[fd].cursor = 0;
     return fd;
 }
 
 static int sys_read(int fd, void *buf, uint32_t count) {
     syscall_process_state_t *state = syscall_current_state();
-    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
-
-    open_file_t *file = &state->files[fd];
-    if (file->cursor >= file->size || count == 0) return 0;
-
-    uint32_t available = file->size - file->cursor;
-    uint32_t to_read = count > available ? available : count;
-    if (!VMM_IsUserRange(buf, to_read, 1)) return -1;
-
-    uint32_t bytes_read = 0;
-    if (!vfs_read_at(file->name, file->cursor, buf,
-                               to_read, &bytes_read))
-        return -1;
-    if (bytes_read > to_read)
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
+        !state->files[fd].used)
         return -1;
 
-    file->cursor += bytes_read;
-    return (int)bytes_read;
+    if (count == 0)
+        return 0;
+    if (!VMM_IsUserRange(buf, count, 1)) {
+        /* Validate only the bytes that can actually be read. */
+        vfs_file_t *file = &state->files[fd].file;
+        if (!file->is_open || file->offset >= file->size)
+            return 0;
+        uint32_t available = file->size - file->offset;
+        uint32_t wanted = count < available ? count : available;
+        if (!VMM_IsUserRange(buf, wanted, 1))
+            return -1;
+    }
+
+    return vfs_file_read(&state->files[fd].file, buf, count);
 }
 
 static int sys_seek(int fd, int offset, int whence) {
     syscall_process_state_t *state = syscall_current_state();
-    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
-
-    open_file_t *file = &state->files[fd];
-    int64_t base;
-    if (whence == 0) base = 0;
-    else if (whence == 1) base = file->cursor;
-    else if (whence == 2) base = file->size;
-    else return -1;
-
-    int64_t target = base + (int64_t)offset;
-    if (target < 0 || target > (int64_t)file->size) return -1;
-
-    file->cursor = (uint32_t)target;
-    return (int)file->cursor;
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
+        !state->files[fd].used)
+        return -1;
+    int64_t result = vfs_file_seek(&state->files[fd].file,
+                                   (int64_t)offset, whence);
+    if (result < 0 || result > 0x7FFFFFFF)
+        return -1;
+    return (int)result;
 }
 
 static int sys_close(int fd) {
     syscall_process_state_t *state = syscall_current_state();
-    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
-
-    state->files[fd].name[0] = '\0';
-    state->files[fd].size = 0;
-    state->files[fd].cursor = 0;
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
+        !state->files[fd].used)
+        return -1;
+    if (!vfs_close(&state->files[fd].file))
+        return -1;
     state->files[fd].used = 0;
     return 0;
 }
