@@ -9,8 +9,7 @@ Legacy SFS2 images with no journal remain read-only. The current transactional
 writer supports root-directory regular files only, with a 2 MiB per-file limit;
 it supports create, replace, and unlink. Nested directory mutation is not yet
 supported. A committed redo journal is replayed before inode metadata is
-trusted. SFS1 remains the
-writable native filesystem.
+trusted. SFS1 remains supported as the legacy writable format.
 
 **Host-tool status:** `tools/sfs2_image.py` provides an offline formatter,
 metadata verifier, and SFS1-to-SFS2 image migration command. These tools operate
