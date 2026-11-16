@@ -432,13 +432,12 @@ static int sfs2_root_filename(const char *path, const char **out_name,
     return 1;
 }
 
-static int sfs2_find_root_file(sfs2_volume_t *volume, const char *name,
+static int sfs2_find_root_entry(sfs2_volume_t *volume, const char *name,
                                uint32_t length, uint32_t *out_index) {
     for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
         sfs2_inode_t *inode = &volume->inodes[i];
         if (!inode->inode_id || inode->parent_id !=
-                volume->superblock.root_inode ||
-            inode->type != SFS2_INODE_FILE)
+                volume->superblock.root_inode)
             continue;
         uint32_t n = 0;
         while (n < SFS2_NAME_MAX && inode->name[n])
@@ -490,7 +489,9 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
     uint32_t sectors = (uint32_t)sectors64;
 
     uint32_t index = 0;
-    int exists = sfs2_find_root_file(volume, name, name_length, &index);
+    int exists = sfs2_find_root_entry(volume, name, name_length, &index);
+    if (exists && volume->inodes[index].type != SFS2_INODE_FILE)
+        return 0;
     sfs2_inode_t previous;
     if (exists) {
         previous = volume->inodes[index];
@@ -567,7 +568,8 @@ int sfs2_unlink_file(sfs2_volume_t *volume, const char *path) {
         !sfs2_root_filename(path, &name, &name_length))
         return 0;
     uint32_t index = 0;
-    if (!sfs2_find_root_file(volume, name, name_length, &index))
+    if (!sfs2_find_root_entry(volume, name, name_length, &index) ||
+        volume->inodes[index].type != SFS2_INODE_FILE)
         return 0;
     sfs2_inode_t previous = volume->inodes[index];
     if (previous.data_sectors > SFS2_MAX_FILE_SECTORS)
