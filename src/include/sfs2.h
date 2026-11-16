@@ -10,6 +10,10 @@
 #define SFS2_INODE_MAX 256u
 #define SFS2_INODE_FILE 1u
 #define SFS2_INODE_DIRECTORY 2u
+#define SFS2_JOURNAL_MAGIC 0x524A3253u /* "S2JR" */
+#define SFS2_JOURNAL_COMMITTED 1u
+#define SFS2_JOURNAL_MAX_RECORDS 8u
+#define SFS2_JOURNAL_HEADER_SECTORS 1u
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
@@ -26,7 +30,10 @@ typedef struct __attribute__((packed)) {
     uint64_t data_lba;
     uint32_t root_inode;
     uint32_t checksum;
-    uint8_t reserved[440];
+    /* Optional v2 extension: zero/zero means legacy read-only image. */
+    uint64_t journal_lba;
+    uint32_t journal_sectors;
+    uint8_t reserved[428];
 } sfs2_superblock_t;
 
 typedef struct __attribute__((packed)) {
@@ -63,7 +70,8 @@ typedef struct {
     uint64_t size_bytes;
 } sfs2_stat_t;
 
-/* Read-only mount and namespace/file access. Mount never formats media. */
+/* Mount replays a committed SFS2 redo journal before validating metadata.
+   A volume without a journal remains compatible but is read-only. */
 int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
                sfs2_write_sector_fn write_sector, uint64_t device_sectors);
 int sfs2_stat_path(sfs2_volume_t *volume, const char *path,
