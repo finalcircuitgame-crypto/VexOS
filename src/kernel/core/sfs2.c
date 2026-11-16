@@ -996,13 +996,14 @@ int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
 
 
 #ifdef VEXOS_CI_INPUT_TEST
-static uint8_t g_sfs2_test_disk[64u][SFS2_SECTOR_SIZE];
+static uint8_t g_sfs2_test_disk[8192u][SFS2_SECTOR_SIZE];
+static uint8_t g_sfs2_large_payload[3u * 1024u * 1024u + 37u];
 static uint64_t g_sfs2_test_fail_write_lba = UINT64_MAX;
 static uint32_t g_sfs2_test_write_calls;
 static uint32_t g_sfs2_test_fail_write_call;
 
 static int sfs2_test_read(uint64_t lba, void *sector) {
-    if (!sector || lba >= 64u)
+    if (!sector || lba >= 8192u)
         return 0;
     const uint8_t *src = g_sfs2_test_disk[lba];
     uint8_t *dst = (uint8_t *)sector;
@@ -1311,6 +1312,60 @@ int sfs2_ci_mount_read_test(void) {
             return 0;
     }
     if (!sfs2_sector_is_zero(g_sfs2_test_disk[1]))
+        return 0;
+
+    /* Exercise a kernel write larger than the former 2 MiB ceiling. */
+    sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
+    sfs2_zero(&sb, sizeof(sb));
+    sb.magic = SFS2_MAGIC;
+    sb.version = SFS2_VERSION;
+    sb.header_size = sizeof(sb);
+    sb.sector_size = SFS2_SECTOR_SIZE;
+    sb.volume_sectors = 8192u;
+    sb.generation = 1u;
+    sb.journal_lba = 1u;
+    sb.journal_sectors = 33u;
+    sb.bitmap_lba = 34u;
+    sb.bitmap_sectors = 2u;
+    sb.inode_table_lba = 36u;
+    sb.inode_table_sectors = 2u;
+    sb.inode_capacity = 8u;
+    sb.data_lba = 38u;
+    sb.root_inode = 1u;
+    sb.checksum = sfs2_checksum(&sb, sizeof(sb),
+        (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    sb_src = (const uint8_t *)&sb;
+    for (uint32_t i = 0; i < sizeof(sb); ++i)
+        g_sfs2_test_disk[0][i] = sb_src[i];
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(36u, 0u, &inode);
+    for (uint32_t i = 0; i < sizeof(g_sfs2_large_payload); ++i)
+        g_sfs2_large_payload[i] = (uint8_t)((i * 17u + 3u) & 0xFFu);
+    sfs2_zero(&volume, sizeof(volume));
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 8192u) ||
+        !sfs2_write_file(&volume, "/large.bin", g_sfs2_large_payload,
+                         (uint32_t)sizeof(g_sfs2_large_payload)))
+        return 0;
+    if (!sfs2_stat_path(&volume, "/large.bin", &info) ||
+        info.size_bytes != sizeof(g_sfs2_large_payload))
+        return 0;
+    uint8_t sample = 0;
+    if (!sfs2_read_file_at(&volume, "/large.bin", 0u, &sample, 1u,
+                           &read_count) || read_count != 1u ||
+        sample != g_sfs2_large_payload[0])
+        return 0;
+    uint64_t middle = sizeof(g_sfs2_large_payload) / 2u;
+    if (!sfs2_read_file_at(&volume, "/large.bin", middle, &sample, 1u,
+                           &read_count) || read_count != 1u ||
+        sample != g_sfs2_large_payload[middle])
+        return 0;
+    uint64_t last = sizeof(g_sfs2_large_payload) - 1u;
+    if (!sfs2_read_file_at(&volume, "/large.bin", last, &sample, 1u,
+                           &read_count) || read_count != 1u ||
+        sample != g_sfs2_large_payload[last])
         return 0;
     return 1;
 }
