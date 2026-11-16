@@ -230,7 +230,7 @@ def verify_image(image: Path):
 
             if parent != 1 or kind != 1:
                 raise ValueError("host verifier currently expects root-level regular files")
-            name_bytes = name_raw.split(b"\\0", 1)[0]
+            name_bytes = name_raw.split(b"\0", 1)[0]
             if not name_bytes or len(name_bytes) >= NAME_MAX or b"/" in name_bytes or name_bytes in (b".", b".."):
                 raise ValueError(f"invalid filename in inode {inode_id}")
             try:
