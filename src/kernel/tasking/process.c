@@ -316,6 +316,7 @@ void Process_OnTaskExit(uint32_t task_id) {
 }
 
 void Process_ExitKernelCurrent(int32_t exit_code) {
+  __asm__ volatile("cli" ::: "memory");
   Process *process = find_by_task(Task_GetCurrentId());
   if (process) {
     process->info.exit_code = exit_code;
@@ -331,6 +332,7 @@ void Process_ExitKernelCurrent(int32_t exit_code) {
 }
 
 uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code) {
+  __asm__ volatile("cli" ::: "memory");
   uint32_t task_id = Task_GetCurrentId();
   Process *process = find_by_task(task_id);
   if (!process || !process->info.user_mode)
