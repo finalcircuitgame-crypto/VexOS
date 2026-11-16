@@ -205,6 +205,45 @@ static int sfs2_name_equal(const char *a, const char *b) {
     return a[i] == b[i];
 }
 
+static int sfs2_validate_data_extents(sfs2_volume_t *volume) {
+    uint8_t bitmap_sector[SFS2_SECTOR_SIZE];
+    uint64_t cached_bitmap_sector = UINT64_MAX;
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        const sfs2_inode_t *inode = &volume->inodes[i];
+        if (inode->inode_id == 0 || inode->type != SFS2_INODE_FILE ||
+            inode->data_sectors == 0)
+            continue;
+        uint64_t end = inode->data_lba + inode->data_sectors;
+        for (uint32_t j = 0; j < i; ++j) {
+            const sfs2_inode_t *other = &volume->inodes[j];
+            if (other->inode_id == 0 || other->type != SFS2_INODE_FILE ||
+                other->data_sectors == 0)
+                continue;
+            uint64_t other_end = other->data_lba + other->data_sectors;
+            if (inode->data_lba < other_end && other->data_lba < end)
+                return 0;
+        }
+        for (uint64_t lba = inode->data_lba; lba < end; ++lba) {
+            uint64_t bit = lba - volume->superblock.data_lba;
+            uint64_t byte = bit >> 3;
+            uint64_t bitmap_sector_index = byte / SFS2_SECTOR_SIZE;
+            if (bitmap_sector_index >= volume->superblock.bitmap_sectors)
+                return 0;
+            if (bitmap_sector_index != cached_bitmap_sector) {
+                if (!volume->read_sector(volume->superblock.bitmap_lba +
+                                         bitmap_sector_index, bitmap_sector))
+                    return 0;
+                cached_bitmap_sector = bitmap_sector_index;
+            }
+            uint32_t byte_offset = (uint32_t)(byte % SFS2_SECTOR_SIZE);
+            uint8_t mask = (uint8_t)(1u << (bit & 7u));
+            if ((bitmap_sector[byte_offset] & mask) == 0)
+                return 0;
+        }
+    }
+    return 1;
+}
+
 static int sfs2_validate_namespace(sfs2_volume_t *volume) {
     uint32_t root_count = 0;
     for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
@@ -281,7 +320,8 @@ int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
         return 0;
     /* Temporarily mark mounted so parent-ID lookups can validate the tree. */
     volume->mounted = 1;
-    if (!sfs2_validate_namespace(volume)) {
+    if (!sfs2_validate_namespace(volume) ||
+        !sfs2_validate_data_extents(volume)) {
         volume->mounted = 0;
         return 0;
     }
@@ -497,6 +537,7 @@ int sfs2_ci_mount_read_test(void) {
     inode.data_sectors = 1u;
     sfs2_test_finish_inode(&inode);
     sfs2_test_store_inode(2u, &inode);
+    g_sfs2_test_disk[1][0] = 0x01u; /* data-area sector zero is allocated */
     g_sfs2_test_disk[3][0] = 'v'; g_sfs2_test_disk[3][1] = 'e';
     g_sfs2_test_disk[3][2] = 'x'; g_sfs2_test_disk[3][3] = 'o';
     g_sfs2_test_disk[3][4] = 's';
