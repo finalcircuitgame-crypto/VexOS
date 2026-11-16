@@ -35,6 +35,23 @@ class SFS2ImageTests(unittest.TestCase):
                     }[name]
                     self.assertEqual(payload, expected)
 
+    def test_formatter_reserves_clean_redo_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "journal.img"
+            image.build_image(path, 128, [("file.txt", b"journal")], 16)
+            fields = image.SB.unpack_from(path.read_bytes())
+            journal_lba, journal_sectors = fields[14], fields[15]
+            self.assertEqual(journal_lba, 1)
+            self.assertEqual(journal_sectors, image.JOURNAL_SECTORS)
+            self.assertLessEqual(journal_lba + journal_sectors, fields[6])
+            image.verify_image(path)
+
+            damaged = bytearray(path.read_bytes())
+            damaged[journal_lba * image.SECTOR] = 0x7F
+            path.write_bytes(damaged)
+            with self.assertRaisesRegex(ValueError, "un-replayed journal"):
+                image.verify_image(path)
+
     def test_refuses_to_overwrite_existing_image(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "existing.img"
