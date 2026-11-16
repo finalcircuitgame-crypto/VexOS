@@ -212,16 +212,20 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
   return pid;
 }
 
-void Process_AttachCurrentAddressSpace(AddressSpace *space) {
+int Process_AttachCurrentAddressSpace(AddressSpace *space) {
   Process *process = find_by_task(Task_GetCurrentId());
-  if (!process)
-    return;
-  /* Address-space attachment is also used while the kernel loader
-     populates ELF pages. Do not mark the process ring-3 until the final
-     transition stack and IRET frame are ready. */
+  if (!process || process->info.state != PROCESS_RUNNING ||
+      !process->kernel_stack_top)
+    return 0;
+
+  /* This may attach a loading image before ring 3 is entered. */
   process->address_space = space;
-  Task_SetCurrentContext(space, process->kernel_stack_top,
-                         process->info.user_mode);
+  if (!Task_SetCurrentContext(space, process->kernel_stack_top,
+                              process->info.user_mode)) {
+    process->address_space = NULL;
+    return 0;
+  }
+  return 1;
 }
 
 void Process_SetCurrentKernelStack(uint64_t stack_top) {
