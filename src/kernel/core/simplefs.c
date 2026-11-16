@@ -442,6 +442,11 @@ int simplefs_init(void) {
   /* Mounting is a one-time operation. Re-running ATA IDENTIFY after the
      AHCI controller and runtime interrupts are active can stall the desktop;
      callers may safely request initialization more than once. */
+  /*
+   * Mounting is deliberately non-destructive. A future installer may add a
+   * separate format operation after explicit confirmation; normal boot and
+   * VFS initialization must never format unknown or damaged media.
+   */
   if (g_mounted)
     return 1;
   g_kind = STORAGE_FS_NONE;
