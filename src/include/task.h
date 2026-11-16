@@ -33,6 +33,7 @@ int Task_SetTaskContext(uint32_t task_id, AddressSpace *space,
 int Task_SetCurrentContext(AddressSpace *space, uint64_t kernel_stack_top,
                            int user_mode);
 uint32_t Task_GetCurrentId(void);
+uint64_t Task_GetTaskKernelStackTop(uint32_t task_id);
 void Task_BlockCurrent(void);
 void Task_MakeReady(uint32_t task_id);
 int Task_Reap(uint32_t task_id);
