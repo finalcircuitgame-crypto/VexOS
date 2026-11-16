@@ -443,9 +443,8 @@ static void ring3_task_entry(void) {
   // On success usermode_launch transfers to ring 3 and never returns. A
   // return means the loader rejected the image or failed before the switch.
   shell_append("ring3: loader returned; see serial log\n");
-  for (;;) {
-    __asm__ volatile("sti; hlt");
-  }
+  desktop_user_app_exited(1);
+  Process_ExitKernelCurrent(-1);
 }
 
 static void launch_ring3_task(const char *filename) {
