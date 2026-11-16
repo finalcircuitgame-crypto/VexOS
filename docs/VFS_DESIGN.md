@@ -10,7 +10,7 @@ Introduce a filesystem-independent kernel interface while preserving the current
 - The storage layer chooses ATA PIO or AHCI, and `simplefs_init()` mounts once. If the disk is neither recognized FAT32 nor a valid SFS1 image, current SimpleFS behavior may format it; this behavior is pre-existing and must be reviewed separately before treating arbitrary disks as safe.
 - The FAT32 implementation scans root short-name files and is read-only; the current ranged-read helper supports SFS1 only.
 - User-mode descriptors are task-local and own VFS file handles with independent offsets; process cleanup closes outstanding handles.
-- Desktop file viewing, wallpaper loading, ELF loading, shell listing, File Manager enumeration, and Notepad load/save now use VFS. The VFS backend is the intended boundary for SimpleFS access.
+- Desktop file viewing, wallpaper loading, ELF loading through the ring-3 loader, shell listing, File Manager enumeration, and Notepad load/save now use VFS. The VFS backend is the intended boundary for SimpleFS access.
 
 ## VFS v1 implementation
 
