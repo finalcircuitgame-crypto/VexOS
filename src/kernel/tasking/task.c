@@ -162,6 +162,12 @@ uint32_t Task_GetCurrentId(void) {
   return current_task;
 }
 
+uint64_t Task_GetTaskKernelStackTop(uint32_t task_id) {
+  if (task_id >= task_count || tasks[task_id].state == TASK_UNUSED)
+    return 0;
+  return tasks[task_id].kernel_stack_top;
+}
+
 void Task_BlockCurrent(void) {
   if (tasks[current_task].state == TASK_RUNNING)
     tasks[current_task].state = TASK_BLOCKED;
