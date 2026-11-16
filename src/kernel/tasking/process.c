@@ -383,8 +383,11 @@ int Process_Wait(ProcessId pid, int32_t *exit_code) {
     if (child->info.state == PROCESS_ZOMBIE) {
       uint32_t child_task_id = child->info.task_id;
       int32_t child_exit_code = child->info.exit_code;
+      /* Reap before restoring interrupts so another task cannot race this
+         parent and release the same zombie between observation and cleanup. */
+      int reaped = Process_ReapTask(child_task_id);
       process_irq_restore(irq_flags);
-      if (!Process_ReapTask(child_task_id))
+      if (!reaped)
         return -1;
       if (exit_code)
         *exit_code = child_exit_code;
