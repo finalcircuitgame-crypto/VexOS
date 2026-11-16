@@ -478,6 +478,11 @@ static void ci_syscall_self_test(void) {
   if (vfs_normalize_path("../ci.txt", normalized, sizeof(normalized)) ||
       vfs_normalize_path("/docs/../ci.txt", normalized, sizeof(normalized)))
     ci_memory_test_fail("VFS parent traversal rejection");
+  char unterminated_path[VFS_PATH_MAX];
+  for (uint32_t i = 0; i < sizeof(unterminated_path); ++i)
+    unterminated_path[i] = 'a';
+  if (vfs_normalize_path(unterminated_path, normalized, sizeof(normalized)))
+    ci_memory_test_fail("VFS bounded path length");
 
   vfs_stat_t vfs_info;
   if (!vfs_stat("/ci.txt", &vfs_info) ||
