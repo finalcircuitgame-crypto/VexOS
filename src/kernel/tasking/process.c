@@ -366,3 +366,120 @@ int Process_ReapTask(uint32_t task_id) {
   process->owns_kernel_stack = 0;
   return 1;
 }
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_process_entry(void) {
+  for (;;)
+    __asm__ volatile("pause");
+}
+
+static void ci_discard_unstarted(Process *process) {
+  if (!process || process->info.state != PROCESS_READY)
+    return;
+
+  uint32_t task_id = process->info.task_id;
+  if (!Task_Discard(task_id))
+    return;
+
+  AddressSpace *space = process->address_space;
+  if (space && process->kernel_stack_base)
+    VMM_AddressSpaceUnmapPage(space, process->kernel_stack_base, 0);
+
+  if (process->owns_kernel_stack && process->kernel_stack_base)
+    PMM_FreePage(process->kernel_stack_base);
+
+  process->address_space = NULL;
+  process->kernel_stack_base = NULL;
+  process->kernel_stack_top = 0;
+  process->owns_kernel_stack = 0;
+  process->info.pid = 0;
+  process->info.parent_pid = 0;
+  process->info.task_id = 0;
+  process->info.state = PROCESS_UNUSED;
+  process->info.exit_code = 0;
+  process->info.user_mode = 0;
+  process->info.name[0] = '\\0';
+
+  if (space)
+    VMM_AddressSpaceDestroy(space);
+}
+
+int Process_CI_SelfTest(void) {
+  const uint64_t code_va = 0x0000600000000000ull;
+  const uint64_t stack_va = code_va + PAGE_SIZE;
+  const ProcessId parent_pid = Process_GetCurrentId();
+  const uint32_t initial_count = Process_GetCount();
+
+  if (!parent_pid || !process_manager_ready)
+    return 0;
+
+  AddressSpace *space = VMM_AddressSpaceCreate();
+  if (!space)
+    return 0;
+
+  void *code_page = PMM_AllocatePage();
+  void *user_stack_page = PMM_AllocatePage();
+  if (!code_page || !user_stack_page) {
+    if (code_page) PMM_FreePage(code_page);
+    if (user_stack_page) PMM_FreePage(user_stack_page);
+    VMM_AddressSpaceDestroy(space);
+    return 0;
+  }
+
+  if (!VMM_AddressSpaceMapPage(space, (void *)(uintptr_t)code_va,
+                              code_page, PAGE_USER | PAGE_PRESENT) ||
+      !VMM_AddressSpaceMapPage(space, (void *)(uintptr_t)stack_va,
+                              user_stack_page,
+                              PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+    /* Destroy only frees successfully installed user mappings. */
+    if (!VMM_AddressSpaceIsUserRange(space,
+            (const void *)(uintptr_t)code_va, 1, 0))
+      PMM_FreePage(code_page);
+    if (!VMM_AddressSpaceIsUserRange(space,
+            (const void *)(uintptr_t)stack_va, 1, 1))
+      PMM_FreePage(user_stack_page);
+    VMM_AddressSpaceDestroy(space);
+    return 0;
+  }
+
+  ProcessId user_pid = Process_CreateUser(
+      "ci-user", space, code_va, stack_va + PAGE_SIZE);
+  Process *user = find_by_pid(user_pid);
+  ProcessInfo info;
+  int user_ok = user_pid && user &&
+      Process_GetInfo(user_pid, &info) &&
+      info.parent_pid == parent_pid &&
+      info.state == PROCESS_READY &&
+      info.user_mode == 1u &&
+      user->address_space == space &&
+      user->kernel_stack_top != 0 &&
+      VMM_AddressSpaceIsUserRange(space,
+          (const void *)(uintptr_t)code_va, 1, 0) &&
+      VMM_AddressSpaceIsUserRange(space,
+          (const void *)(uintptr_t)(stack_va + PAGE_SIZE - 1u), 1, 1);
+
+  if (user)
+    ci_discard_unstarted(user);
+  else
+    VMM_AddressSpaceDestroy(space);
+
+  if (!user_ok || Process_GetCount() != initial_count)
+    return 0;
+
+  ProcessId kernel_pid = Process_CreateKernel("ci-kernel", ci_process_entry);
+  Process *kernel = find_by_pid(kernel_pid);
+  int kernel_ok = kernel_pid && kernel &&
+      Process_GetInfo(kernel_pid, &info) &&
+      info.parent_pid == parent_pid &&
+      info.state == PROCESS_READY &&
+      info.user_mode == 0u &&
+      kernel->kernel_stack_base != NULL &&
+      kernel->kernel_stack_top != 0;
+
+  if (kernel)
+    ci_discard_unstarted(kernel);
+
+  return kernel_ok && Process_GetCount() == initial_count &&
+         Process_GetCurrentId() == parent_pid;
+}
+#endif
