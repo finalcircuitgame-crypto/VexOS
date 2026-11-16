@@ -405,7 +405,7 @@ static int sfs2_tx_store_superblock(sfs2_volume_t *volume,
     return 1;
 }
 
-static int sfs2_find_child_entry(sfs2_volume_t *volume,
+static int sfs2_next_inode_slot(sfs2_volume_t *volume, uint32_t *out_index,\n                                uint32_t *out_id);\n\nstatic int sfs2_find_child_entry(sfs2_volume_t *volume,
                                    uint32_t parent_id, const char *name,
                                    uint32_t length, uint32_t *out_index) {
     for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
@@ -494,7 +494,7 @@ static int sfs2_resolve_parent(sfs2_volume_t *volume, const char *path,
         while (path[next] == '/')
             ++next;
         if (!path[next]) {
-            if (path[pos] == '/' && pos == next)
+            if (next != pos)
                 return 0;
             *out_parent_id = volume->inodes[parent_index].inode_id;
             *out_name = path + start;
@@ -543,10 +543,12 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
                     const void *data, uint32_t length) {
     const char *name = 0;
     uint32_t name_length = 0;
+    uint32_t parent_id = 0;
     if (!volume || !volume->mounted || !volume->write_sector ||
         volume->superblock.journal_lba == 0 ||
         (!data && length) ||
-        !sfs2_root_filename(path, &name, &name_length))
+        !sfs2_resolve_parent(volume, path, 1, &parent_id,
+                             &name, &name_length))
         return 0;
     uint64_t sectors64 = ((uint64_t)length + SFS2_SECTOR_SIZE - 1u) /
                          SFS2_SECTOR_SIZE;
@@ -555,7 +557,7 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
     uint32_t sectors = (uint32_t)sectors64;
 
     uint32_t index = 0;
-    int exists = sfs2_find_root_entry(volume, name, name_length, &index);
+    int exists = sfs2_find_child_entry(volume, parent_id, name, name_length, &index);
     if (exists && volume->inodes[index].type != SFS2_INODE_FILE)
         return 0;
     sfs2_inode_t previous;
@@ -569,7 +571,7 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
             return 0;
         sfs2_zero(&previous, sizeof(previous));
         previous.inode_id = new_id;
-        previous.parent_id = volume->superblock.root_inode;
+        previous.parent_id = parent_id;
         previous.type = SFS2_INODE_FILE;
         for (uint32_t i = 0; i < name_length; ++i)
             previous.name[i] = name[i];
@@ -629,12 +631,14 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
 int sfs2_unlink_file(sfs2_volume_t *volume, const char *path) {
     const char *name = 0;
     uint32_t name_length = 0;
+    uint32_t parent_id = 0;
     if (!volume || !volume->mounted || !volume->write_sector ||
         volume->superblock.journal_lba == 0 ||
-        !sfs2_root_filename(path, &name, &name_length))
+        !sfs2_resolve_parent(volume, path, 0, &parent_id,
+                             &name, &name_length))
         return 0;
     uint32_t index = 0;
-    if (!sfs2_find_root_entry(volume, name, name_length, &index) ||
+    if (!sfs2_find_child_entry(volume, parent_id, name, name_length, &index) ||
         volume->inodes[index].type != SFS2_INODE_FILE)
         return 0;
     sfs2_inode_t previous = volume->inodes[index];
