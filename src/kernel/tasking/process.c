@@ -398,7 +398,7 @@ static void ci_discard_unstarted(Process *process) {
   process->info.state = PROCESS_UNUSED;
   process->info.exit_code = 0;
   process->info.user_mode = 0;
-  process->info.name[0] = '\\0';
+  process->info.name[0] = '\0';
 
   if (space)
     VMM_AddressSpaceDestroy(space);
