@@ -1411,6 +1411,7 @@ int sfs2_ci_mount_read_test(void) {
                            &read_count) || read_count != 1u ||
         sample != g_sfs2_large_payload[last])
         return 0;
+    g_sfs2_large_mode = 0;
     return 1;
 }
 #endif
