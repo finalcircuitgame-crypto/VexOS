@@ -9,12 +9,12 @@ Introduce a filesystem-independent kernel interface while preserving the current
 - SimpleFS SFS1 is a flat root-file store with a fixed file table; it does not currently expose directories or unlink.
 - The storage layer chooses ATA PIO or AHCI, and `simplefs_init()` mounts once. If the disk is neither recognized FAT32 nor a valid SFS1 image, current SimpleFS behavior may format it; this behavior is pre-existing and must be reviewed separately before treating arbitrary disks as safe.
 - The FAT32 implementation scans root short-name files and is read-only; the current ranged-read helper supports SFS1 only.
-- User-mode descriptors are task-indexed, with per-descriptor name, size, and cursor. They are not yet VFS open-file objects.
-- The desktop still has direct SimpleFS call sites and has not yet been migrated.
+- User-mode descriptors are task-local and own VFS file handles with independent offsets; process cleanup closes outstanding handles.
+- Desktop file viewing, wallpaper loading, ELF loading, shell listing, File Manager enumeration, and Notepad load/save now use VFS. The VFS backend is the intended boundary for SimpleFS access.
 
 ## VFS v1 implementation
 
-`src/include/vfs.h` and `src/kernel/core/vfs.c` define the first adapter layer. It has a root mount with a backend operation table and supports stat, read, ranged read, write, count, and flat-file listing. It normalizes absolute and relative root-file paths, strips `.` components, and rejects `..` traversal and nested paths. It also provides per-open file handles with independent offsets, read, seek, and close; user-mode open/read/seek/close syscalls now use these handles, and process cleanup closes outstanding handles. This is intentionally a compatibility layer; it is not yet a hierarchical VFS with vnode caching or mount-point routing.
+`src/include/vfs.h` and `src/kernel/core/vfs.c` define the first adapter layer. It has a root mount with a backend operation table and supports stat, read, ranged read, write, count, and flat-file listing. It normalizes absolute and relative root-file paths, strips `.` components, and rejects `..` traversal and nested paths. It also provides per-open file handles with independent offsets, read, seek, and close; user-mode open/read/seek/close syscalls now use these handles, and process cleanup closes outstanding handles. Desktop file consumers use VFS for metadata, reads, writes, and listing; direct SimpleFS operations are contained behind the VFS backend except for storage-specific regression fixtures. This is intentionally a compatibility layer; it is not yet a hierarchical VFS with vnode caching or mount-point routing.
 
 ## Required repository audit before further implementation
 
@@ -22,7 +22,7 @@ Identify and document:
 - SimpleFS on-disk structures, magic/version fields, allocation model, and image builder.
 - Storage block read/write interface and its locking/interrupt assumptions.
 - Existing file and directory APIs, including error conventions.
-- All direct SimpleFS call sites in the shell, desktop, applications, boot/setup flow, and tests.
+- Direct SimpleFS call sites in desktop consumers and applications; distinguish backend implementation and explicit storage regression fixtures from normal file consumers.
 - Whether current file handles are global, task-local, or already represented by process file descriptors.
 
 Do not infer these details or change the disk format during the initial VFS work.
