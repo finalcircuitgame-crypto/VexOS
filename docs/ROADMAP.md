@@ -37,7 +37,7 @@ Remaining:
 
 **Status: VFS v1 integrated with syscalls and desktop consumers; filesystem-tree functionality remains**
 
-The existing SimpleFS persistent storage remains the first backend. VFS v1 provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode file descriptors own VFS handles with independent offsets. The desktop viewer, wallpaper loader, ELF launcher, shell file listing, File Manager, and Notepad now use VFS rather than calling SimpleFS directly. The existing SimpleFS disk format is unchanged.
+The existing SimpleFS persistent storage remains the first backend. VFS v1 provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode file descriptors own VFS handles with independent offsets. The desktop viewer, wallpaper loader, ELF launcher and ring-3 ELF loader, shell file listing, File Manager, and Notepad now use VFS rather than calling SimpleFS directly. The existing SimpleFS disk format is unchanged.
 
 Milestones:
 Completed in VFS v1:
