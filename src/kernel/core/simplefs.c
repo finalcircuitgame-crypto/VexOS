@@ -359,6 +359,7 @@ static int sfs_write_sector(uint32_t lba, const void *buf) {
 
 static int sfs_load_table(void) {
   uint8_t sector[SFS_SECTOR_SIZE];
+  mem_zero(&g_table[0], (uint32_t)sizeof(g_table));
   uint32_t idx = 0;
   for (uint32_t s = 0; s < g_sb.table_sectors; s++) {
     if (!sfs_read_sector(g_sb.table_lba + s, sector))
