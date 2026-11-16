@@ -60,12 +60,12 @@ static int16_t clamp_mouse_axis(int32_t v) {
 
 /* Release only the descriptors and mmap accounting belonging to this task.
    User frames themselves are reclaimed by its AddressSpace teardown. */
-void syscall_process_cleanup(void) {
-    syscall_process_state_t *state = syscall_current_state();
-    if (!state)
+void syscall_process_cleanup_task(uint32_t task_id) {
+    if (task_id >= TASK_MAX)
         return;
 
-    for (int fd = 3; fd < MAX_OPEN_FILES; ++fd) {
+    syscall_process_state_t *state = &g_process_states[task_id];
+    for (int fd = 0; fd < MAX_OPEN_FILES; ++fd) {
         state->files[fd].name[0] = '\0';
         state->files[fd].size = 0;
         state->files[fd].cursor = 0;
@@ -74,6 +74,11 @@ void syscall_process_cleanup(void) {
 
     state->mmap_page_count = 0;
     state->next_mmap = USER_MMAP_BASE;
+    state->initialized = 0;
+}
+
+void syscall_process_cleanup(void) {
+    syscall_process_cleanup_task(Task_GetCurrentId());
 }
 
 static int copy_user_string(char *dst, uint32_t dst_cap, const char *src) {
