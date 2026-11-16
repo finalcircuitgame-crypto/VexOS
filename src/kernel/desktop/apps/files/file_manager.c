@@ -8,6 +8,7 @@
 #define FILE_MANAGER_NAME_CAP 64u
 #define FILE_MANAGER_SEARCH_CAP 48u
 #define FILE_MANAGER_ROW_HEIGHT 28u
+#define FILE_MANAGER_STATUS_CAP 64u
 
 static desktop_window_t g_window;
 static uint8_t g_open;
@@ -33,6 +34,8 @@ static uint32_t g_screen_width;
 static uint32_t g_screen_height;
 static uint32_t g_visible[FILE_MANAGER_MAX_FILES];
 static uint32_t g_visible_count;
+static uint8_t g_delete_armed;
+static char g_status[FILE_MANAGER_STATUS_CAP];
 
 static uint32_t fm_min_u32(uint32_t a, uint32_t b) {
   return a < b ? a : b;
@@ -214,7 +217,7 @@ static int fm_build_path(const char *name, char *out, uint32_t cap) {
   uint32_t prefix_len = (base_len && g_current_path[0] != '/') ?
       base_len + 1u : 0u;
   if (prefix_len + name_len + 1u > cap ||
-      prefix_len + name_len > 31u)
+      prefix_len + name_len >= VFS_PATH_MAX)
     return 0;
   uint32_t pos = 0;
   if (prefix_len) {
@@ -226,6 +229,75 @@ static int fm_build_path(const char *name, char *out, uint32_t cap) {
     out[pos++] = name[i];
   out[pos] = 0;
   return 1;
+}
+
+static void fm_set_status(const char *message) {
+  fm_copy(g_status, message, sizeof(g_status));
+}
+
+static void fm_create_file(void) {
+  char full_path[VFS_PATH_MAX];
+  char candidate[FILE_MANAGER_NAME_CAP];
+  for (uint32_t suffix = 1; suffix <= 99u; ++suffix) {
+    if (suffix == 1u) {
+      fm_copy(candidate, "New File.txt", sizeof(candidate));
+    } else {
+      const char prefix[] = "New File ";
+      uint32_t pos = 0;
+      while (prefix[pos] && pos + 1u < sizeof(candidate)) {
+        candidate[pos] = prefix[pos];
+        ++pos;
+      }
+      char digits[12];
+      fm_u32_to_text(digits, suffix);
+      for (uint32_t i = 0; digits[i] && pos + 1u < sizeof(candidate); ++i)
+        candidate[pos++] = digits[i];
+      const char ending[] = ".txt";
+      for (uint32_t i = 0; ending[i] && pos + 1u < sizeof(candidate); ++i)
+        candidate[pos++] = ending[i];
+      candidate[pos] = 0;
+    }
+    if (!fm_build_path(candidate, full_path, sizeof(full_path)))
+      break;
+    if (vfs_create(full_path)) {
+      g_search[0] = 0;
+      g_scroll = 0;
+      g_selected = 0xFFFFFFFFu;
+      g_delete_armed = 0;
+      fm_refresh();
+      fm_set_status("Created a new text file");
+      return;
+    }
+  }
+  fm_set_status("Could not create a file here");
+}
+
+static void fm_delete_selected_file(void) {
+  char name[FILE_MANAGER_NAME_CAP];
+  char full_path[VFS_PATH_MAX];
+  if (g_selected == 0xFFFFFFFFu ||
+      g_selected >= g_order_count ||
+      g_is_directory[g_selected] ||
+      !fm_get_name(g_selected, name) ||
+      !fm_build_path(name, full_path, sizeof(full_path))) {
+    fm_set_status("Select a file first");
+    g_delete_armed = 0;
+    return;
+  }
+  if (!g_delete_armed) {
+    g_delete_armed = 1;
+    fm_set_status("Click Delete again to confirm");
+    return;
+  }
+  if (vfs_unlink(full_path)) {
+    g_selected = 0xFFFFFFFFu;
+    g_delete_armed = 0;
+    fm_refresh();
+    fm_set_status("File deleted");
+  } else {
+    g_delete_armed = 0;
+    fm_set_status("Delete failed: file may be open");
+  }
 }
 
 static void fm_go_parent(void) {
@@ -321,6 +393,8 @@ void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
   g_search[0] = 0;
   g_order_count = 0;
   g_visible_count = 0;
+  g_delete_armed = 0;
+  g_status[0] = 0;
   g_current_path[0] = '/';
   g_current_path[1] = 0;
 
@@ -335,6 +409,7 @@ void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
 void file_manager_open(void) {
   g_open = 1;
   g_search_focused = 0;
+  g_delete_armed = 0;
   fm_refresh();
   wm_raise(APP_EXPLORER);
 }
@@ -413,7 +488,8 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   gfx_draw_rect((uint32_t)(x + 22), (uint32_t)(y + 43), 1u, 14u,
                 0x35405B);
   gfx_draw_string((uint32_t)(x + 34), (uint32_t)(y + 46),
-                  "VexOS  /  Storage  /  Root", 0xDCE0F2u);
+                  g_current_path[0] == '/' ? "VexOS  /  Storage  /  Root" :
+                  g_current_path, 0xDCE0F2u);
 
   uint32_t search_width = w > 600 ? 154u : 110u;
   uint32_t search_x = (uint32_t)(x + w) - search_width - 22u;
@@ -466,11 +542,20 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                   0xF0F1FCu);
   gfx_draw_string(list_x + 14u, body_y + 30u,
                   "Saved on this VexOS volume", 0x8995B1u);
-  if (list_w > 340u) {
-    gfx_blend_round_rect(list_x + list_w - 112u, body_y + 10u,
-                         98u, 20u, 6u, 0x202B3Eu, 255u);
-    gfx_draw_string(list_x + list_w - 101u, body_y + 16u,
-                    "SIMPLEFS", 0x8DDCC0u);
+  if (list_w > 390u) {
+    uint32_t action_y = body_y + 10u;
+    uint32_t new_x = list_x + list_w - 204u;
+    uint32_t del_x = list_x + list_w - 130u;
+    uint32_t refresh_x = list_x + list_w - 64u;
+    gfx_blend_round_rect(new_x, action_y, 68u, 23u, 5u, 0x3A315F, 255u);
+    gfx_draw_string(new_x + 9u, action_y + 8u, "+ New", 0xE6E0FFu);
+    gfx_blend_round_rect(del_x, action_y, 58u, 23u, 5u,
+                         g_delete_armed ? 0x70404Bu : 0x283247u, 255u);
+    gfx_draw_string(del_x + 8u, action_y + 8u,
+                    g_delete_armed ? "Confirm" : "Delete",
+                    g_delete_armed ? 0xFFE4E8u : 0xC6D0E5u);
+    gfx_blend_round_rect(refresh_x, action_y, 54u, 23u, 5u, 0x202B3E, 255u);
+    gfx_draw_string(refresh_x + 8u, action_y + 8u, "Reload", 0xA9DCCB);
   }
 
   uint32_t header_y = body_y + 50u;
@@ -553,8 +638,12 @@ void file_manager_draw(const file_manager_render_context_t *context) {
     gfx_draw_string((uint32_t)(x + 174), (uint32_t)(y + h - 18),
                     "SimpleFS volume", 0x8995B1u);
   }
-  gfx_draw_string((uint32_t)(x + w - 150), (uint32_t)(y + h - 18),
-                  "Double-click to open", 0x8995B1u);
+  if (g_status[0])
+    gfx_draw_string((uint32_t)(x + 174), (uint32_t)(y + h - 18),
+                    g_status, 0xA9DCCBu);
+  else
+    gfx_draw_string((uint32_t)(x + w - 150), (uint32_t)(y + h - 18),
+                    "Double-click to open", 0x8995B1u);
 }
 
 file_manager_event_t file_manager_handle_click(
@@ -628,6 +717,36 @@ file_manager_event_t file_manager_handle_click(
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
+  uint32_t list_panel_x = (uint32_t)x + 160u;
+  uint32_t list_panel_w = w > 176 ? (uint32_t)w - 172u : 1u;
+  if (list_panel_w > 390u &&
+      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 204u),
+             (int32_t)(by + 10u), 68, 23)) {
+    g_search_focused = 0;
+    g_delete_armed = 0;
+    fm_create_file();
+    wm_raise(APP_EXPLORER);
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+  if (list_panel_w > 390u &&
+      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 130u),
+             (int32_t)(by + 10u), 58, 23)) {
+    g_search_focused = 0;
+    fm_delete_selected_file();
+    wm_raise(APP_EXPLORER);
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+  if (list_panel_w > 390u &&
+      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
+             (int32_t)(by + 10u), 54, 23)) {
+    g_search_focused = 0;
+    g_delete_armed = 0;
+    fm_refresh();
+    fm_set_status("Folder refreshed");
+    wm_raise(APP_EXPLORER);
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+
   uint32_t header_y = by + 50u;
   uint32_t mx = (uint32_t)x + 160u;
   uint32_t mw = w > 176 ? (uint32_t)w - 172u : 1u;
@@ -655,6 +774,8 @@ file_manager_event_t file_manager_handle_click(
 
     uint32_t storage_index = g_visible[visible_index];
     g_selected = storage_index;
+    g_delete_armed = 0;
+    g_status[0] = 0;
     uint32_t elapsed = tick - g_last_click_tick;
     if (g_last_click_index == storage_index && elapsed < 45u) {
       char name[FILE_MANAGER_NAME_CAP];
