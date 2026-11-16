@@ -41,6 +41,6 @@ int Task_Discard(uint32_t task_id);
 void Task_Yield(void);
 uint64_t Task_Schedule(uint64_t current_rsp);
 uint64_t Task_Exit(uint64_t current_rsp);
-void Task_ExitCurrent(void);
+__attribute__((noreturn)) void Task_ExitCurrent(void);
 
 #endif
