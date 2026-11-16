@@ -161,14 +161,14 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
     for slot, (inode_id, parent_id, kind, name, data) in enumerate(nodes[1:], start=1):
         if kind == 2:
             inode_records[slot] = INODE.pack(
-                inode_id, parent_id, 2, 0, 0, name.ljust(NAME_MAX, b"\\0"),
+                inode_id, parent_id, 2, 0, 0, name.ljust(NAME_MAX, b"\0"),
                 0, 0, 0, 1, 0, bytes(8))
             continue
         needed = ceildiv(len(data), SECTOR)
         if cursor + needed > volume_sectors:
             raise ValueError(f"not enough free sectors for {name.decode('utf-8')!r}")
         inode_records[slot] = INODE.pack(
-            inode_id, parent_id, 1, 0, 0, name.ljust(NAME_MAX, b"\\0"),
+            inode_id, parent_id, 1, 0, 0, name.ljust(NAME_MAX, b"\0"),
             len(data), cursor if needed else 0, needed, 1, 0, bytes(8))
         for bit in range(cursor - data_lba, cursor + needed - data_lba):
             bitmap[bit >> 3] |= 1 << (bit & 7)
@@ -282,7 +282,7 @@ def verify_image(image: Path):
 
             if parent == 0 or kind not in (1, 2):
                 raise ValueError(f"invalid parent or inode type for inode {inode_id}")
-            name_bytes = name_raw.split(b"\\0", 1)[0]
+            name_bytes = name_raw.split(b"\0", 1)[0]
             if (not name_bytes or len(name_bytes) >= NAME_MAX or
                     b"/" in name_bytes or name_bytes in (b".", b"..")):
                 raise ValueError(f"invalid filename in inode {inode_id}")
