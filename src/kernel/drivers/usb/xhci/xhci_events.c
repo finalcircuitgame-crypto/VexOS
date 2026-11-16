@@ -1,6 +1,5 @@
 #include "xhci_internal.h"
 #include "input.h"
-#include "interrupts.h"
 
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
@@ -46,51 +45,6 @@ static char xhci_kbd_keycode_to_ascii(uint8_t key, uint8_t shift) {
   }
 }
 
-
-/*
- * Report the raw boot-keyboard packet whenever its contents change. These
- * bytes are captured before key transitions are decoded, so the serial log
- * can distinguish a missing USB key-up report from a parser/input bug.
- */
-static void xhci_kbd_log_report(xhci_device_state_t *dev, uint32_t cc,
-                                uint32_t xfer_len, const uint8_t *report) {
-  serial_print("[HID][KBD] tick=");
-  xhci_print_u32_dec((uint32_t)Timer_Ticks());
-  serial_print(" slot=");
-  xhci_print_u32_dec(dev->slot_id);
-  serial_print(" cc=");
-  xhci_print_u32_dec(cc);
-  serial_print(" len=");
-  xhci_print_u32_dec(xfer_len);
-  serial_print(" mod=");
-  xhci_print_hex8(report[0]);
-  serial_print(" keys=");
-  for (uint32_t i = 0; i < 6u; ++i) {
-    if (i)
-      serial_print(",");
-    xhci_print_hex8(report[i + 2u]);
-  }
-  serial_print(" prev_mod=");
-  xhci_print_hex8(dev->kbd_prev_mod);
-  serial_print(" prev_keys=");
-  for (uint32_t i = 0; i < 6u; ++i) {
-    if (i)
-      serial_print(",");
-    xhci_print_hex8(dev->kbd_prev_keys[i]);
-  }
-  serial_print("\n");
-}
-
-static int xhci_kbd_report_changed(const xhci_device_state_t *dev,
-                                   const uint8_t *report) {
-  if (report[0] != dev->kbd_prev_mod)
-    return 1;
-  for (uint32_t i = 0; i < 6u; ++i) {
-    if (report[i + 2u] != dev->kbd_prev_keys[i])
-      return 1;
-  }
-  return 0;
-}
 
 void xhci_event_ring_update_erdp(void) {
   if (!event_ring || !runtime_regs) {
@@ -215,18 +169,6 @@ void xhci_poll_events() {
       xfer_len = (uint32_t)dev->intr_mps - trb_len_remaining;
     }
 
-    if (dev->hid_proto == 1 && cc != 1 && cc != 13) {
-      serial_print("[HID][KBD] transfer-error tick=");
-      xhci_print_u32_dec((uint32_t)Timer_Ticks());
-      serial_print(" slot=");
-      xhci_print_u32_dec(slot_id);
-      serial_print(" cc=");
-      xhci_print_u32_dec(cc);
-      serial_print(" residual=");
-      xhci_print_u32_dec(trb_len_remaining);
-      serial_print("\n");
-    }
-
     if ((cc == 1 || cc == 13) && dev->intr_buf) {
       if (dev->hid_mouse_valid) {
           const uint8_t *r = dev->intr_buf;
@@ -301,8 +243,6 @@ void xhci_poll_events() {
       } else if (dev->hid_proto == 1) {
           if (xfer_len >= 8) {
             const uint8_t *r = dev->intr_buf;
-            if (xhci_kbd_report_changed(dev, r))
-              xhci_kbd_log_report(dev, cc, xfer_len, r);
             uint8_t mod = r[0];
             uint8_t shift = (uint8_t)(((mod & 0x02u) || (mod & 0x20u)) ? 1u : 0u);
             const uint8_t *keys = &r[2];
@@ -334,16 +274,6 @@ void xhci_poll_events() {
             for (uint32_t i = 0; i < 6; i++) {
               dev->kbd_prev_keys[i] = keys[i];
             }
-          } else {
-            serial_print("[HID][KBD] short-report tick=");
-            xhci_print_u32_dec((uint32_t)Timer_Ticks());
-            serial_print(" slot=");
-            xhci_print_u32_dec(slot_id);
-            serial_print(" cc=");
-            xhci_print_u32_dec(cc);
-            serial_print(" len=");
-            xhci_print_u32_dec(xfer_len);
-            serial_print("\n");
           }
       }
     }
