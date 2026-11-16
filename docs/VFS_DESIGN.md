@@ -56,7 +56,7 @@ Ring-3 has task-local file and directory descriptors. In addition to open/read/s
 
 ## Known safety issue
 
-`simplefs_init()` retains pre-existing behavior that may format a disk if it is neither recognized FAT32 nor a valid SFS1 volume. This must be removed or moved behind an explicit installer/format confirmation path before supporting arbitrary physical disks, an installer, or automatic disk discovery. Never claim the current mount path is safe for arbitrary user disks.
+`simplefs_init()` only mounts recognized FAT32 or validated SFS1 volumes. It refuses to format unrecognized media and refuses destructive recovery when an SFS1 file table cannot be read. There is no in-kernel format operation; a future installer must make formatting a separate, explicitly confirmed action. A failed mount leaves the volume unavailable rather than overwriting it.
 
 ## Regression coverage
 
@@ -77,4 +77,4 @@ The latest CI run must be checked against the exact PR head before this work is 
 2. Add a FAT32 image fixture covering fragmented files, multi-cluster reads, invalid cluster chains, and end-of-chain handling; later design subdirectory and long-name support.
 3. Add safe ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process policy.
 4. Add tests for cache exhaustion, concurrent operations, interrupted I/O, and repeated create/delete cycles.
-5. Remove implicit formatting of unrecognized disks and require explicit confirmation for destructive formatting.
+5. Add a separate installer-only format operation that requires explicit user confirmation; normal mount code must remain non-destructive.
