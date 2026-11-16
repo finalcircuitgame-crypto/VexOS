@@ -251,8 +251,10 @@ void Task_CI_StartRuntimeTest(void) {
 
   extern void serial_print(const char *str);
   serial_print(ci_runtime_setup_ok
-      ? "[CI] Process control blocks and private CR3 fixtures created\\n"
-      : "[CI] Process manager fixture creation failed\\n");
+      ? "[CI] Runtime task IRET frames validated\\n"
+      : "[CI] Runtime task IRET frame validation failed\\n");
+  if (ci_runtime_setup_ok)
+    serial_print("[CI] Process control blocks and private CR3 fixtures created\\n");
   if (!ci_runtime_setup_ok) Task_Init();
 }
 
