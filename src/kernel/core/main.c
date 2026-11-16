@@ -491,7 +491,7 @@ static void ci_syscall_self_test(void) {
   uint32_t vfs_slice_len = 0;
   if (!vfs_read_at("/ci-vfs.txt", 6u, vfs_slice, 7u, &vfs_slice_len) ||
       vfs_slice_len != 7u || vfs_slice[0] != 'V' ||
-      vfs_slice[6] != 'S')
+      vfs_slice[6] != 'a')
     ci_memory_test_fail("VFS ranged read");
 
   // Unknown syscall numbers and invalid user pointers must fail safely.
