@@ -597,6 +597,11 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("VFS unlink and open-file lifetime");
   if (vfs_write("/ci.txt/child", "x", 2u))
     ci_memory_test_fail("VFS rejects file as parent directory");
+  if (!vfs_write("/tree/leaf", nested_payload, sizeof(nested_payload)) ||
+      vfs_write("/tree", "x", 2u) || vfs_create("/tree") ||
+      vfs_write("/tree/leaf/child", "x", 2u) ||
+      !vfs_unlink("/tree/leaf") || vfs_stat("/tree", &directory_stat))
+    ci_memory_test_fail("VFS namespace parent/child type consistency");
   if (vfs_create("/"))
     ci_memory_test_fail("VFS rejects creating root directory as file");
   serial_print("[CI] VFS create/unlink and open-node reference rules passed\\n");
