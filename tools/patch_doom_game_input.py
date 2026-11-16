@@ -60,7 +60,7 @@ def main() -> int:
 
     patched = source.replace(OLD, NEW, 1)
     carry_pos = patched.index(carry_line)
-    function_end = patched.find("\\n}", carry_pos)
+    function_end = patched.find("\n}", carry_pos)
     if function_end < 0:
         print(
             "patch_doom_game_input: could not locate G_BuildTiccmd closing brace.",
@@ -69,7 +69,7 @@ def main() -> int:
         return 1
 
     trace_call = (
-        "\\n    VEXOS_DoomTraceTiccmd(maketic, cmd->angleturn, "
+        "\n    VEXOS_DoomTraceTiccmd(maketic, cmd->angleturn, "
         "cmd->forwardmove, cmd->sidemove);"
     )
     patched = patched[:function_end] + trace_call + patched[function_end:]
