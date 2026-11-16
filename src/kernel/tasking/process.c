@@ -359,25 +359,47 @@ uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code) {
 }
 
 int Process_Wait(ProcessId pid, int32_t *exit_code) {
-  if (!pid || pid == Process_GetCurrentId())
+  if (!pid)
     return -1;
 
   for (;;) {
-    Process *child = find_by_pid(pid);
-    if (!child || child->info.parent_pid != Process_GetCurrentId())
+    /* The child-state check and parent block must be one atomic operation.
+       Otherwise the child can exit after the check but before cli(), leaving
+       the parent blocked forever with nobody left to wake it. */
+    uint64_t irq_flags = process_irq_save_disable();
+    ProcessId self_pid = Process_GetCurrentId();
+    if (pid == self_pid) {
+      process_irq_restore(irq_flags);
       return -1;
+    }
+
+    Process *child = find_by_pid(pid);
+    if (!child || child->info.parent_pid != self_pid) {
+      process_irq_restore(irq_flags);
+      return -1;
+    }
+
     if (child->info.state == PROCESS_ZOMBIE) {
+      uint32_t child_task_id = child->info.task_id;
+      int32_t child_exit_code = child->info.exit_code;
+      process_irq_restore(irq_flags);
+      if (!Process_ReapTask(child_task_id))
+        return -1;
       if (exit_code)
-        *exit_code = child->info.exit_code;
-      return Process_ReapTask(child->info.task_id) ? 0 : -1;
+        *exit_code = child_exit_code;
+      return 0;
     }
 
     Process *current = find_by_task(Task_GetCurrentId());
-    if (!current || current->info.state != PROCESS_RUNNING)
+    if (!current || current->info.state != PROCESS_RUNNING) {
+      process_irq_restore(irq_flags);
       return -1;
-    uint64_t irq_flags = process_irq_save_disable();
+    }
+
     current->info.state = PROCESS_BLOCKED;
     Task_BlockCurrent();
+    /* Keep interrupts disabled until another task is running. The saved
+       parent frame restores the original IF state when this task resumes. */
     Task_Yield();
     process_irq_restore(irq_flags);
   }
