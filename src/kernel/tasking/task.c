@@ -238,6 +238,15 @@ uint64_t Task_GetTaskKernelStackTop(uint32_t task_id) {
   return tasks[task_id].kernel_stack_top;
 }
 
+int Task_IsReady(uint32_t task_id) {
+  uint64_t irq_flags = task_irq_save_disable();
+  int ready = task_id < TASK_IDLE_SLOT &&
+              task_id < task_count &&
+              tasks[task_id].state == TASK_READY;
+  task_irq_restore(irq_flags);
+  return ready;
+}
+
 void Task_BlockCurrent(void) {
   uint64_t irq_flags = task_irq_save_disable();
   if (current_task < task_count && tasks[current_task].state == TASK_RUNNING)
