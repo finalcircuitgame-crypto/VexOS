@@ -168,8 +168,9 @@ ProcessId Process_RegisterTask(const char *name, uint32_t task_id,
                                void *external_stack_base) {
   uint64_t irq_flags = process_irq_save_disable();
   if (!process_manager_ready || task_id >= TASK_MAX ||
-      task_id == Task_GetCurrentId() || find_by_task(task_id) ||
-      !external_stack_base || !Task_GetTaskKernelStackTop(task_id)) {
+      task_id == Task_GetCurrentId() || !Task_IsReady(task_id) ||
+      find_by_task(task_id) || !external_stack_base ||
+      !Task_GetTaskKernelStackTop(task_id)) {
     process_irq_restore(irq_flags);
     return 0;
   }
@@ -612,6 +613,11 @@ int Process_CI_SelfTest(void) {
   const uint32_t initial_count = Process_GetCount();
 
   if (!parent_pid || !process_manager_ready)
+    return 0;
+
+  /* The final scheduler slot is the reserved idle task, never a process. */
+  if (Process_RegisterTask("ci-idle", TASK_MAX - 1u,
+          (void *)(uintptr_t)Task_GetTaskKernelStackTop(TASK_MAX - 1u)) != 0)
     return 0;
 
   int32_t ignored_exit_code = 0;
