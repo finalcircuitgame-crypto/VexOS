@@ -212,7 +212,7 @@ def verify_image(image: Path):
                 for bit in range(start - data_lba, start + sectors - data_lba):
                     if not (bitmap[bit >> 3] & (1 << (bit & 7))):
                         raise ValueError(f"bitmap misses allocation for inode {inode_id}")
-                live.append(name.split(b"\0", 1)[0].decode("utf-8", "replace"))
+                live.append((name.split(b"\0", 1)[0].decode("utf-8", "replace"), start, length))
         if len(live) + 1 > cap:
             raise ValueError("inode count exceeds capacity")
     return {"sectors": volume, "files": live, "data_lba": data_lba}
