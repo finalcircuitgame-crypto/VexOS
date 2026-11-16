@@ -283,7 +283,6 @@ jobs:
             "[CI] VFS directory buffer retry passed" \
             "[CI] VFS create/unlink and open-node reference rules passed" \
             "[CI] VFS independent open-file handles and descriptor offsets passed" \
-            "[CI] RING3 VFS mutation/stat/directory syscalls passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
             "[AHCI] SATA disk ready; sectors=" \
@@ -446,6 +445,7 @@ jobs:
                       "[DOOMWIN] Ring 3 Doom window opened and focused",
                       "[WADDBG] LOCAL_OPEN",
                       "[DOOMWIN] First frame rendered by Ring 3 Doom",
+                      "[CI] RING3 VFS mutation/stat/directory syscalls passed",
                   )
                   deadline = time.time() + 30
                   serial = ""
