@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define VFS_PATH_MAX 128u
-#define VFS_NAME_MAX 32u
+#define VFS_NAME_MAX 48u
 
 typedef enum {
     VFS_NODE_FILE = 1,
