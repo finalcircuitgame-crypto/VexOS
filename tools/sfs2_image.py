@@ -162,11 +162,11 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
             f.seek(cursor * SECTOR)
             f.write(data)
             padded = ceildiv(len(data), SECTOR) * SECTOR
-            if len(data) == 0:
+            # Empty files have no data extent in the SFS2 on-disk contract.
                 padded = SECTOR
             if padded > len(data):
                 f.write(bytes(padded - len(data)))
-            cursor += max(1, ceildiv(len(data), SECTOR))
+            cursor += ceildiv(len(data), SECTOR)
     return {"sectors": volume_sectors, "files": len(files), "data_lba": data_lba,
             "used_sectors": cursor - data_lba, "inode_capacity": inode_capacity}
 
@@ -206,12 +206,12 @@ def verify_image(image: Path):
             else:
                 if parent != 1 or kind != 1:
                     raise ValueError("unsupported namespace in host image verifier")
-                need = max(1, ceildiv(length, SECTOR))
-                if sectors < need or start < data_lba or start + sectors > volume:
+                need = ceildiv(length, SECTOR)
+                if (length == 0 and (start != 0 or sectors != 0)) or (length > 0 and (sectors < need or start < data_lba or start + sectors > volume)):
                     raise ValueError(f"invalid extent for inode {inode_id}")
-                for bit in range(start - data_lba, start + sectors - data_lba):
-                    if not (bitmap[bit >> 3] & (1 << (bit & 7))):
-                        raise ValueError(f"bitmap misses allocation for inode {inode_id}")
+                if length:
+                        if not (bitmap[bit >> 3] & (1 << (bit & 7))):
+                            raise ValueError(f"bitmap misses allocation for inode {inode_id}")
                 live.append((name.split(b"\0", 1)[0].decode("utf-8", "replace"), start, length))
         if len(live) + 1 > cap:
             raise ValueError("inode count exceeds capacity")
