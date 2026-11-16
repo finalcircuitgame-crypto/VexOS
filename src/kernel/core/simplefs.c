@@ -213,14 +213,17 @@ static int fat_mount_and_scan_root(void) {
   }
 
   g_fat.fat_start_lba = (uint32_t)g_fat.reserved_sector_count;
-  g_fat.data_start_lba = g_fat.fat_start_lba +
-                         (uint32_t)g_fat.num_fats * g_fat.fat_size_sectors;
-  if (g_fat.data_start_lba >= g_fat.total_sectors)
+  uint64_t data_start =
+      (uint64_t)g_fat.fat_start_lba +
+      (uint64_t)g_fat.num_fats * (uint64_t)g_fat.fat_size_sectors;
+  if (data_start > 0xFFFFFFFFull || data_start >= g_fat.total_sectors)
     return 0;
+  g_fat.data_start_lba = (uint32_t)data_start;
   g_fat.cluster_count =
       (g_fat.total_sectors - g_fat.data_start_lba) /
       (uint32_t)g_fat.sectors_per_cluster;
   if (g_fat.cluster_count == 0 ||
+      g_fat.cluster_count > 0x0FFFFFF5u ||
       g_fat.root_cluster >= g_fat.cluster_count + 2u)
     return 0;
 
