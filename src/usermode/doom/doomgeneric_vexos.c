@@ -54,6 +54,56 @@ static uint32_t log_append_u64(char *buffer, uint32_t offset, uint64_t value) {
     return offset;
 }
 
+static uint32_t log_append_i32(char *buffer, uint32_t offset, int32_t value) {
+    uint32_t magnitude;
+    if (value < 0) {
+        buffer[offset++] = '-';
+        magnitude = (uint32_t)(-(value + 1)) + 1u;
+    } else {
+        magnitude = (uint32_t)value;
+    }
+    return log_append_u64(buffer, offset, magnitude);
+}
+
+/*
+ * Log the actual ticcmd produced by Doom after all keyboard, mouse, and
+ * joystick inputs have been combined. This is distinct from KEYSYNC, which
+ * only reports the kernel HID snapshot copied into gamekeydown[].
+ */
+void VEXOS_DoomTraceTiccmd(int maketic, int angleturn,
+                           int forwardmove, int sidemove) {
+    static int previous_valid;
+    static int previous_turn;
+    static int previous_forward;
+    static int previous_side;
+
+    if (previous_valid && angleturn == previous_turn &&
+        forwardmove == previous_forward && sidemove == previous_side)
+        return;
+
+    previous_valid = 1;
+    previous_turn = angleturn;
+    previous_forward = forwardmove;
+    previous_side = sidemove;
+
+    char message[160];
+    uint32_t length = 0;
+    int active = angleturn != 0 || forwardmove != 0 || sidemove != 0;
+    length = log_append_text(message, length, "[DOOM][CMD] tick=");
+    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
+    length = log_append_text(message, length, " tic=");
+    length = log_append_i32(message, length, maketic);
+    length = log_append_text(message, length, active ? " state=ACTIVE" : " state=NEUTRAL");
+    length = log_append_text(message, length, " turn=");
+    length = log_append_i32(message, length, angleturn);
+    length = log_append_text(message, length, " forward=");
+    length = log_append_i32(message, length, forwardmove);
+    length = log_append_text(message, length, " side=");
+    length = log_append_i32(message, length, sidemove);
+    message[length++] = '\n';
+    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+}
+
 static const char *arrow_label_from_usage(uint8_t usage) {
     switch (usage) {
         case 0x4F: return "RIGHT";
@@ -102,7 +152,7 @@ static void log_arrow_ticcmd_state(uint8_t state) {
     previous_state = state;
     for (uint32_t i = 0; i < 4u; ++i) {
         if (changed & bits[i])
-            log_arrow_transition("TICCMD", usages[i],
+            log_arrow_transition("KEYSYNC", usages[i],
                                  (state & bits[i]) != 0, "kernel-snapshot");
     }
 }
@@ -143,28 +193,28 @@ static uint8_t arrow_sync_state_valid;
 static void trace_arrow_sync_state(uint8_t state) {
     static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
     static const char *const down_messages[4] = {
-        "[CI] Doom ticcmd synced RIGHT down\n",
-        "[CI] Doom ticcmd synced LEFT down\n",
-        "[CI] Doom ticcmd synced DOWN down\n",
-        "[CI] Doom ticcmd synced UP down\n"
+        "[CI] Doom key state synced RIGHT down\n",
+        "[CI] Doom key state synced LEFT down\n",
+        "[CI] Doom key state synced DOWN down\n",
+        "[CI] Doom key state synced UP down\n"
     };
     static const char *const up_messages[4] = {
-        "[CI] Doom ticcmd synced RIGHT released\n",
-        "[CI] Doom ticcmd synced LEFT released\n",
-        "[CI] Doom ticcmd synced DOWN released\n",
-        "[CI] Doom ticcmd synced UP released\n"
+        "[CI] Doom key state synced RIGHT released\n",
+        "[CI] Doom key state synced LEFT released\n",
+        "[CI] Doom key state synced DOWN released\n",
+        "[CI] Doom key state synced UP released\n"
     };
     static const uint8_t down_lengths[4] = {
-        sizeof("[CI] Doom ticcmd synced RIGHT down\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced LEFT down\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced DOWN down\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced UP down\n") - 1u
+        sizeof("[CI] Doom key state synced RIGHT down\n") - 1u,
+        sizeof("[CI] Doom key state synced LEFT down\n") - 1u,
+        sizeof("[CI] Doom key state synced DOWN down\n") - 1u,
+        sizeof("[CI] Doom key state synced UP down\n") - 1u
     };
     static const uint8_t up_lengths[4] = {
-        sizeof("[CI] Doom ticcmd synced RIGHT released\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced LEFT released\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced DOWN released\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced UP released\n") - 1u
+        sizeof("[CI] Doom key state synced RIGHT released\n") - 1u,
+        sizeof("[CI] Doom key state synced LEFT released\n") - 1u,
+        sizeof("[CI] Doom key state synced DOWN released\n") - 1u,
+        sizeof("[CI] Doom key state synced UP released\n") - 1u
     };
 
     if (!arrow_sync_state_valid) {
