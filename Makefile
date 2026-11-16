@@ -175,12 +175,6 @@ $(DOOMOBJDIR)/g_game.o: $(DOOMDIR)/g_game.c tools/patch_doom_game_input.py Makef
 	python3 tools/patch_doom_game_input.py --source $< --output $(DOOMOBJDIR)/g_game_vexos.c
 	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/g_game_vexos.c -o $@
 
-# Trace real post-physics player momentum and view angle after each player thinker update.
-$(DOOMOBJDIR)/p_user.o: $(DOOMDIR)/p_user.c tools/patch_doom_player_state.py Makefile
-	@mkdir -p $(DOOMOBJDIR)
-	python3 tools/patch_doom_player_state.py --source $< --output $(DOOMOBJDIR)/p_user_vexos.c
-	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/p_user_vexos.c -o $@
-
 $(DOOMOBJDIR)/%.o: $(DOOMDIR)/%.c
 	@mkdir -p $(DOOMOBJDIR)
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
