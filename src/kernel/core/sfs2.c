@@ -1513,6 +1513,11 @@ int sfs2_ci_mount_read_test(void) {
         return 0;
     /* Replace the large file with a different payload; both extents span
        multiple bitmap sectors and must commit as one transaction. */
+    uint64_t large_sectors =
+        ((uint64_t)sizeof(g_sfs2_large_payload) + SFS2_SECTOR_SIZE - 1u) /
+        SFS2_SECTOR_SIZE;
+    g_sfs2_large_data_lba = sb.data_lba + large_sectors;
+    sfs2_zero(g_sfs2_large_written, sizeof(g_sfs2_large_written));
     for (uint32_t i = 0; i < sizeof(g_sfs2_large_payload); ++i)
         g_sfs2_large_payload[i] = (uint8_t)((i * 29u + 11u) & 0xFFu);
     if (!sfs2_write_file(&volume, "/large.bin", g_sfs2_large_payload,
