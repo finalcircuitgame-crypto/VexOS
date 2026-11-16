@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define VFS_PATH_MAX 128u
-#define VFS_NAME_MAX 32u
+#define VFS_NAME_MAX 48u
 
 typedef enum {
     VFS_NODE_FILE = 1,
@@ -39,7 +39,8 @@ int vfs_init(void);
 int vfs_is_mounted(void);
 
 /* Normalize absolute or root-relative paths. Parent traversal is rejected.
-   The SFS1 backend stores at most 31 bytes total, including '/' separators. */
+   Limits follow the mounted backend: SFS1 allows 31 total bytes; SFS2 allows
+   127 total bytes and 47 bytes per path component. */
 int vfs_normalize_path(const char *path, char *out, uint32_t out_cap);
 
 int vfs_stat(const char *path, vfs_stat_t *out_stat);

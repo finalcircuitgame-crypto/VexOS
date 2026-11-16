@@ -1,0 +1,255 @@
+name: SFS2 CI
+
+on:
+  push:
+    branches: [main, feature/sfs2-foundation]
+    paths:
+      - "Makefile"
+      - "CGA.F08"
+      - "assets/**"
+      - "src/boot/**"
+      - "src/include/**"
+      - "src/kernel/**"
+      - "tools/sfs2_image.py"
+      - "tools/test_sfs2_image.py"
+      - "tools/sfs2_kernel_test.c"
+      - "docs/SFS2_FORMAT.md"
+      - ".github/workflows/sfs2-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Makefile"
+      - "CGA.F08"
+      - "assets/**"
+      - "src/boot/**"
+      - "src/include/**"
+      - "src/kernel/**"
+      - "tools/sfs2_image.py"
+      - "tools/test_sfs2_image.py"
+      - "tools/sfs2_kernel_test.c"
+      - "docs/SFS2_FORMAT.md"
+      - ".github/workflows/sfs2-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-image-tests:
+    name: SFS2 image formatter and migration
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository (no submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Run SFS2 host-tool regression tests
+        run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
+
+  kernel-regression-tests:
+    name: SFS2 kernel logic, journal, and crash recovery
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository (no submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Compile standalone SFS2 kernel tests
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -DVEXOS_CI_INPUT_TEST -Isrc/include \
+            src/kernel/core/sfs2.c tools/sfs2_kernel_test.c \
+            -o /tmp/sfs2-kernel-tests
+      - name: Run SFS2 kernel regression tests
+        run: /tmp/sfs2-kernel-tests
+
+  qemu-sfs2-boot:
+    name: Boot VexOS with an SFS2 disk and record MP4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository (no submodules or Doom)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install UEFI build, QEMU, and recording dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm python3
+
+      - name: Build bootloader and CI-instrumented VexOS kernel (no Doom target)
+        run: |
+          make clean
+          make VEXOS_CI=1 -j2 all
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+
+      - name: Create and verify a real SFS2 boot-test disk
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          payload = bytes((i * 37 + 11) & 0xff for i in range(700))
+          Path("dist/ci.txt").write_bytes(payload)
+          PY
+          python3 tools/sfs2_image.py format dist/storage.img dist/ci.txt --force --sectors 131072 --inodes 256
+          python3 tools/sfs2_image.py verify dist/storage.img
+          test "$(stat -c %s dist/storage.img)" -eq $((131072 * 512))
+          # A separate disposable SATA disk is attached to QEMU's AHCI HBA.
+          # The OS self-test writes sectors 16-17, never the boot/SFS2 disks.
+          truncate -s 64M dist/ahci-test.img
+
+      - name: Boot SFS2 disk in QEMU, verify kernel tests, and record MP4
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          OVMF_VARS_TEMPLATE=/usr/share/OVMF/OVMF_VARS_4M.fd
+          test -s "$OVMF_CODE"
+          test -s "$OVMF_VARS_TEMPLATE"
+          cp "$OVMF_VARS_TEMPLATE" /tmp/OVMF_VARS.fd
+          mkdir -p artifacts
+          : > serial.log
+          rm -f qemu.log xvfb.log recording.log recording-verify.log
+
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1920x800x24 -nolisten tcp >xvfb.log 2>&1 &
+          xvfb_pid=$!
+          sleep 0.5
+          kill -0 "$xvfb_pid"
+
+          # Show the serial log beside the guest display so the MP4 contains
+          # both the actual boot and the SFS2 pass/fail evidence.
+          xterm -geometry 80x48+1280+0 -fa Monospace -fs 10 \
+            -e bash -lc 'tail -n +1 -F serial.log' >serial-viewer.log 2>&1 &
+          serial_viewer_pid=$!
+          export SDL_VIDEO_WINDOW_POS=0,0
+
+          recording="artifacts/sfs2-ci-run-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}.mp4"
+          ffmpeg -hide_banner -loglevel warning -y \
+            -f x11grab -framerate 30 -video_size 1920x800 -i "$DISPLAY+0,0" \
+            -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+            -movflags +faststart "$recording" >recording.log 2>&1 &
+          ffmpeg_pid=$!
+          sleep 1
+          kill -0 "$ffmpeg_pid"
+
+          qemu_pid=""
+          cleanup() {
+            status=$?
+            trap - EXIT
+            set +e
+            if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
+              kill "$qemu_pid" 2>/dev/null
+            fi
+            if [[ -n "$qemu_pid" ]]; then wait "$qemu_pid" 2>/dev/null; fi
+            if kill -0 "$ffmpeg_pid" 2>/dev/null; then
+              kill -INT "$ffmpeg_pid" 2>/dev/null
+              wait "$ffmpeg_pid"
+              ffmpeg_status=$?
+            else
+              ffmpeg_status=1
+            fi
+            kill "$serial_viewer_pid" "$xvfb_pid" 2>/dev/null
+            wait "$serial_viewer_pid" "$xvfb_pid" 2>/dev/null
+
+            if [[ -s "$recording" ]] && ffprobe -v error -select_streams v:0 \
+              -show_entries stream=codec_name,width,height \
+              -of default=noprint_wrappers=1 "$recording" >recording-verify.log 2>&1 \
+              && grep -q '^codec_name=h264$' recording-verify.log \
+              && grep -q '^width=1920$' recording-verify.log \
+              && grep -q '^height=800$' recording-verify.log; then
+              echo "MP4 recording verified: $recording"
+              cat recording-verify.log
+              echo "ffmpeg shutdown status: $ffmpeg_status"
+            else
+              echo "MP4 recording missing or invalid" >&2
+              cat recording.log recording-verify.log 2>/dev/null || true
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          qemu-system-x86_64 \
+            -machine pc \
+            -m 512M \
+            -vga std \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device ahci,id=ahci \
+            -drive if=none,id=ahci-test-disk,format=raw,file=dist/ahci-test.img \
+            -device ide-hd,drive=ahci-test-disk,bus=ahci.0 \
+            -display sdl \
+            -monitor none \
+            -serial file:serial.log \
+            -no-reboot -no-shutdown >qemu.log 2>&1 &
+          qemu_pid=$!
+
+          required_markers=(
+            "[KERNEL] Entered kernel_main"
+            "[CI] SFS2 superblock, inode, and bitmap metadata passed"
+            "[CI] SFS2 mount, journal recovery, and file mutation passed"
+            "[CI] VFS root mount/path/stat/read/write/ranged-read passed"
+            "[CI] VFS hierarchical paths and directory iteration passed"
+            "[CI] VFS create/unlink and open-node reference rules passed"
+            "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed"
+            "[CI] AHCI SATA identify, two-sector DMA write/read, and bounds checks passed"
+          )
+          deadline=$((SECONDS + 120))
+          while (( SECONDS < deadline )); do
+            if grep -Fq "[KERNEL] FATAL:" serial.log; then
+              echo "Kernel fatal error during SFS2 QEMU test:"
+              cat serial.log
+              exit 1
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before SFS2 tests completed"
+              cat serial.log
+              cat qemu.log
+              exit 1
+            fi
+            all_seen=1
+            for marker in "${required_markers[@]}"; do
+              grep -Fq "$marker" serial.log || all_seen=0
+            done
+            if (( all_seen )); then
+              break
+            fi
+            sleep 0.2
+          done
+
+          for marker in "${required_markers[@]}"; do
+            if ! grep -Fq "$marker" serial.log; then
+              echo "Missing required SFS2 boot marker: $marker"
+              cat serial.log
+              cat qemu.log
+              exit 1
+            fi
+          done
+
+          # Keep a short, useful post-test capture of the successful boot.
+          sleep 3
+          echo "PASS: UEFI booted VexOS with SFS2 and AHCI disks; SFS2, journal, VFS, persistent file I/O, and AHCI DMA markers observed."
+          printf '%s\n' "${required_markers[@]}" > artifacts/sfs2-required-markers.txt
+          cp serial.log artifacts/serial.log
+          cp qemu.log artifacts/qemu.log
+
+      - name: Upload SFS2 QEMU recording and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sfs2-qemu-mp4-${{ github.run_number }}-${{ github.run_id }}
+          path: |
+            artifacts/
+            recording.log
+            recording-verify.log
+            xvfb.log
+            serial-viewer.log
+            qemu.log
+          if-no-files-found: warn
+          retention-days: 14

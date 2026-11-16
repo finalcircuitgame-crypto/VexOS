@@ -11,7 +11,17 @@ permissions:
   contents: read
 
 jobs:
+  sfs2-host-tests:
+    if: github.event_name != 'pull_request' || github.head_ref != 'feature/sfs2-foundation'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Test SFS2 host image tools
+        run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
+
   build-and-boot:
+    if: github.event_name != 'pull_request' || github.head_ref != 'feature/sfs2-foundation'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -29,6 +39,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm
+
+      - name: Test SFS2 host image formatter and migration
+        run: |
+          python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 
       - name: Verify UEFI toolchain paths
         run: |

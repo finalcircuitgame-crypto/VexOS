@@ -7,6 +7,7 @@
 #include "idt.h"
 #include "pmm.h"
 #include "simplefs.h"
+#include "sfs2.h"
 #include "vfs.h"
 #include "task.h"
 #include "process.h"
@@ -463,6 +464,12 @@ static void ci_syscall_self_test(void) {
   if (!simplefs_ci_validate_metadata_self_test())
     ci_memory_test_fail("SFS1 metadata validation and extent safety");
   serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\\n");
+  if (!sfs2_ci_metadata_self_test())
+    ci_memory_test_fail("SFS2 superblock, inode, and bitmap metadata");
+  serial_print("[CI] SFS2 superblock, inode, and bitmap metadata passed\\n");
+  if (!sfs2_ci_mount_read_test())
+    ci_memory_test_fail("SFS2 mount, journal recovery, and file mutation");
+  serial_print("[CI] SFS2 mount, journal recovery, and file mutation passed\\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
@@ -589,6 +596,18 @@ static void ci_syscall_self_test(void) {
   if (vfs_stat("/docs/readme.txt", &vfs_info) ||
       vfs_stat("/docs", &directory_stat))
     ci_memory_test_fail("VFS unlink removes final implicit directory");
+
+  /* SFS2 stores parent directory inodes; unlink must prune an empty chain. */
+  if (!vfs_write("/prune/a/b/leaf.txt", nested_payload,
+                 sizeof(nested_payload)) ||
+      !vfs_stat("/prune", &directory_stat) ||
+      !vfs_stat("/prune/a", &directory_stat) ||
+      !vfs_stat("/prune/a/b", &directory_stat) ||
+      !vfs_unlink("/prune/a/b/leaf.txt") ||
+      vfs_stat("/prune", &directory_stat) ||
+      vfs_stat("/prune/a", &directory_stat) ||
+      vfs_stat("/prune/a/b", &directory_stat))
+    ci_memory_test_fail("VFS unlink recursively prunes empty SFS2 directories");
 
   if (!vfs_create("/docs/empty.txt") ||
       !vfs_stat("/docs/empty.txt", &vfs_info) ||
