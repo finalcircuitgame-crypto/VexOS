@@ -5,7 +5,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 ## Key features
 - EFI bootloader (src/boot) that loads kernel.elf and passes a BootInfo struct
 - Kernel core (src/kernel/core): framebuffer console, PMM, VMM, heap, PCI enumeration and drivers, desktop UI, and setup wizard
-- Persistent SimpleFS storage with SFS1 compatibility and journaled SFS2 root-file operations
+- Persistent SimpleFS storage with SFS1 compatibility and journaled SFS2 nested-file operations
 
 ## Development roadmap
 
