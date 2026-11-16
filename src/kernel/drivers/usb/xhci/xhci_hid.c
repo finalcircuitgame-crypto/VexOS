@@ -383,14 +383,9 @@ int xhci_hid_set_idle(xhci_device_state_t *dev) {
   uint64_t setup = 0;
   setup |= 0x21ULL;
   setup |= 0x0AULL << 8;
-  /*
-   * Ask keyboards for a state report every 100 ms as well as on changes.
-   * If one key-up transfer is missed, a later idle report resynchronizes the
-   * boot-keyboard state. Keep mouse idle at zero: repeating a relative mouse
-   * report would replay its last movement delta.
-   */
-  uint16_t idle_w_value = (dev->hid_proto == 1) ? (uint16_t)(25u << 8) : 0u;
-  setup |= ((uint64_t)idle_w_value) << 16;
+  /* Keep HID idle reporting disabled; relative report semantics vary
+     by device, and this driver relies on change reports for all HID input. */
+  setup |= 0x0000ULL << 16;
   setup |= ((uint64_t)dev->hid_ifnum) << 32;
   setup |= 0ULL << 48;
   return xhci_ep0_control_no_data_out(dev, setup);
