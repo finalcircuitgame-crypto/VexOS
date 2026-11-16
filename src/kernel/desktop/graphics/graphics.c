@@ -1,5 +1,6 @@
 #include "graphics.h"
-#include "font_atlas.h"
+
+extern const uint8_t _binary_font_atlas_bin_start[];
 
 static BootInfo *g_boot_info;
 static uint32_t *g_backbuffer;
@@ -380,16 +381,23 @@ gfx_font_family_t gfx_get_font_family(void) {
 uint8_t gfx_get_font_scale(void) { return g_font_scale; }
 uint8_t gfx_get_font_bold(void) { return g_font_bold; }
 
+static uint8_t gfx_font_coverage(uint8_t character, uint32_t x,
+                                 uint32_t y) {
+  if (character >= 128u || x >= 8u || y >= 8u)
+    return 0;
+  uint32_t glyph_index = (uint32_t)g_font_family * 128u + character;
+  uint32_t pixel_index = glyph_index * 64u + y * 8u + x;
+  uint8_t packed = _binary_font_atlas_bin_start[pixel_index >> 2];
+  uint8_t shift = (uint8_t)(6u - ((pixel_index & 3u) * 2u));
+  return (uint8_t)(((packed >> shift) & 3u) * 85u);
+}
+
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground) {
   if (!g_boot_info)
     return;
 
-  /* The new grayscale atlas is the normal path. Keep the original CGA font
-     as a defensive fallback for non-ASCII bytes or an unavailable atlas. */
-  if (character < VEXOS_FONT_GLYPH_COUNT) {
-    const uint8_t *glyph =
-        &vexos_font_atlas[g_font_family][g_font_bold][character][0];
+  if (character < 128u) {
     uint32_t scale = g_font_scale;
     uint32_t width = 8u * scale;
     uint32_t height = 8u * scale;
@@ -413,7 +421,12 @@ void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
     foreground &= 0x00FFFFFFu;
     for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
       for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
-        uint8_t alpha = glyph[gy * 8u + gx];
+        uint8_t alpha = gfx_font_coverage(character, gx, gy);
+        if (g_font_bold && gx)
+          {
+            uint8_t left = gfx_font_coverage(character, gx - 1u, gy);
+            if (left > alpha) alpha = left;
+          }
         if (!alpha)
           continue;
         uint32_t px0 = x + gx * scale;
