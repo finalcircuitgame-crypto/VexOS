@@ -7,6 +7,7 @@
 #include "idt.h"
 #include "pmm.h"
 #include "simplefs.h"
+#include "sfs2.h"
 #include "vfs.h"
 #include "task.h"
 #include "process.h"
@@ -463,6 +464,9 @@ static void ci_syscall_self_test(void) {
   if (!simplefs_ci_validate_metadata_self_test())
     ci_memory_test_fail("SFS1 metadata validation and extent safety");
   serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\\n");
+  if (!sfs2_ci_metadata_self_test())
+    ci_memory_test_fail("SFS2 superblock, inode, and bitmap metadata");
+  serial_print("[CI] SFS2 superblock, inode, and bitmap metadata passed\\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
