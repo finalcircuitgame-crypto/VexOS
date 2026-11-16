@@ -1446,6 +1446,20 @@ int sfs2_ci_metadata_self_test(void) {
                                                    checksum));
     if (!sfs2_validate_superblock(&sb, 4096))
         return 0;
+
+    /* Earlier journal-enabled SFS2 images reserve eight redo records. */
+    sfs2_superblock_t legacy_journal = sb;
+    legacy_journal.journal_lba = 1u;
+    legacy_journal.journal_sectors = 9u;
+    legacy_journal.bitmap_lba = 10u;
+    legacy_journal.inode_table_lba = 11u;
+    legacy_journal.data_lba = 59u;
+    legacy_journal.checksum = sfs2_checksum(&legacy_journal,
+        sizeof(legacy_journal),
+        (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    if (!sfs2_validate_superblock(&legacy_journal, 4096u))
+        return 0;
+
     sb.data_lba = 1;
     if (sfs2_validate_superblock(&sb, 4096))
         return 0;
