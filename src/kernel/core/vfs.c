@@ -268,6 +268,7 @@ int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
     }
 
     uint32_t written = 0;
+    uint32_t path_limit = simplefs_path_limit();
     while (src < len) {
         uint32_t component_start = src;
         while (src < len && path[src] != '/')
@@ -284,8 +285,8 @@ int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
             return 0;
         } else {
             uint32_t separator = written ? 1u : 0u;
-            if (component_len == 0 || component_len > 31u ||
-                written + separator + component_len > 31u ||
+            if (component_len == 0 || component_len >= VFS_NAME_MAX ||
+                written + separator + component_len > path_limit ||
                 written + separator + component_len + 1u > out_cap) {
                 out[0] = '\0';
                 return 0;
