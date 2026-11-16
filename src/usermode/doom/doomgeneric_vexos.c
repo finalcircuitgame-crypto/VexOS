@@ -2,6 +2,7 @@
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include "d_event.h"
+#include "../libc/vexfs.h"
 
 #define SYS_EXIT       0u
 #define SYS_TICKS      7u
@@ -136,8 +137,107 @@ static unsigned char arrow_key_from_index(uint32_t index) {
     return index < 4u ? keys[index] : 0;
 }
 
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_test_vfs_syscalls(void) {
+    static const char path[] = "/r3ci/data.txt";
+    static const char parent[] = "/r3ci";
+    static const char payload[] = "Ring3 VFS syscall regression";
+    char readback[sizeof(payload)];
+    vexfs_stat_t info;
+    vexfs_dir_t directory = {-1};
+    vexfs_dirent_t entry;
+
+    (void)vexfs_unlink(path);
+    if (vexfs_create(path) != 0)
+        goto fail;
+    if (vexfs_write_file(path, payload, sizeof(payload)) != 0)
+        goto fail;
+    if (vexfs_stat(path, &info) != 0 ||
+        info.type != VEXFS_NODE_FILE || info.size != sizeof(payload))
+        goto fail;
+
+    int fd = vexfs_open_read(path);
+    if (fd < 3)
+        goto fail;
+    if (vexfs_unlink(path) == 0 ||
+        vexfs_write_file(path, payload, sizeof(payload)) == 0)
+        goto fail;
+    int bytes = vexfs_read_file(fd, readback, sizeof(readback));
+    if (bytes != (int)sizeof(payload))
+        goto fail_open;
+    for (uint32_t i = 0; i < sizeof(payload); ++i) {
+        if (readback[i] != payload[i])
+            goto fail_open;
+    }
+    if (vexfs_seek_file(fd, 0, 0) != 0 ||
+        vexfs_close_file(fd) != 0)
+        goto fail;
+
+    if (vexfs_open_dir(&directory, parent) < 3)
+        goto fail;
+    uint32_t entry_size = 0;
+    if (vexfs_readdir_sized(&directory, entry.name, 2u,
+                            &entry_size) != -1)
+        goto fail_dir;
+    if (vexfs_readdir_sized(&directory, (char *)(uintptr_t)1u,
+                            sizeof(entry.name), &entry_size) != -1)
+        goto fail_dir;
+    int type = vexfs_readdir(&directory, &entry);
+    if (type != (int)VEXFS_NODE_FILE ||
+        entry.size != sizeof(payload) ||
+        entry.name[0] != 'd' || entry.name[1] != 'a' ||
+        entry.name[2] != 't' || entry.name[3] != 'a' ||
+        entry.name[4] != '.' || entry.name[5] != 't' ||
+        entry.name[6] != 'x' || entry.name[7] != 't' ||
+        entry.name[8] != '\0' ||
+        vexfs_readdir(&directory, &entry) != 0 ||
+        vexfs_close_dir(&directory) != 0)
+        goto fail;
+
+    vexfs_dir_t root = {-1};
+    if (vexfs_open_dir(&root, "/") < 3)
+        goto fail;
+    int found_parent = 0;
+    while ((type = vexfs_readdir(&root, &entry)) > 0) {
+        if (type == (int)VEXFS_NODE_DIRECTORY &&
+            entry.name[0] == 'r' && entry.name[1] == '3' &&
+            entry.name[2] == 'c' && entry.name[3] == 'i' &&
+            entry.name[4] == '\0')
+            found_parent = 1;
+    }
+    if (type < 0 || !found_parent || vexfs_close_dir(&root) != 0)
+        goto fail;
+
+    if (vexfs_unlink(path) != 0 ||
+        vexfs_stat(path, &info) == 0 ||
+        vexfs_stat(parent, &info) == 0 ||
+        vexfs_write_file(path, (const void *)(uintptr_t)1u, 4u) == 0)
+        goto fail;
+
+    static const char passed[] =
+        "[CI] RING3 VFS mutation/stat/directory syscalls passed\n";
+    (void)vexfs_syscall3(1u, (uint64_t)(uintptr_t)passed,
+                         sizeof(passed) - 1u, 0);
+    return;
+
+fail_dir:
+    (void)vexfs_close_dir(&directory);
+    goto fail;
+fail_open:
+    (void)vexfs_close_file(fd);
+fail:
+    static const char failed[] =
+        "[CI] RING3 VFS mutation/stat/directory syscalls FAILED\n";
+    (void)vexfs_syscall3(1u, (uint64_t)(uintptr_t)failed,
+                         sizeof(failed) - 1u, 0);
+}
+#endif
+
 void DG_Init(void) {
     mouse_buttons = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+    ci_test_vfs_syscalls();
+#endif
     (void)vex_syscall0(SYS_APP_READY);
     arrow_state = (uint8_t)(vex_syscall0(SYS_KEY_STATE) & 0x0Fu);
     arrow_state_valid = 1;
