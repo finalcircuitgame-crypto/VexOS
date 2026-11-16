@@ -88,6 +88,17 @@ class SFS2ImageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "un-replayed journal"):
                 image.verify_image(path)
 
+    def test_verifier_accepts_legacy_eight_record_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "legacy-journal.img"
+            image.build_image(path, 128, [("file.txt", b"legacy")], 16)
+            raw = bytearray(path.read_bytes())
+            struct.pack_into("<I", raw, 80, 9)
+            struct.pack_into("<I", raw, 68, image.checksum(raw[:image.SECTOR], 68))
+            path.write_bytes(raw)
+            verified = image.verify_image(path)
+            self.assertEqual(verified["files"][0][0], "file.txt")
+
     def test_refuses_to_overwrite_existing_image(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "existing.img"
