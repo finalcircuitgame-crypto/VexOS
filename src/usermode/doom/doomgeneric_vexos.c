@@ -35,6 +35,78 @@ static inline uint64_t vex_syscall3(uint64_t n, uint64_t a, uint64_t b,
     return r;
 }
 
+static uint32_t log_append_text(char *buffer, uint32_t offset,
+                                const char *value) {
+    while (value && *value)
+        buffer[offset++] = *value++;
+    return offset;
+}
+
+static uint32_t log_append_u64(char *buffer, uint32_t offset, uint64_t value) {
+    char digits[20];
+    uint32_t count = 0;
+    do {
+        digits[count++] = (char)('0' + (value % 10u));
+        value /= 10u;
+    } while (value && count < sizeof(digits));
+    while (count)
+        buffer[offset++] = digits[--count];
+    return offset;
+}
+
+static const char *arrow_label_from_usage(uint8_t usage) {
+    switch (usage) {
+        case 0x4F: return "RIGHT";
+        case 0x50: return "LEFT";
+        case 0x51: return "DOWN";
+        case 0x52: return "UP";
+        default: return 0;
+    }
+}
+
+static void log_arrow_transition(const char *stage, uint8_t usage,
+                                 int pressed, const char *source) {
+    const char *key = arrow_label_from_usage(usage);
+    if (!key)
+        return;
+
+    char message[128];
+    uint32_t length = 0;
+    length = log_append_text(message, length, "[DOOM] tick=");
+    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
+    length = log_append_text(message, length, " stage=");
+    length = log_append_text(message, length, stage);
+    length = log_append_text(message, length, " key=");
+    length = log_append_text(message, length, key);
+    length = log_append_text(message, length, " state=");
+    length = log_append_text(message, length, pressed ? "DOWN" : "UP");
+    length = log_append_text(message, length, " source=");
+    length = log_append_text(message, length, source);
+    message[length++] = '\\n';
+    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+}
+
+static void log_arrow_ticcmd_state(uint8_t state) {
+    static uint8_t previous_state;
+    static uint8_t state_valid;
+    static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
+    static const uint8_t usages[4] = {0x4Fu, 0x50u, 0x51u, 0x52u};
+
+    if (!state_valid) {
+        previous_state = state;
+        state_valid = 1u;
+        return;
+    }
+
+    uint8_t changed = (uint8_t)(previous_state ^ state);
+    previous_state = state;
+    for (uint32_t i = 0; i < 4u; ++i) {
+        if (changed & bits[i])
+            log_arrow_transition("TICCMD", usages[i],
+                                 (state & bits[i]) != 0, "kernel-snapshot");
+    }
+}
+
 #ifdef VEXOS_CI_INPUT_TEST
 static void trace_arrow_event(uint8_t usage, int pressed) {
     const char *message = 0;
@@ -135,6 +207,7 @@ void VEXOS_DoomSyncArrowKeys(unsigned int *keys, int key_right, int key_left,
     if (key_up > 0 && key_up < 256)
         keys[key_up] = (state & 8u) ? 1u : 0u;
 
+    log_arrow_ticcmd_state(state);
     trace_arrow_sync_state(state);
 }
 
@@ -324,8 +397,9 @@ static int reconcile_arrow_state(int *pressed, unsigned char *key) {
                 *pressed = (actual & bit) != 0;
             if (key)
                 *key = arrow_key_from_index(i);
-            trace_arrow_event((uint8_t)(i == 0u ? 0x4Fu : i == 1u ? 0x50u : i == 2u ? 0x51u : 0x52u),
-                              (actual & bit) != 0);
+            uint8_t usage = (uint8_t)(i == 0u ? 0x4Fu : i == 1u ? 0x50u : i == 2u ? 0x51u : 0x52u);
+            log_arrow_transition("EVENT", usage, (actual & bit) != 0, "state-reconcile");
+            trace_arrow_event(usage, (actual & bit) != 0);
             return 1;
         }
     }
@@ -359,6 +433,7 @@ int DG_GetKey(int *pressed, unsigned char *key) {
             else
                 arrow_state &= (uint8_t)~bit;
             arrow_state_valid = 1;
+            log_arrow_transition("EVENT", usage, is_pressed, "event-queue");
             trace_arrow_event(usage, is_pressed);
         }
 
