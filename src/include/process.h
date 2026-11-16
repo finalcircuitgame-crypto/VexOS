@@ -34,6 +34,8 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
                              uint64_t entry, uint64_t user_stack_top);
 int Process_BeginUserModeCurrent(AddressSpace *space,
                                  uint64_t kernel_stack_top);
+void Process_AttachCurrentAddressSpace(AddressSpace *space);
+void Process_SetCurrentKernelStack(uint64_t stack_top);
 void Process_DetachCurrentAddressSpace(void);
 int Process_IsCurrentUser(void);
 ProcessId Process_GetCurrentId(void);
