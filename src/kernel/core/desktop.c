@@ -298,6 +298,7 @@ static uint8_t g_doom_render_trace_done;
 static uint8_t g_doom_close_pointer_reported;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
+static int32_t g_ring3_task_id = -1;
 static const char *g_ring3_elf_name = "doom.elf";
 
 int desktop_doom_app_ready(void) {
@@ -463,8 +464,24 @@ static void launch_ring3_task(const char *filename) {
   }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
+  int32_t task_id = Task_Create(ring3_task_entry, stack_top);
+  if (task_id < 0) {
+    kfree(stack);
+    g_ring3_task_started = 0;
+    shell_append("ring3: scheduler has no free task slot\\n");
+    return;
+  }
+
+  if (!Process_RegisterTask("Doom", (uint32_t)task_id, stack)) {
+    Task_Discard((uint32_t)task_id);
+    kfree(stack);
+    g_ring3_task_started = 0;
+    shell_append("ring3: process table is full\\n");
+    return;
+  }
+
   g_ring3_task_stack = stack;
-  Task_Create(ring3_task_entry, stack_top);
+  g_ring3_task_id = task_id;
 }
 
 static void draw_window_chrome(const desktop_window_t *win,
@@ -1696,6 +1713,10 @@ void desktop_tick(void) {
   if (g_deferred_ring3_task_stack) {
     kfree(g_deferred_ring3_task_stack);
     g_deferred_ring3_task_stack = NULL;
+    if (g_ring3_task_id >= 0) {
+      Process_ReapTask((uint32_t)g_ring3_task_id);
+      g_ring3_task_id = -1;
+    }
   }
 
   if (!g_bi)
