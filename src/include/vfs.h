@@ -18,7 +18,7 @@ typedef struct {
 
 struct vfs_node;
 
-/* Each open handle has an independent offset and a reference to a shared node. */
+/* Zero-initialize before open. Each handle has an independent offset. */
 typedef struct {
     char path[VFS_PATH_MAX];
     uint32_t size;
