@@ -109,7 +109,14 @@ static int simplefs_backend_mount(void) {
 
 static int simplefs_backend_stat(const char *name, vfs_stat_t *out) {
     uint32_t size = 0;
-    if (!name || !out || !simplefs_file_size(name, &size))
+    if (!name || !out)
+        return 0;
+    if (simplefs_is_directory(name)) {
+        out->type = VFS_NODE_DIRECTORY;
+        out->size = 0;
+        return 1;
+    }
+    if (!simplefs_file_size(name, &size))
         return 0;
     out->type = VFS_NODE_FILE;
     out->size = size;
@@ -787,9 +794,11 @@ int vfs_dir_read(vfs_dir_t *dir, char *out_name, uint32_t out_cap,
         full_path[pos] = '\0';
 
         vfs_stat_t exact_info;
-        int exact_file = vfs_backend_stat(full_path, &exact_info) &&
-                         exact_info.type == VFS_NODE_FILE;
-        if (is_directory) {
+        int exact_exists = vfs_backend_stat(full_path, &exact_info);
+        int exact_file = exact_exists && exact_info.type == VFS_NODE_FILE;
+        int exact_directory = exact_exists &&
+                              exact_info.type == VFS_NODE_DIRECTORY;
+        if (is_directory || exact_directory) {
             if (exact_file || vfs_child_seen_before(dir, index, child))
                 continue;
             out_stat->type = VFS_NODE_DIRECTORY;
