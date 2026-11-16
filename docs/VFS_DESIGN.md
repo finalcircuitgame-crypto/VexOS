@@ -1,6 +1,6 @@
 # VexOS VFS Integration Design
 
-## Goal
+## Current implementation\n\nThe first vertical slice is now present in `src/include/vfs.h` and `src/kernel/core/vfs.c`. It lazily mounts the existing SimpleFS backend, accepts root-level file paths (including `/name` and `./name`), and exposes stat, ranged read, write, and root enumeration. The user-mode open/read path and desktop file-manager listing now call VFS rather than SimpleFS directly.\n\nThis is deliberately not yet a full VFS: it has no vnode/open-file objects, nested directories, mount table, unlink, directory handles, or FAT32 ranged reads. The current SimpleFS backend itself supports a flat namespace; its FAT32 path is root-only and read-only.\n\n## Goal
 
 Introduce a filesystem-independent kernel interface while preserving the current SimpleFS disk image and its contents. This is an integration layer, not a replacement filesystem format.
 
@@ -43,12 +43,12 @@ Backend operations should cover lookup, create, unlink, read, write, stat, and d
 
 ## Incremental implementation order
 
-1. Audit and document SimpleFS and all call sites.
-2. Add VFS types and a root mount backed by SimpleFS.
-3. Implement lookup, open, read, write, close, and stat.
-4. Route one small consumer (preferably a kernel test or shell command) through VFS.
-5. Route remaining consumers and remove direct backend dependencies.
-6. Integrate process-owned descriptors and test cleanup.
+1. Complete the audit of SimpleFS, FAT32, storage-driver semantics, and remaining direct call sites.
+2. Add filesystem, mount, vnode, and open-file abstractions behind the current compatibility API.
+3. Implement hierarchical lookup, open, read, write, close, and stat.
+4. Route all remaining desktop, shell, and application consumers through VFS.
+5. Remove direct backend dependencies from consumers.
+6. Integrate process-owned VFS open-file objects with process descriptor cleanup.
 7. Add directory iteration, create, unlink, and error-path coverage.
 8. Only then add another backend such as FAT32.
 
