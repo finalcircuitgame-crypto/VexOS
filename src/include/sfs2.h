@@ -53,6 +53,7 @@ typedef struct {
     sfs2_read_sector_fn read_sector;
     sfs2_write_sector_fn write_sector;
     uint8_t mounted;
+    sfs2_inode_t inodes[SFS2_INODE_MAX];
 } sfs2_volume_t;
 
 typedef struct {
