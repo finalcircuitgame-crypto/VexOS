@@ -564,9 +564,17 @@ static void ci_kernel_exit_entry(void) {
 }
 
 static volatile ProcessId ci_orphan_child_pid;
+static uint32_t ci_unauthorized_target_task;
+static volatile int ci_unauthorized_reap_result;
 
 static void ci_orphan_leaf_entry(void) {
   /* Returning through the trampoline should yield exit code zero. */
+}
+
+static void ci_unauthorized_reaper_entry(void) {
+  /* A process must never reap a zombie owned by a different parent. */
+  ci_unauthorized_reap_result =
+      Process_ReapTask(ci_unauthorized_target_task);
 }
 
 static void ci_orphan_parent_entry(void) {
@@ -722,6 +730,30 @@ int Process_CI_SelfTest(void) {
 
   if (!kernel_ok || Process_GetCount() != initial_count ||
       Process_GetCurrentId() != parent_pid)
+    return 0;
+
+  /* An unrelated process must not be allowed to reap a sibling's
+     zombie; the actual parent must still be able to wait and reap it. */
+  ci_unauthorized_reap_result = -1;
+  ProcessId protected_pid =
+      Process_CreateKernel("ci-protected", ci_orphan_leaf_entry);
+  ProcessInfo protected_info;
+  if (!protected_pid ||
+      !Process_GetInfo(protected_pid, &protected_info))
+    return 0;
+  ci_unauthorized_target_task = protected_info.task_id;
+
+  ProcessId reaper_pid = Process_CreateKernel(
+      "ci-unauthorized-reaper", ci_unauthorized_reaper_entry);
+  int32_t reaper_exit_code = -999;
+  if (!reaper_pid ||
+      Process_Wait(reaper_pid, &reaper_exit_code) != 0 ||
+      reaper_exit_code != 0 ||
+      ci_unauthorized_reap_result != 0 ||
+      !find_by_pid(protected_pid))
+    return 0;
+
+  if (Process_Wait(protected_pid, NULL) != 0)
     return 0;
 
   /* Exit a parent while its child is still ready. The child must be adopted
