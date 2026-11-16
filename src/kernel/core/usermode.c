@@ -391,7 +391,7 @@ void usermode_launch(const char *filename) {
     if (!space) {
         kfree(mapped_pages);
         kfree(elf_data);
-        serial_print("[USERMODE] failed to create isolated address space\\n");
+        serial_print("[USERMODE] failed to create isolated address space\n");
         return;
     }
     /* The kernel continues running on the inherited mappings while the new
