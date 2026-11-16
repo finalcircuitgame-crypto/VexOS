@@ -49,7 +49,7 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
     extern void serial_print(const char *str);
     serial_print("[CI] Shell help command executed\n");
 #endif
-    terminal_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
+    terminal_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall font\n");
     return 1;
   }
 
@@ -66,8 +66,8 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
     uint8_t bold = gfx_get_font_bold();
 
     if (!token_length) {
-      terminal_append("Fonts: inter, lato, dejavu, mono\\n");
-      terminal_append("Usage: font <family> [1|2|3] [bold|regular]\\n");
+      terminal_append("Fonts: inter, lato, dejavu, mono\n");
+      terminal_append("Usage: font <family> [1|2|3] [bold|regular]\n");
       return 1;
     }
     if (token_length == 5u &&
@@ -88,7 +88,7 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
         line[token_start + 2u] == 'n' && line[token_start + 3u] == 'o')
       family = GFX_FONT_DEJAVU_MONO;
     else {
-      terminal_append("Unknown font. Use: inter, lato, dejavu, mono\\n");
+      terminal_append("Unknown font. Use: inter, lato, dejavu, mono\n");
       return 1;
     }
 
@@ -109,12 +109,12 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
           line[pos + 3u] == 'u' && line[pos + 4u] == 'l' &&
           line[pos + 5u] == 'a' && line[pos + 6u] == 'r') bold = 0u;
       else if (style_length) {
-        terminal_append("Style must be bold or regular.\\n");
+        terminal_append("Style must be bold or regular.\n");
         return 1;
       }
     }
     gfx_set_font(family, scale, bold);
-    terminal_append("System font updated.\\n");
+    terminal_append("System font updated.\n");
     return 1;
   }
 
