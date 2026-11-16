@@ -35,6 +35,17 @@ class SFS2ImageTests(unittest.TestCase):
                     }[name]
                     self.assertEqual(payload, expected)
 
+    def test_formats_and_verifies_file_larger_than_2_mib(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "large.img"
+            payload = bytes((i * 17) & 0xFF for i in range(3 * 1024 * 1024 + 37))
+            image.build_image(path, 8192, [("large.bin", payload)], 16)
+            verified = image.verify_image(path)
+            self.assertEqual(verified["files"][0][2], len(payload))
+            with path.open("rb") as disk:
+                disk.seek(verified["files"][0][1] * image.SECTOR)
+                self.assertEqual(disk.read(len(payload)), payload)
+
     def test_formatter_reserves_clean_redo_journal(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "journal.img"
