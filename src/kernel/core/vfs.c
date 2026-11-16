@@ -736,8 +736,7 @@ static int vfs_child_seen_before(const vfs_dir_t *dir, uint32_t index,
             continue;
         int result = vfs_child_from_entry(dir->path, entry, previous,
                                           sizeof(previous), &previous_is_dir);
-        if (result == 1 && previous_is_dir &&
-            vfs_string_equal(previous, child))
+        if (result == 1 && vfs_string_equal(previous, child))
             return 1;
     }
     return 0;
