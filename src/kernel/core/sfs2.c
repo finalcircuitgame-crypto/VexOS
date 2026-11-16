@@ -1066,7 +1066,7 @@ int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
 #ifdef VEXOS_CI_INPUT_TEST
 static uint8_t g_sfs2_test_disk[64u][SFS2_SECTOR_SIZE];
 static uint8_t g_sfs2_large_payload[2u * 1024u * 1024u + 37u];
-static uint8_t g_sfs2_large_written[8192u];
+static uint8_t g_sfs2_large_written[16384u];
 static uint8_t g_sfs2_large_mode;
 static uint64_t g_sfs2_large_data_lba;
 static uint64_t g_sfs2_test_fail_write_lba = UINT64_MAX;
@@ -1077,7 +1077,7 @@ static int sfs2_test_read(uint64_t lba, void *sector) {
     if (!sector)
         return 0;
     if (g_sfs2_large_mode && lba >= g_sfs2_large_data_lba &&
-        lba - g_sfs2_large_data_lba < 8192u) {
+        lba - g_sfs2_large_data_lba < 16384u) {
         uint64_t index = lba - g_sfs2_large_data_lba;
         if (!g_sfs2_large_written[index])
             return 0;
@@ -1480,16 +1480,16 @@ int sfs2_ci_mount_read_test(void) {
     sb.version = SFS2_VERSION;
     sb.header_size = sizeof(sb);
     sb.sector_size = SFS2_SECTOR_SIZE;
-    sb.volume_sectors = 8192u;
+    sb.volume_sectors = 12288u;
     sb.generation = 1u;
     sb.journal_lba = 1u;
     sb.journal_sectors = 33u;
     sb.bitmap_lba = 34u;
-    sb.bitmap_sectors = 2u;
-    sb.inode_table_lba = 36u;
+    sb.bitmap_sectors = 3u;
+    sb.inode_table_lba = 37u;
     sb.inode_table_sectors = 2u;
     sb.inode_capacity = 8u;
-    sb.data_lba = 38u;
+    sb.data_lba = 39u;
     sb.root_inode = 1u;
     sb.checksum = sfs2_checksum(&sb, sizeof(sb),
         (uint32_t)offsetof(sfs2_superblock_t, checksum));
@@ -1500,16 +1500,26 @@ int sfs2_ci_mount_read_test(void) {
     inode.inode_id = 1u;
     inode.type = SFS2_INODE_DIRECTORY;
     sfs2_test_finish_inode(&inode);
-    sfs2_test_store_inode_at(36u, 0u, &inode);
+    sfs2_test_store_inode_at(37u, 0u, &inode);
     for (uint32_t i = 0; i < sizeof(g_sfs2_large_payload); ++i)
         g_sfs2_large_payload[i] = (uint8_t)((i * 17u + 3u) & 0xFFu);
     sfs2_zero(g_sfs2_large_written, sizeof(g_sfs2_large_written));
     g_sfs2_large_data_lba = sb.data_lba;
     g_sfs2_large_mode = 1u;
     sfs2_zero(&volume, sizeof(volume));
-    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 8192u) ||
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 12288u) ||
         !sfs2_write_file(&volume, "/large.bin", g_sfs2_large_payload,
                          (uint32_t)sizeof(g_sfs2_large_payload)))
+        return 0;
+    /* Replace the large file with a different payload; both extents span
+       multiple bitmap sectors and must commit as one transaction. */
+    for (uint32_t i = 0; i < sizeof(g_sfs2_large_payload); ++i)
+        g_sfs2_large_payload[i] = (uint8_t)((i * 29u + 11u) & 0xFFu);
+    if (!sfs2_write_file(&volume, "/large.bin", g_sfs2_large_payload,
+                         (uint32_t)sizeof(g_sfs2_large_payload)))
+        return 0;
+    sfs2_zero(&volume, sizeof(volume));
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 12288u))
         return 0;
     if (!sfs2_stat_path(&volume, "/large.bin", &info) ||
         info.size_bytes != sizeof(g_sfs2_large_payload))
