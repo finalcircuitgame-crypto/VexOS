@@ -556,7 +556,7 @@ static void ci_syscall_self_test(void) {
   if (vfs_unlink("/docs/readme.txt") ||
       vfs_write("/docs/readme.txt", nested_payload, sizeof(nested_payload)))
     ci_memory_test_fail("VFS mutation rejected while file is open");
-  if (vfs_close(&nested_file_b) || vfs_unlink("/docs/readme.txt"))
+  if (!vfs_close(&nested_file_b) || vfs_unlink("/docs/readme.txt"))
     ci_memory_test_fail("VFS unlink blocked while one reference remains");
   if (!vfs_close(&nested_file_a) || !vfs_unlink("/docs/readme.txt"))
     ci_memory_test_fail("VFS close releases final node and permits unlink");
