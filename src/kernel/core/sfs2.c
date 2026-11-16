@@ -230,7 +230,6 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
     return 0;
 }
 
-#define SFS2_MAX_FILE_SECTORS 32768u /* 16 MiB */
 
 typedef struct {
     uint32_t count;
