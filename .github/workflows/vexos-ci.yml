@@ -458,7 +458,7 @@ jobs:
 
                   # Regression test: hold each arrow key long enough to exercise
                   # sustained movement, then verify the USB driver and Doom
-                  # backend both observe the matching release transition.
+                  # Doom backend receives both transitions and its live-state syscall agrees.
                   for qcode, label in (
                       ("right", "RIGHT"),
                       ("left", "LEFT"),
@@ -495,8 +495,8 @@ jobs:
                           f"[CI] USB arrow {label} released",
                           f"[CI] Doom backend received {label} down",
                           f"[CI] Doom backend received {label} released",
-                          f"[CI] Doom key state synced {label} down",
-                          f"[CI] Doom key state synced {label} released",
+                          f"[CI] Doom syscall arrow {label} state down",
+                          f"[CI] Doom syscall arrow {label} state released",
                       )
                       deadline = time.time() + 4
                       serial = ""
