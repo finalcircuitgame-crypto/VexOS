@@ -405,7 +405,12 @@ static int sfs2_tx_store_superblock(sfs2_volume_t *volume,
     return 1;
 }
 
-static int sfs2_find_inode_id(const sfs2_volume_t *volume, uint32_t id,\n                              uint32_t *out_index);\nstatic int sfs2_next_inode_slot(sfs2_volume_t *volume, uint32_t *out_index,\n                                uint32_t *out_id);\n\nstatic int sfs2_find_child_entry(sfs2_volume_t *volume,
+static int sfs2_find_inode_id(const sfs2_volume_t *volume, uint32_t id,
+                              uint32_t *out_index);
+static int sfs2_next_inode_slot(sfs2_volume_t *volume, uint32_t *out_index,
+                                uint32_t *out_id);
+
+static int sfs2_find_child_entry(sfs2_volume_t *volume,
                                    uint32_t parent_id, const char *name,
                                    uint32_t length, uint32_t *out_index) {
     for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
