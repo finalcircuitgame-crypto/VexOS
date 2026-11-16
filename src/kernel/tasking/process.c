@@ -549,14 +549,12 @@ int Process_CI_SelfTest(void) {
       kernel->kernel_stack_top != 0;
 
   if (kernel_ok) {
-    /* Real software-interrupt context switch into the child. It returns from
-       its C entry, exits through the trampoline, and resumes this parent. */
-    Task_Yield();
-    kernel_ok = Process_GetInfo(kernel_pid, &info) &&
-        info.state == PROCESS_ZOMBIE &&
-        info.exit_code == 0;
-    if (kernel_ok)
-      kernel_ok = Process_ReapTask(info.task_id);
+    /* Wait must block this parent, run the child, wake the parent when the
+       child exits, return its exit code, and reap the zombie automatically. */
+    int32_t wait_exit_code = -999;
+    kernel_ok = Process_Wait(kernel_pid, &wait_exit_code) == 0 &&
+        wait_exit_code == 0 &&
+        !find_by_pid(kernel_pid);
   } else if (kernel) {
     ci_discard_unstarted(kernel);
   }
