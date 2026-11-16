@@ -494,6 +494,8 @@ static void ci_syscall_self_test(void) {
       vfs_slice[6] != 'a')
     ci_memory_test_fail("VFS ranged read");
 
+  serial_print("[CI] VFS root mount/path/stat/read/write/ranged-read passed\\n");
+
   // Unknown syscall numbers and invalid user pointers must fail safely.
   frame.rax = 0xFFFFFFFFu;
   syscall_handler((uint64_t)(uintptr_t)&frame);
