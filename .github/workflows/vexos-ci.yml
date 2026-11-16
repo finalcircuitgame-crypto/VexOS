@@ -20,6 +20,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Verify storage mount is non-destructive
+        run: |
+          if grep -Eq 'sfs_format[[:space:]]*\\(' src/kernel/core/simplefs.c; then
+            echo "Automatic SFS formatting must not be called from mount code." >&2
+            exit 1
+          fi
+          grep -Fq 'refusing to format' src/kernel/core/simplefs.c
+          grep -Fq 'refusing destructive recovery' src/kernel/core/simplefs.c
+          echo "Storage mount policy: unknown or damaged volumes are never formatted automatically."
+
       - name: Initialize test artifact directory
         run: |
           mkdir -p artifacts
