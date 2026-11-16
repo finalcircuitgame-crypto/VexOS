@@ -621,7 +621,7 @@ int sfs2_ci_metadata_self_test(void) {
     if (sfs2_validate_inode(&root, 50u, 4096u))
         return 0;
 
-    uint8_t bitmap[2] = {0xF0u, 0x00u};
+    uint8_t bitmap[2] = {0x0Fu, 0x00u};
     uint32_t start = 99;
     if (!sfs2_bitmap_find_free_run(bitmap, 16, 4, &start) || start != 4)
         return 0;
