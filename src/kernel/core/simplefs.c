@@ -481,6 +481,80 @@ static int sfs_validate_table(void) {
   return actual_count == g_sb.file_count;
 }
 
+#ifdef VEXOS_CI_INPUT_TEST
+static void sfs_ci_set_entry(uint32_t index, const char *name,
+                             uint32_t start_lba, uint32_t size_bytes) {
+  mem_zero(&g_table[index], (uint32_t)sizeof(g_table[index]));
+  g_table[index].used = 1;
+  str_copy(g_table[index].name, name, SFS_NAME_MAX);
+  g_table[index].start_lba = start_lba;
+  g_table[index].size_bytes = size_bytes;
+}
+
+/* Exercise the metadata validator with synthetic in-memory tables. No disk
+   sectors are modified by this test. */
+int simplefs_ci_validate_metadata_self_test(void) {
+  sfs_file_t saved_table[SFS_MAX_FILES];
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    saved_table[i] = g_table[i];
+  sfs_superblock_t saved_superblock = g_sb;
+  int ok = 1;
+
+  mem_zero(g_table, (uint32_t)sizeof(g_table));
+  g_sb.data_lba = 9u;
+  g_sb.next_free_lba = 16u;
+  g_sb.file_count = 1u;
+  sfs_ci_set_entry(0u, "docs/file.txt", 9u, 512u);
+  if (!sfs_validate_table())
+    ok = 0;
+
+  if (ok) {
+    str_copy(g_table[0].name, "../escape", SFS_NAME_MAX);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    for (uint32_t i = 0; i < SFS_NAME_MAX; ++i)
+      g_table[0].name[i] = 'x';
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 2u;
+    sfs_ci_set_entry(0u, "node", 9u, 1u);
+    sfs_ci_set_entry(1u, "node/child", 10u, 1u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 2u;
+    sfs_ci_set_entry(0u, "first", 9u, 1024u);
+    sfs_ci_set_entry(1u, "second", 10u, 1u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 1u;
+    g_sb.next_free_lba = 10u;
+    sfs_ci_set_entry(0u, "past-end", 10u, 1024u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    g_table[i] = saved_table[i];
+  g_sb = saved_superblock;
+  return ok;
+}
+#endif
+
 int simplefs_file_size(const char *name, uint32_t *out_size) {
   if (!g_storage_ready || !name)
     return 0;
