@@ -71,28 +71,28 @@ static uint8_t arrow_sync_state_valid;
 static void trace_arrow_sync_state(uint8_t state) {
     static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
     static const char *const down_messages[4] = {
-        "[CI] Doom ticcmd synced RIGHT down\\n",
-        "[CI] Doom ticcmd synced LEFT down\\n",
-        "[CI] Doom ticcmd synced DOWN down\\n",
-        "[CI] Doom ticcmd synced UP down\\n"
+        "[CI] Doom ticcmd synced RIGHT down\n",
+        "[CI] Doom ticcmd synced LEFT down\n",
+        "[CI] Doom ticcmd synced DOWN down\n",
+        "[CI] Doom ticcmd synced UP down\n"
     };
     static const char *const up_messages[4] = {
-        "[CI] Doom ticcmd synced RIGHT released\\n",
-        "[CI] Doom ticcmd synced LEFT released\\n",
-        "[CI] Doom ticcmd synced DOWN released\\n",
-        "[CI] Doom ticcmd synced UP released\\n"
+        "[CI] Doom ticcmd synced RIGHT released\n",
+        "[CI] Doom ticcmd synced LEFT released\n",
+        "[CI] Doom ticcmd synced DOWN released\n",
+        "[CI] Doom ticcmd synced UP released\n"
     };
     static const uint8_t down_lengths[4] = {
-        sizeof("[CI] Doom ticcmd synced RIGHT down\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced LEFT down\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced DOWN down\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced UP down\\n") - 1u
+        sizeof("[CI] Doom ticcmd synced RIGHT down\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced LEFT down\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced DOWN down\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced UP down\n") - 1u
     };
     static const uint8_t up_lengths[4] = {
-        sizeof("[CI] Doom ticcmd synced RIGHT released\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced LEFT released\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced DOWN released\\n") - 1u,
-        sizeof("[CI] Doom ticcmd synced UP released\\n") - 1u
+        sizeof("[CI] Doom ticcmd synced RIGHT released\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced LEFT released\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced DOWN released\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced UP released\n") - 1u
     };
 
     if (!arrow_sync_state_valid) {
