@@ -382,6 +382,119 @@ int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
     return 0;
 }
 
+
+#ifdef VEXOS_CI_INPUT_TEST
+static uint8_t g_sfs2_test_disk[16u][SFS2_SECTOR_SIZE];
+
+static int sfs2_test_read(uint64_t lba, void *sector) {
+    if (!sector || lba >= 16u)
+        return 0;
+    const uint8_t *src = g_sfs2_test_disk[lba];
+    uint8_t *dst = (uint8_t *)sector;
+    for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
+        dst[i] = src[i];
+    return 1;
+}
+
+static void sfs2_test_store_inode(uint32_t index,
+                                  const sfs2_inode_t *inode) {
+    uint32_t offset = index * (uint32_t)sizeof(*inode);
+    const uint8_t *src = (const uint8_t *)inode;
+    for (uint32_t i = 0; i < sizeof(*inode); ++i) {
+        uint32_t absolute = offset + i;
+        g_sfs2_test_disk[2u + absolute / SFS2_SECTOR_SIZE]
+                        [absolute % SFS2_SECTOR_SIZE] = src[i];
+    }
+}
+
+static void sfs2_test_finish_inode(sfs2_inode_t *inode) {
+    inode->checksum = sfs2_checksum(inode, sizeof(*inode),
+                                    (uint32_t)offsetof(sfs2_inode_t, checksum));
+}
+
+int sfs2_ci_mount_read_test(void) {
+    sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
+    sfs2_superblock_t sb;
+    sfs2_zero(&sb, sizeof(sb));
+    sb.magic = SFS2_MAGIC;
+    sb.version = SFS2_VERSION;
+    sb.header_size = sizeof(sb);
+    sb.sector_size = SFS2_SECTOR_SIZE;
+    sb.volume_sectors = 16u;
+    sb.generation = 1u;
+    sb.bitmap_lba = 1u;
+    sb.bitmap_sectors = 1u;
+    sb.inode_table_lba = 2u;
+    sb.inode_table_sectors = 1u;
+    sb.inode_capacity = 4u;
+    sb.data_lba = 3u;
+    sb.root_inode = 1u;
+    sb.checksum = sfs2_checksum(&sb, sizeof(sb),
+                                (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    const uint8_t *sb_src = (const uint8_t *)&sb;
+    for (uint32_t i = 0; i < sizeof(sb); ++i)
+        g_sfs2_test_disk[0][i] = sb_src[i];
+
+    sfs2_inode_t inode;
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode(0u, &inode);
+
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 2u;
+    inode.parent_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    inode.name[0] = 'e'; inode.name[1] = 'm'; inode.name[2] = 'p';
+    inode.name[3] = 't'; inode.name[4] = 'y';
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode(1u, &inode);
+
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 3u;
+    inode.parent_id = 1u;
+    inode.type = SFS2_INODE_FILE;
+    inode.name[0] = 'h'; inode.name[1] = 'e'; inode.name[2] = 'l';
+    inode.name[3] = 'l'; inode.name[4] = 'o';
+    inode.size_bytes = 5u;
+    inode.data_lba = 3u;
+    inode.data_sectors = 1u;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode(2u, &inode);
+    g_sfs2_test_disk[3][0] = 'v'; g_sfs2_test_disk[3][1] = 'e';
+    g_sfs2_test_disk[3][2] = 'x'; g_sfs2_test_disk[3][3] = 'o';
+    g_sfs2_test_disk[3][4] = 's';
+
+    sfs2_volume_t volume;
+    sfs2_zero(&volume, sizeof(volume));
+    if (!sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
+        return 0;
+    sfs2_stat_t info;
+    if (!sfs2_stat_path(&volume, "/empty", &info) ||
+        info.type != SFS2_INODE_DIRECTORY)
+        return 0;
+    char contents[5];
+    uint32_t bytes = 0;
+    if (!sfs2_read_file_at(&volume, "/hello", 0u, contents, 5u, &bytes) ||
+        bytes != 5u || contents[0] != 'v' || contents[1] != 'e' ||
+        contents[2] != 'x' || contents[3] != 'o' || contents[4] != 's')
+        return 0;
+    uint32_t cursor = 0;
+    sfs2_inode_t listed;
+    if (sfs2_list_directory(&volume, "/", &cursor, &listed) != 1)
+        return 0;
+    if (sfs2_stat_path(&volume, "/missing", &info))
+        return 0;
+    /* A damaged inode checksum must prevent mounting. */
+    g_sfs2_test_disk[2][sizeof(sfs2_inode_t) + 12u] ^= 0x80u;
+    volume.mounted = 0;
+    if (sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
+        return 0;
+    return 1;
+}
+#endif
+
 #ifdef VEXOS_CI_INPUT_TEST
 int sfs2_ci_metadata_self_test(void) {
     sfs2_superblock_t sb;
