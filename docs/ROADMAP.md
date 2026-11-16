@@ -44,8 +44,9 @@ Completed in VFS v1:
 - Audited the current SimpleFS interface and confirmed that SFS1 is a flat root-file store; the existing FAT32 path is a limited read-only root-file scanner.
 - Added a private backend-operations table and mounted the current SimpleFS API at `/`.
 - Added path normalization, root stat, read, ranged read, write, and flat-file listing adapters.
-- Routed user-mode open/read syscalls through VFS while preserving per-task descriptor cursors.
-- Added CI checks for existing-file lookup, absolute/relative paths, traversal/nested-path rejection, write/read, and ranged reads.
+- Added per-open VFS file handles with independent offsets, seek, close, and descriptor cleanup on process exit.
+- Routed user-mode open/read/seek/close syscalls through VFS; each process retains its own descriptor table.
+- Added CI checks for existing-file lookup, absolute/relative paths, traversal/nested-path rejection, write/read, ranged reads, and independent opens.
 
 Remaining milestones:
 1. Add explicit vnode/open-file objects and reference/lifetime rules.
