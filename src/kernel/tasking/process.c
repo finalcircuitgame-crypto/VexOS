@@ -421,9 +421,9 @@ int Process_ReapTask(uint32_t task_id) {
 }
 
 #ifdef VEXOS_CI_INPUT_TEST
-static void ci_process_entry(void) {
-  for (;;)
-    __asm__ volatile("pause");
+static void ci_kernel_return_entry(void) {
+  /* Deliberately return: Task's kernel-entry trampoline must convert this
+     into a normal process exit instead of returning through address zero. */
 }
 
 static void ci_discard_unstarted(Process *process) {
@@ -538,7 +538,7 @@ int Process_CI_SelfTest(void) {
   if (!user_ok || Process_GetCount() != initial_count)
     return 0;
 
-  ProcessId kernel_pid = Process_CreateKernel("ci-kernel", ci_process_entry);
+  ProcessId kernel_pid = Process_CreateKernel("ci-kernel", ci_kernel_return_entry);
   Process *kernel = find_by_pid(kernel_pid);
   int kernel_ok = kernel_pid && kernel &&
       Process_GetInfo(kernel_pid, &info) &&
@@ -548,8 +548,18 @@ int Process_CI_SelfTest(void) {
       kernel->kernel_stack_base != NULL &&
       kernel->kernel_stack_top != 0;
 
-  if (kernel)
+  if (kernel_ok) {
+    /* Real software-interrupt context switch into the child. It returns from
+       its C entry, exits through the trampoline, and resumes this parent. */
+    Task_Yield();
+    kernel_ok = Process_GetInfo(kernel_pid, &info) &&
+        info.state == PROCESS_ZOMBIE &&
+        info.exit_code == 0;
+    if (kernel_ok)
+      kernel_ok = Process_ReapTask(info.task_id);
+  } else if (kernel) {
     ci_discard_unstarted(kernel);
+  }
 
   return kernel_ok && Process_GetCount() == initial_count &&
          Process_GetCurrentId() == parent_pid;
