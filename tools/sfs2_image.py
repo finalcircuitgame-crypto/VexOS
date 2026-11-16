@@ -20,8 +20,8 @@ SFS1_MAGIC = 0x31465353
 SFS1_VERSION = 1
 SB = struct.Struct("<IHHIQQQI QIIQI IQI428s")
 INODE = struct.Struct("<IIBBH48sQQIII8s")
-JOURNAL = struct.Struct("<IIIIQ8Q8I392s")
-JOURNAL_SECTORS = 1 + 8
+JOURNAL = struct.Struct("<IIIIQ32Q32I104s")
+JOURNAL_SECTORS = 1 + 32
 SFS1_SB = struct.Struct("<8I")
 SFS1_ENTRY = struct.Struct("<B32sIII")
 
