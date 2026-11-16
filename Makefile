@@ -169,6 +169,12 @@ $(DOOMOBJDIR)/i_input.o: $(DOOMDIR)/i_input.c tools/patch_doom_input.py Makefile
 	python3 tools/patch_doom_input.py --source $< --output $(DOOMOBJDIR)/i_input_vexos.c
 	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/i_input_vexos.c -o $@
 
+# Reconcile live USB arrow state immediately before Doom builds movement commands.
+$(DOOMOBJDIR)/g_game.o: $(DOOMDIR)/g_game.c tools/patch_doom_game_input.py Makefile
+	@mkdir -p $(DOOMOBJDIR)
+	python3 tools/patch_doom_game_input.py --source $< --output $(DOOMOBJDIR)/g_game_vexos.c
+	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/g_game_vexos.c -o $@
+
 $(DOOMOBJDIR)/%.o: $(DOOMDIR)/%.c
 	@mkdir -p $(DOOMOBJDIR)
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
