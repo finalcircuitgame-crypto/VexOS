@@ -38,10 +38,13 @@ sizes, undersized metadata regions, and invalid checksums.
 
 The optional journal occupies a fixed region before the bitmap. The first
 journal sector is a checksummed commit header; up to 32 following sectors
-hold redo images for home sectors. A transaction writes journal payloads,
-commits the header, applies home sectors, then clears the header. On mount, a
-committed transaction is replayed before inode-table validation. Images with
-zero journal geometry remain compatible as read-only SFS2 volumes.
+hold redo images for home sectors. Newly formatted images reserve 33 journal
+sectors. Older journal-enabled images with nine sectors retain their original
+eight-record header layout and remain writable with an eight-record transaction
+limit. A transaction writes journal payloads, commits the header, applies home
+sectors, then clears the header. On mount, a committed transaction is replayed
+before inode-table validation. Images with zero journal geometry remain
+compatible as read-only SFS2 volumes.
 
 The bitmap has one bit per data-area sector (bit zero describes LBA
 `data_lba`). A set bit means allocated. Journaled nested-file operations update
