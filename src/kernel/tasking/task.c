@@ -8,7 +8,7 @@
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 extern void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task);
 extern void Process_OnTaskExit(uint32_t task_id);
-extern void Process_ExitKernelCurrent(int32_t exit_code);
+extern __attribute__((noreturn)) void Process_ExitKernelCurrent(int32_t exit_code);
 
 static Task tasks[TASK_MAX];
 static uint32_t task_count;
