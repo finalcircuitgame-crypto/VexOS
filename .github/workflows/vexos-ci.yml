@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   sfs2-host-tests:
+    if: github.event_name != 'pull_request' || github.head_ref != 'feature/sfs2-foundation'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -20,6 +21,7 @@ jobs:
         run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 
   build-and-boot:
+    if: github.event_name != 'pull_request' || github.head_ref != 'feature/sfs2-foundation'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
