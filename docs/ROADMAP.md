@@ -35,22 +35,29 @@ Remaining:
 
 ## 3. Virtual File System (VFS)
 
-**Status: In progress — design and integration are the next work**
+**Status: Initial VFS layer implemented; filesystem-tree functionality remains**
 
-The existing SimpleFS persistent storage must remain usable while filesystem access is moved behind a filesystem-independent VFS interface.
+The existing SimpleFS persistent storage remains the first backend. VFS v1 now provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode open/read syscalls now resolve files through VFS. The existing SimpleFS disk format is unchanged.
 
 Milestones:
-1. Inventory the existing SimpleFS format, storage driver, file APIs, and every caller.
-2. Define VFS objects and operations: filesystem, mount, vnode/inode, directory iteration, open/read/write/close, create, unlink, and stat.
-3. Implement path normalization and mount-point lookup, starting with a root mount backed by the existing SimpleFS.
-4. Route kernel and desktop file access through VFS instead of calling SimpleFS directly.
-5. Connect per-process file descriptors to VFS open-file objects with independent offsets and safe cleanup on process exit.
-6. Add directory and file operation tests, error-path tests, and concurrent access tests.
-7. Add a second filesystem backend only after the abstraction is stable (FAT32 is the first candidate).
+Completed in VFS v1:
+- Audited the current SimpleFS interface and confirmed that SFS1 is a flat root-file store; the existing FAT32 path is a limited read-only root-file scanner.
+- Added a private backend-operations table and mounted the current SimpleFS API at `/`.
+- Added path normalization, root stat, read, ranged read, write, and flat-file listing adapters.
+- Routed user-mode open/read syscalls through VFS while preserving per-task descriptor cursors.
+- Added CI checks for existing-file lookup, absolute/relative paths, traversal/nested-path rejection, write/read, and ranged reads.
+
+Remaining milestones:
+1. Add explicit vnode/open-file objects and reference/lifetime rules.
+2. Implement directory nodes and hierarchical paths; `/docs/readme.txt` is not supported by the current flat backend.
+3. Move desktop and shell file consumers from direct SimpleFS calls to VFS.
+4. Expand process descriptors to reference VFS open-file objects, retaining independent offsets and safe cleanup.
+5. Add create/unlink semantics and comprehensive error/concurrency tests.
+6. Add FAT32 as a separate backend after the VFS contract stabilizes.
 
 Acceptance criteria:
 - Existing persistent files remain readable and writable without changing their on-disk format.
-- Paths such as `/docs/readme.txt` resolve consistently.
+- Hierarchical paths such as `/docs/readme.txt` resolve consistently (future milestone; not supported by VFS v1).
 - Multiple processes can open the same file with independent offsets.
 - File descriptors are reclaimed on exit and cannot be used by unrelated processes.
 - CI exercises create, read, write, list, seek, close, and error cases.
