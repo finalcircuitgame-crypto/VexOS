@@ -27,6 +27,8 @@ static uint32_t g_order_count;
 static char g_names[FILE_MANAGER_MAX_FILES][FILE_MANAGER_NAME_CAP];
 static uint32_t g_file_sizes[FILE_MANAGER_MAX_FILES];
 static uint8_t g_file_size_valid[FILE_MANAGER_MAX_FILES];
+static uint8_t g_is_directory[FILE_MANAGER_MAX_FILES];
+static char g_current_path[VFS_PATH_MAX];
 static uint32_t g_screen_width;
 static uint32_t g_screen_height;
 static uint32_t g_visible[FILE_MANAGER_MAX_FILES];
@@ -135,19 +137,27 @@ static const char *fm_file_kind(const char *name) {
   return "File";
 }
 
-static void fm_draw_file_icon(uint32_t x, uint32_t y, const char *name) {
+static void fm_draw_file_icon(uint32_t x, uint32_t y, const char *name,
+                              uint8_t is_directory) {
   uint32_t accent = 0x8E7DFFu;
   const char *kind = fm_file_kind(name);
-  if (kind[0] == 'T') accent = 0x69D5B0u;
+  if (is_directory) accent = 0xE5B36Du;
+  else if (kind[0] == 'T') accent = 0x69D5B0u;
   else if (kind[0] == 'I') accent = 0x65B7F0u;
   else if (kind[0] == 'G') accent = 0xE5B36Du;
   else if (kind[0] == 'E') accent = 0xB69BFFu;
 
   gfx_blend_round_rect(x, y, 18u, 20u, 4u, 0x29334Bu, 255u);
-  gfx_draw_rect(x + 3u, y + 3u, 12u, 2u, accent);
-  gfx_draw_rect(x + 4u, y + 9u, 10u, 1u, 0x8793B0u);
-  gfx_draw_rect(x + 4u, y + 13u, 10u, 1u, 0x687590u);
-  gfx_draw_rect(x + 4u, y + 17u, 7u, 1u, 0x687590u);
+  if (is_directory) {
+    gfx_draw_rect(x + 3u, y + 4u, 8u, 3u, accent);
+    gfx_draw_rect(x + 2u, y + 7u, 14u, 10u, accent);
+    gfx_draw_rect(x + 4u, y + 10u, 10u, 1u, 0xFFF0C8u);
+  } else {
+    gfx_draw_rect(x + 3u, y + 3u, 12u, 2u, accent);
+    gfx_draw_rect(x + 4u, y + 9u, 10u, 1u, 0x8793B0u);
+    gfx_draw_rect(x + 4u, y + 13u, 10u, 1u, 0x687590u);
+    gfx_draw_rect(x + 4u, y + 17u, 7u, 1u, 0x687590u);
+  }
 }
 
 static int fm_get_name(uint32_t storage_index, char *out) {
@@ -194,26 +204,85 @@ static void fm_rebuild_visible(void) {
   }
 }
 
-static void fm_refresh(void) {
-  g_order_count = vfs_file_count();
-  if (g_order_count > FILE_MANAGER_MAX_FILES)
-    g_order_count = FILE_MANAGER_MAX_FILES;
+static void fm_refresh(void);
 
-  for (uint32_t i = 0; i < g_order_count; i++) {
-    g_order[i] = i;
-    g_names[i][0] = 0;
-    g_file_sizes[i] = 0;
-    g_file_size_valid[i] = 0;
-    if (vfs_file_name_at(i, g_names[i], FILE_MANAGER_NAME_CAP)) {
-      vfs_stat_t info;
-      if (vfs_stat(g_names[i], &info)) {
-        g_file_sizes[i] = info.size;
-        g_file_size_valid[i] = (uint8_t)(info.type == VFS_NODE_FILE);
+static int fm_build_path(const char *name, char *out, uint32_t cap) {
+  if (!name || !out || cap == 0)
+    return 0;
+  uint32_t base_len = fm_name_length(g_current_path);
+  uint32_t name_len = fm_name_length(name);
+  uint32_t prefix_len = (base_len && g_current_path[0] != '/') ?
+      base_len + 1u : 0u;
+  if (prefix_len + name_len + 1u > cap ||
+      prefix_len + name_len > 31u)
+    return 0;
+  uint32_t pos = 0;
+  if (prefix_len) {
+    for (uint32_t i = 0; i < base_len; ++i)
+      out[pos++] = g_current_path[i];
+    out[pos++] = '/';
+  }
+  for (uint32_t i = 0; i < name_len; ++i)
+    out[pos++] = name[i];
+  out[pos] = 0;
+  return 1;
+}
+
+static void fm_go_parent(void) {
+  uint32_t len = fm_name_length(g_current_path);
+  if (len == 0 || g_current_path[0] == '/') {
+    g_current_path[0] = '/';
+    g_current_path[1] = 0;
+  } else {
+    uint32_t slash = len;
+    while (slash && g_current_path[slash - 1u] != '/')
+      --slash;
+    if (slash == 0) {
+      g_current_path[0] = '/';
+      g_current_path[1] = 0;
+    } else {
+      g_current_path[slash - 1u] = 0;
+    }
+  }
+  g_scroll = 0;
+  g_selected = 0xFFFFFFFFu;
+  g_last_click_index = 0xFFFFFFFFu;
+  fm_refresh();
+}
+
+static void fm_refresh(void) {
+  g_order_count = 0;
+  vfs_dir_t directory = {0};
+  if (!vfs_dir_open(&directory, g_current_path)) {
+    if (g_current_path[0] != '/') {
+      g_current_path[0] = '/';
+      g_current_path[1] = 0;
+      if (!vfs_dir_open(&directory, g_current_path)) {
+        fm_rebuild_visible();
+        return;
       }
+    } else {
+      fm_rebuild_visible();
+      return;
     }
   }
 
-  /* Small bounded insertion sort: the storage index remains the stable ID. */
+  while (g_order_count < FILE_MANAGER_MAX_FILES) {
+    char entry[VFS_NAME_MAX];
+    vfs_stat_t info;
+    int result = vfs_dir_read(&directory, entry, sizeof(entry), &info);
+    if (result <= 0)
+      break;
+    uint32_t index = g_order_count++;
+    g_order[index] = index;
+    fm_copy(g_names[index], entry, FILE_MANAGER_NAME_CAP);
+    g_file_sizes[index] = info.size;
+    g_file_size_valid[index] = (uint8_t)(info.type == VFS_NODE_FILE);
+    g_is_directory[index] = (uint8_t)(info.type == VFS_NODE_DIRECTORY);
+  }
+  vfs_dir_close(&directory);
+
+  /* Small bounded insertion sort: each snapshot index remains a stable ID. */
   for (uint32_t i = 1; i < g_order_count; i++) {
     uint32_t key = g_order[i];
     char key_name[FILE_MANAGER_NAME_CAP];
@@ -252,6 +321,8 @@ void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
   g_search[0] = 0;
   g_order_count = 0;
   g_visible_count = 0;
+  g_current_path[0] = '/';
+  g_current_path[1] = 0;
 
   g_window.w = (int32_t)(screen_width > 760u ? 720u :
       (screen_width > 48u ? screen_width - 48u : screen_width));
@@ -391,7 +462,8 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   gfx_blend_round_rect(list_x, body_y, list_w, body_h,
                        7u, 0x111929u, 255u);
   gfx_draw_string(list_x + 14u, body_y + 12u,
-                  "Root", 0xF0F1FCu);
+                  g_current_path[0] == '/' ? "Root" : g_current_path,
+                  0xF0F1FCu);
   gfx_draw_string(list_x + 14u, body_y + 30u,
                   "Saved on this VexOS volume", 0x8995B1u);
   if (list_w > 340u) {
@@ -452,8 +524,10 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                       list_w - 10u, 25u, 0x151F30u);
       }
 
-      const char *kind = fm_file_kind(name);
-      fm_draw_file_icon(list_x + 14u, row_y + 3u, name);
+      const char *kind = g_is_directory[storage_index] ?
+          "Folder" : fm_file_kind(name);
+      fm_draw_file_icon(list_x + 14u, row_y + 3u, name,
+                        g_is_directory[storage_index]);
       uint32_t name_x = list_x + 42u;
       uint32_t max_name_chars = type_x > name_x + 12u ?
           (type_x - name_x - 12u) / 8u : 1u;
@@ -499,7 +573,10 @@ file_manager_event_t file_manager_handle_click(
     return FILE_MANAGER_EVENT_CLOSED;
   }
   if (fm_hit(px, py, x + w - 46, y + 5, 20, 20)) {
-    if (g_scroll) g_scroll--;
+    if (g_current_path[0] != '/' && g_current_path[0] != 0)
+      fm_go_parent();
+    else if (g_scroll)
+      g_scroll--;
     g_search_focused = 0;
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
@@ -538,6 +615,19 @@ file_manager_event_t file_manager_handle_click(
   }
 
   uint32_t by = (uint32_t)y + 70u;
+  if (fm_hit(px, py, x + 16, (int32_t)by + 32, 128, 27)) {
+    if (g_current_path[0] != '/') {
+      g_current_path[0] = '/';
+      g_current_path[1] = 0;
+      g_scroll = 0;
+      g_selected = 0xFFFFFFFFu;
+      g_last_click_index = 0xFFFFFFFFu;
+      fm_refresh();
+    }
+    g_search_focused = 0;
+    wm_raise(APP_EXPLORER);
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
   uint32_t header_y = by + 50u;
   uint32_t mx = (uint32_t)x + 160u;
   uint32_t mw = w > 176 ? (uint32_t)w - 172u : 1u;
@@ -568,7 +658,19 @@ file_manager_event_t file_manager_handle_click(
     uint32_t elapsed = tick - g_last_click_tick;
     if (g_last_click_index == storage_index && elapsed < 45u) {
       char name[FILE_MANAGER_NAME_CAP];
-      if (fm_get_name(storage_index, name) && open_file && open_file(name)) {
+      char full_path[VFS_PATH_MAX];
+      if (!fm_get_name(storage_index, name) ||
+          !fm_build_path(name, full_path, sizeof(full_path)))
+        return FILE_MANAGER_EVENT_OPEN_FAILED;
+      if (g_is_directory[storage_index]) {
+        fm_copy(g_current_path, full_path, sizeof(g_current_path));
+        g_scroll = 0;
+        g_selected = 0xFFFFFFFFu;
+        g_last_click_index = 0xFFFFFFFFu;
+        fm_refresh();
+        return FILE_MANAGER_EVENT_CHANGED;
+      }
+      if (open_file && open_file(full_path)) {
         g_last_click_index = 0xFFFFFFFFu;
         return FILE_MANAGER_EVENT_CHANGED;
       }
