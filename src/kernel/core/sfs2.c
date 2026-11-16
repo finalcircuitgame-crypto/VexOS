@@ -274,8 +274,7 @@ static int sfs2_tx_commit(sfs2_volume_t *volume) {
     sfs2_transaction_t *tx = &g_sfs2_transaction;
     if (!volume || !volume->mounted || !volume->write_sector ||
         volume->superblock.journal_lba == 0 ||
-        volume->superblock.journal_sectors <
-            SFS2_JOURNAL_HEADER_SECTORS + SFS2_JOURNAL_MAX_RECORDS ||
+        sfs2_journal_record_capacity(&volume->superblock) == 0 ||
         tx->count == 0 ||
         tx->count > sfs2_journal_record_capacity(&volume->superblock))
         return 0;
