@@ -252,7 +252,7 @@ jobs:
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
-            if grep -Fq "[KERNEL] Starting desktop loop..." serial.log 2>/dev/null; then
+            if grep -Fq "[CI] IRQ0 preempted and executed both runtime tasks" serial.log 2>/dev/null; then
               break
             fi
             if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -285,7 +285,7 @@ jobs:
             "[KERNEL] Desktop initialized" \
             "[KERNEL] QEMU stdvga detected; mapping two framebuffer pages" \
             "[DISPLAY] QEMU VBE double-buffered page flipping enabled" \
-            "[KERNEL] Starting desktop loop..."; do
+            "[CI] IRQ0 preempted and executed both runtime tasks"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
               cat serial.log || true
