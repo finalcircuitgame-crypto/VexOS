@@ -54,6 +54,7 @@ run.sh builds then launches QEMU with OVMF. It will also embed `new.png` into th
 
 - The GitHub Actions pipeline builds the normal kernel, the separate DoomGeneric ELF, and the CI-instrumented kernel, then boots VexOS in QEMU and exercises desktop input and applications.
 - The first-boot screen is a **non-destructive welcome guide**. It does not partition, format, or install to any disk.
+- Storage initialization only mounts recognized FAT32/SFS1 media. Unknown or damaged volumes are rejected without automatic formatting; there is no in-kernel disk formatter yet.
 - AHCI support targets SATA controllers. NVMe support is not implemented, and the AHCI driver has not yet been qualified on the user's physical laptop.
 - The current boot image is a development image, not a Windows replacement or a dual-boot installer. Do not use it to repartition or overwrite an internal drive.
 - A successful QEMU test does not guarantee compatibility with every laptop's firmware, graphics hardware, storage controller, keyboard, or touchpad.
