@@ -469,6 +469,11 @@ static void ci_syscall_self_test(void) {
   if (!vfs_normalize_path("./ci.txt", normalized, sizeof(normalized)) ||
       normalized[0] != 'c' || normalized[1] != 'i')
     ci_memory_test_fail("VFS relative path normalization");
+  if (!vfs_normalize_path(".", normalized, sizeof(normalized)) ||
+      normalized[0] != '/' || normalized[1] != '\0' ||
+      !vfs_normalize_path("/./", normalized, sizeof(normalized)) ||
+      normalized[0] != '/' || normalized[1] != '\0')
+    ci_memory_test_fail("VFS current-directory normalization");
   if (!vfs_normalize_path("/docs//./ci.txt", normalized, sizeof(normalized)))
     ci_memory_test_fail("VFS nested path normalization");
   for (uint32_t i = 0; i < sizeof(normalized_nested); ++i) {
