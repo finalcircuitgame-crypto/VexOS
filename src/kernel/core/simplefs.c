@@ -641,6 +641,8 @@ int simplefs_delete_file(const char *name) {
   if (!sfs_store_table()) {
     g_table[idx] = previous;
     g_sb.file_count = count + 1u;
+    (void)sfs_store_table();
+    (void)sfs_store_superblock();
     return 0;
   }
   if (!sfs_store_superblock()) {
