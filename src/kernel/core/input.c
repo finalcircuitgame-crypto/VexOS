@@ -16,6 +16,31 @@ static uint8_t g_kbd_down[256];
 static uint32_t g_kbd_event_r;
 static uint32_t g_kbd_event_w;
 
+#ifdef VEXOS_CI_INPUT_TEST
+extern void serial_print(const char *str);
+
+static void input_ci_trace_arrow(uint8_t usage, int pressed) {
+  switch (usage) {
+  case 0x4F:
+    serial_print(pressed ? "[CI] USB arrow RIGHT down\n" : "[CI] USB arrow RIGHT released\n");
+    break;
+  case 0x50:
+    serial_print(pressed ? "[CI] USB arrow LEFT down\n" : "[CI] USB arrow LEFT released\n");
+    break;
+  case 0x51:
+    serial_print(pressed ? "[CI] USB arrow DOWN down\n" : "[CI] USB arrow DOWN released\n");
+    break;
+  case 0x52:
+    serial_print(pressed ? "[CI] USB arrow UP down\n" : "[CI] USB arrow UP released\n");
+    break;
+  default:
+    break;
+  }
+}
+#else
+#define input_ci_trace_arrow(usage, pressed) ((void)0)
+#endif
+
 static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
   if (v < lo)
     return lo;
@@ -119,6 +144,7 @@ void input_kbd_push_event(uint8_t usage, int pressed) {
      Doom can reconcile arrow-key state after draining queued events, so a
      dropped key-up can never leave movement stuck indefinitely. */
   g_kbd_down[usage] = pressed ? 1u : 0u;
+  input_ci_trace_arrow(usage, pressed);
 
   uint32_t next = (g_kbd_event_w + 1u) & KBD_EVENT_MASK;
   if (next == g_kbd_event_r)
