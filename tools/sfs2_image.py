@@ -162,8 +162,6 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
             f.seek(cursor * SECTOR)
             f.write(data)
             padded = ceildiv(len(data), SECTOR) * SECTOR
-            # Empty files have no data extent in the SFS2 on-disk contract.
-                padded = SECTOR
             if padded > len(data):
                 f.write(bytes(padded - len(data)))
             cursor += ceildiv(len(data), SECTOR)
@@ -210,6 +208,7 @@ def verify_image(image: Path):
                 if (length == 0 and (start != 0 or sectors != 0)) or (length > 0 and (sectors < need or start < data_lba or start + sectors > volume)):
                     raise ValueError(f"invalid extent for inode {inode_id}")
                 if length:
+                    for bit in range(start - data_lba, start + sectors - data_lba):
                         if not (bitmap[bit >> 3] & (1 << (bit & 7))):
                             raise ValueError(f"bitmap misses allocation for inode {inode_id}")
                 live.append((name.split(b"\0", 1)[0].decode("utf-8", "replace"), start, length))
