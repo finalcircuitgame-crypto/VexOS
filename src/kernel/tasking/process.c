@@ -556,7 +556,7 @@ static void ci_discard_unstarted(Process *process) {
 
   AddressSpace *space = process->address_space;
   if (space && process->kernel_stack_base)
-    VMM_AddressSpaceUnmapPage(space, process->kernel_stack_base, 0);
+    (void)VMM_AddressSpaceUnmapPage(space, process->kernel_stack_base, 0);
 
   if (process->owns_kernel_stack && process->kernel_stack_base)
     PMM_FreePage(process->kernel_stack_base);
@@ -566,7 +566,15 @@ static void ci_discard_unstarted(Process *process) {
   process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
   process->auto_reap = 0;
-  process->info.pid = 0;  if (space)
+  process->info.pid = 0;
+  process->info.parent_pid = 0;
+  process->info.task_id = 0;
+  process->info.state = PROCESS_UNUSED;
+  process->info.exit_code = 0;
+  process->info.user_mode = 0;
+  process->info.name[0] = '\0';
+
+  if (space)
     VMM_AddressSpaceDestroy(space);
 }
 
@@ -668,8 +676,8 @@ int Process_CI_SelfTest(void) {
       kernel->kernel_stack_top != 0;
 
   if (kernel_ok) {
-    /* Wait must block this parent, run the child, wake the parent when the
-       child exits, return its exit code, and reap the zombie automatically. */
+    /* Wait blocks the parent, runs the child, observes exit code 42, and
+       reaps the zombie. A second wait must reject the now-invalid PID. */
     int32_t wait_exit_code = -999;
     kernel_ok = Process_Wait(kernel_pid, &wait_exit_code) == 0 &&
         wait_exit_code == 42 &&
@@ -703,7 +711,6 @@ int Process_CI_SelfTest(void) {
 
   return orphan_ok && !find_by_pid(ci_orphan_child_pid) &&
          Process_GetCount() == initial_count &&
-         Process_GetCurrentId() == parent_pid;  return kernel_ok && Process_GetCount() == initial_count &&
          Process_GetCurrentId() == parent_pid;
 }
 #endif
