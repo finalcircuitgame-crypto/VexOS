@@ -166,8 +166,63 @@ void DG_SetWindowTitle(const char *title) {
     (void)title;
 }
 
+/*
+ * On-screen input monitor for manual held-key verification.
+ * Green arrows mean the kernel currently sees that key held; slate arrows
+ * mean it sees the key released. It is painted into the captured Doom frame
+ * so an MP4 recording can show the exact transition without a second window.
+ */
+static void draw_arrow_debug_overlay(uint32_t *pixels, uint32_t width,
+                                     uint32_t height) {
+    static const uint8_t arrow_rows[4][7] = {
+        {0x08u, 0x1Cu, 0x3Eu, 0x08u, 0x08u, 0x08u, 0x08u}, /* Up */
+        {0x08u, 0x08u, 0x08u, 0x08u, 0x3Eu, 0x1Cu, 0x08u}, /* Down */
+        {0x08u, 0x0Cu, 0x0Eu, 0x7Fu, 0x0Eu, 0x0Cu, 0x08u}, /* Left */
+        {0x08u, 0x18u, 0x38u, 0x7Fu, 0x38u, 0x18u, 0x08u}  /* Right */
+    };
+    static const uint8_t bits[4] = {8u, 4u, 2u, 1u};
+    static const uint32_t positions[4][2] = {
+        {8u, 8u}, {24u, 8u}, {8u, 24u}, {24u, 24u}
+    };
+    const uint32_t panel = 0x00101824u;
+    const uint32_t released = 0x00485868u;
+    const uint32_t pressed = 0x0028C76Fu;
+    const uint32_t white = 0x00FFFFFFu;
+
+    if (!pixels || width < 42u || height < 42u)
+        return;
+
+    uint8_t state = (uint8_t)(vex_syscall0(SYS_KEY_STATE) & 0x0Fu);
+
+    /* Opaque backing keeps the indicators readable over any Doom scene. */
+    for (uint32_t y = 5u; y < 43u; ++y) {
+        for (uint32_t x = 5u; x < 43u; ++x)
+            pixels[y * width + x] = panel;
+    }
+
+    for (uint32_t key = 0; key < 4u; ++key) {
+        uint32_t x0 = positions[key][0];
+        uint32_t y0 = positions[key][1];
+        uint32_t background = (state & bits[key]) ? pressed : released;
+
+        for (uint32_t y = 0; y < 14u; ++y) {
+            for (uint32_t x = 0; x < 14u; ++x)
+                pixels[(y0 + y) * width + x0 + x] = background;
+        }
+
+        for (uint32_t y = 0; y < 7u; ++y) {
+            for (uint32_t x = 0; x < 7u; ++x) {
+                if (arrow_rows[key][y] & (uint8_t)(1u << (6u - x)))
+                    pixels[(y0 + 3u + y) * width + x0 + 3u + x] = white;
+            }
+        }
+    }
+}
+
 void DG_DrawFrame(void) {
     if (DG_ScreenBuffer) {
+        draw_arrow_debug_overlay(DG_ScreenBuffer,
+                                 DOOMGENERIC_RESX, DOOMGENERIC_RESY);
         (void)vex_syscall3(SYS_DRAW,
                            (uint64_t)(uintptr_t)DG_ScreenBuffer,
                            DOOMGENERIC_RESX, DOOMGENERIC_RESY);
