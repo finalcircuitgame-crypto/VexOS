@@ -43,7 +43,7 @@ uint32_t Process_GetCount(void);
 int Process_GetInfo(ProcessId pid, ProcessInfo *out);
 int Process_Wait(ProcessId pid, int32_t *exit_code);
 uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code);
-void Process_ExitKernelCurrent(int32_t exit_code);
+__attribute__((noreturn)) void Process_ExitKernelCurrent(int32_t exit_code);
 int Process_ReapTask(uint32_t task_id);
 void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task);
 void Process_OnTaskExit(uint32_t task_id);
