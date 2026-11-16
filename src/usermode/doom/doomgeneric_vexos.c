@@ -64,6 +64,80 @@ static void trace_arrow_event(uint8_t usage, int pressed) {
 #define trace_arrow_event(usage, pressed) ((void)0)
 #endif
 
+#ifdef VEXOS_CI_INPUT_TEST
+static uint8_t arrow_sync_state;
+static uint8_t arrow_sync_state_valid;
+
+static void trace_arrow_sync_state(uint8_t state) {
+    static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
+    static const char *const down_messages[4] = {
+        "[CI] Doom ticcmd synced RIGHT down\\n",
+        "[CI] Doom ticcmd synced LEFT down\\n",
+        "[CI] Doom ticcmd synced DOWN down\\n",
+        "[CI] Doom ticcmd synced UP down\\n"
+    };
+    static const char *const up_messages[4] = {
+        "[CI] Doom ticcmd synced RIGHT released\\n",
+        "[CI] Doom ticcmd synced LEFT released\\n",
+        "[CI] Doom ticcmd synced DOWN released\\n",
+        "[CI] Doom ticcmd synced UP released\\n"
+    };
+    static const uint8_t down_lengths[4] = {
+        sizeof("[CI] Doom ticcmd synced RIGHT down\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced LEFT down\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced DOWN down\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced UP down\\n") - 1u
+    };
+    static const uint8_t up_lengths[4] = {
+        sizeof("[CI] Doom ticcmd synced RIGHT released\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced LEFT released\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced DOWN released\\n") - 1u,
+        sizeof("[CI] Doom ticcmd synced UP released\\n") - 1u
+    };
+
+    if (!arrow_sync_state_valid) {
+        arrow_sync_state = state;
+        arrow_sync_state_valid = 1;
+        return;
+    }
+
+    uint8_t changed = (uint8_t)(arrow_sync_state ^ state);
+    arrow_sync_state = state;
+    for (uint32_t i = 0; i < 4u; ++i) {
+        if (!(changed & bits[i]))
+            continue;
+        const char *message = (state & bits[i]) ? down_messages[i] : up_messages[i];
+        uint64_t length = (state & bits[i]) ? down_lengths[i] : up_lengths[i];
+        (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+    }
+}
+#else
+#define trace_arrow_sync_state(state) ((void)0)
+#endif
+
+/*
+ * Keep Doom's continuous movement booleans synchronized with the live
+ * kernel HID snapshot. Input events remain responsible for menus and other
+ * one-shot actions; movement no longer depends on a key-up queue surviving.
+ */
+void VEXOS_DoomSyncArrowKeys(unsigned int *keys, int key_right, int key_left,
+                             int key_down, int key_up) {
+    if (!keys)
+        return;
+
+    uint8_t state = (uint8_t)(vex_syscall0(SYS_KEY_STATE) & 0x0Fu);
+    if (key_right > 0 && key_right < 256)
+        keys[key_right] = (state & 1u) ? 1u : 0u;
+    if (key_left > 0 && key_left < 256)
+        keys[key_left] = (state & 2u) ? 1u : 0u;
+    if (key_down > 0 && key_down < 256)
+        keys[key_down] = (state & 4u) ? 1u : 0u;
+    if (key_up > 0 && key_up < 256)
+        keys[key_up] = (state & 8u) ? 1u : 0u;
+
+    trace_arrow_sync_state(state);
+}
+
 static int arrow_index_from_usage(uint8_t usage) {
     switch (usage) {
         case 0x4F: return 0; /* Right */
