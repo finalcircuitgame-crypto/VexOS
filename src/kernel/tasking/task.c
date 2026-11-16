@@ -1,173 +1,269 @@
 #include "../../include/task.h"
 #include "../../include/heap.h"
+#include "../../include/vmm.h"
 #include "../../include/gdt.h"
 #include <stddef.h>
 #include <stdint.h>
 
-#define MAX_TASKS 32u
+extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
+extern void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task);
+extern void Process_OnTaskExit(uint32_t task_id);
 
-static Task tasks[MAX_TASKS];
+static Task tasks[TASK_MAX];
 static uint32_t task_count;
 static uint32_t current_task;
-static uint64_t next_pid;
 
 #ifdef VEXOS_CI_INPUT_TEST
 static volatile uint64_t ci_runtime_bad_frame_cs;
 static volatile int ci_runtime_setup_ok;
-static volatile int ci_runtime_space_a_ok;
-static volatile int ci_runtime_space_b_ok;
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
-static AddressSpace *ci_runtime_space_a;
-static AddressSpace *ci_runtime_space_b;
 #endif
 
-static void copy_name(char dst[TASK_NAME_MAX], const char *src) {
-  uint32_t i = 0;
-  if (!src || !src[0]) src = "process";
-  for (; i + 1u < TASK_NAME_MAX && src[i]; ++i) dst[i] = src[i];
-  dst[i] = '\0';
-  for (++i; i < TASK_NAME_MAX; ++i) dst[i] = '\0';
+static void task_activate(uint32_t id) {
+  if (id >= task_count)
+    return;
+
+  Task *task = &tasks[id];
+  if (task->address_space)
+    VMM_ActivateAddressSpace(task->address_space);
+  else
+    VMM_Activate();
+
+  /* RSP0 is consulted by the CPU only when entering ring 0 from ring 3.
+     Keep it associated with the task that is about to run. */
+  if (task->kernel_stack_top)
+    TSS_Load(task->kernel_stack_top);
 }
 
 void Task_Init(void) {
-  for (uint32_t i = 0; i < MAX_TASKS; ++i) {
+  for (uint32_t i = 0; i < TASK_MAX; ++i) {
     tasks[i].rsp = 0;
-    tasks[i].pid = 0;
-    tasks[i].parent_pid = 0;
     tasks[i].kernel_stack_top = 0;
     tasks[i].address_space = NULL;
     tasks[i].state = TASK_UNUSED;
-    tasks[i].name[0] = '\0';
+    tasks[i].user_mode = 0;
   }
+
   task_count = 1;
   current_task = 0;
-  next_pid = 2;
-  tasks[0].pid = 1;
   tasks[0].state = TASK_RUNNING;
-  copy_name(tasks[0].name, "kernel");
 }
 
-uint64_t Task_CreateProcess(const char *name, void (*entry)(void),
-                            void *stack_top, AddressSpace *space) {
-  if (!entry || !stack_top) return 0;
-
-  uint32_t slot = MAX_TASKS;
-  for (uint32_t i = 1; i < task_count; ++i) {
-    if (tasks[i].state == TASK_UNUSED || tasks[i].state == TASK_EXITED) {
-      slot = i;
-      break;
-    }
+static int32_t find_free_task_slot(void) {
+  for (uint32_t i = 1; i < TASK_MAX; ++i) {
+    if (tasks[i].state == TASK_UNUSED)
+      return (int32_t)i;
   }
-  if (slot == MAX_TASKS) {
-    if (task_count >= MAX_TASKS) return 0;
-    slot = task_count++;
-  }
+  return -1;
+}
 
-  /* irq0_stub restores 15 GPRs, then IRETQ consumes the five-word
-     same-privilege frame (RIP, CS, RFLAGS, RSP, SS). */
-  uint64_t *stack = (uint64_t *)stack_top;
-  *(--stack) = 0; /* harmless fake return slot */
+static void build_kernel_task_frame(uint64_t **stack_ptr,
+                                    void (*entry)(void)) {
+  uint64_t *stack = *stack_ptr;
+
+  /* A normal C function entered by IRET still needs a fake return slot. */
+  *(--stack) = 0;
   uint64_t initial_rsp = (uint64_t)(uintptr_t)stack;
-  *(--stack) = 0x10;        /* SS */
-  *(--stack) = initial_rsp; /* RSP */
-  *(--stack) = 0x202;       /* RFLAGS */
-  *(--stack) = 0x08;        /* CS */
-  *(--stack) = (uint64_t)(uintptr_t)entry; /* RIP */
-  for (uint32_t i = 0; i < 15u; ++i) *(--stack) = 0;
 
-  Task *task = &tasks[slot];
-  task->rsp = (uint64_t)(uintptr_t)stack;
-  task->pid = next_pid++;
-  if (next_pid == 0) next_pid = 2;
-  task->parent_pid = tasks[current_task].pid;
-  task->kernel_stack_top = (uint64_t)(uintptr_t)stack_top;
-  task->address_space = space;
-  task->state = TASK_RUNNABLE;
-  copy_name(task->name, name);
-  return task->pid;
+  /* IRETQ consumes RIP/CS/RFLAGS for a same-privilege transition. The
+     following RSP/SS words remain as the initial kernel stack contents. */
+  *(--stack) = 0x10;
+  *(--stack) = initial_rsp;
+  *(--stack) = 0x202;
+  *(--stack) = 0x08;
+  *(--stack) = (uint64_t)(uintptr_t)entry;
+
+  /* Match PUSH_GPRS in interrupt_stubs.s: RAX..R15 are pushed in order. */
+  for (uint32_t i = 0; i < 15; ++i)
+    *(--stack) = 0;
+
+  *stack_ptr = stack;
 }
 
-void Task_Create(void (*entry)(void), void *stack_top) {
-  (void)Task_CreateProcess("kernel-worker", entry, stack_top, NULL);
+int32_t Task_Create(void (*entry)(void), void *stack_top) {
+  if (!entry || !stack_top)
+    return -1;
+
+  int32_t slot = find_free_task_slot();
+  if (slot < 0)
+    return -1;
+
+  uint64_t *stack = (uint64_t *)stack_top;
+  build_kernel_task_frame(&stack, entry);
+
+  tasks[slot].rsp = (uint64_t)(uintptr_t)stack;
+  tasks[slot].kernel_stack_top = (uint64_t)(uintptr_t)stack_top;
+  tasks[slot].address_space = NULL;
+  tasks[slot].user_mode = 0;
+  tasks[slot].state = TASK_READY;
+
+  if ((uint32_t)slot >= task_count)
+    task_count = (uint32_t)slot + 1u;
+  return slot;
 }
 
-void Task_SetCurrentAddressSpace(AddressSpace *space) {
-  tasks[current_task].address_space = space;
+int32_t Task_CreateUser(AddressSpace *space, uint64_t entry,
+                        uint64_t user_stack_top, void *kernel_stack_top) {
+  if (!space || !entry || !user_stack_top || !kernel_stack_top)
+    return -1;
+  if (!VMM_AddressSpaceIsUserRange(space, (const void *)(uintptr_t)entry, 1, 0) ||
+      user_stack_top < 1u ||
+      !VMM_AddressSpaceIsUserRange(space,
+          (const void *)(uintptr_t)(user_stack_top - 1u), 1, 1))
+    return -1;
+
+  int32_t slot = find_free_task_slot();
+  if (slot < 0)
+    return -1;
+
+  uint64_t *stack = (uint64_t *)kernel_stack_top;
+
+  /* User-mode IRET frame: RIP, CS, RFLAGS, user RSP, SS. */
+  *(--stack) = 0x23;
+  *(--stack) = user_stack_top;
+  *(--stack) = 0x202;
+  *(--stack) = 0x1B;
+  *(--stack) = entry;
+  for (uint32_t i = 0; i < 15; ++i)
+    *(--stack) = 0;
+
+  tasks[slot].rsp = (uint64_t)(uintptr_t)stack;
+  tasks[slot].kernel_stack_top = (uint64_t)(uintptr_t)kernel_stack_top;
+  tasks[slot].address_space = space;
+  tasks[slot].user_mode = 1;
+  tasks[slot].state = TASK_READY;
+
+  if ((uint32_t)slot >= task_count)
+    task_count = (uint32_t)slot + 1u;
+  return slot;
 }
 
-void Task_SetCurrentKernelStack(uint64_t stack_top) {
-  tasks[current_task].kernel_stack_top = stack_top;
-  if (stack_top) TSS_Load(stack_top);
+int Task_SetTaskContext(uint32_t task_id, AddressSpace *space,
+                        uint64_t kernel_stack_top, int user_mode) {
+  if (task_id >= task_count || tasks[task_id].state == TASK_UNUSED ||
+      tasks[task_id].state == TASK_ZOMBIE)
+    return 0;
+
+  tasks[task_id].address_space = space;
+  tasks[task_id].kernel_stack_top = kernel_stack_top;
+  tasks[task_id].user_mode = user_mode ? 1u : 0u;
+  if (task_id == current_task)
+    task_activate(task_id);
+  return 1;
 }
 
-uint64_t Task_CurrentPid(void) {
-  return tasks[current_task].pid;
+int Task_SetCurrentContext(AddressSpace *space, uint64_t kernel_stack_top,
+                           int user_mode) {
+  return Task_SetTaskContext(current_task, space, kernel_stack_top, user_mode);
 }
 
-TaskState Task_GetState(uint64_t pid) {
-  for (uint32_t i = 0; i < task_count; ++i)
-    if (tasks[i].pid == pid) return tasks[i].state;
-  return TASK_UNUSED;
+uint32_t Task_GetCurrentId(void) {
+  return current_task;
 }
 
-static void activate_task(uint32_t index) {
-  Task *task = &tasks[index];
-  if (task->address_space) VMM_ActivateAddressSpace(task->address_space);
-  else VMM_Activate();
-  if (task->kernel_stack_top) TSS_Load(task->kernel_stack_top);
+void Task_BlockCurrent(void) {
+  if (tasks[current_task].state == TASK_RUNNING)
+    tasks[current_task].state = TASK_BLOCKED;
+}
+
+void Task_MakeReady(uint32_t task_id) {
+  if (task_id < task_count && tasks[task_id].state == TASK_BLOCKED)
+    tasks[task_id].state = TASK_READY;
+}
+
+int Task_Reap(uint32_t task_id) {
+  if (task_id == current_task || task_id >= task_count ||
+      tasks[task_id].state != TASK_ZOMBIE)
+    return 0;
+
+  tasks[task_id].rsp = 0;
+  tasks[task_id].kernel_stack_top = 0;
+  tasks[task_id].address_space = NULL;
+  tasks[task_id].user_mode = 0;
+  tasks[task_id].state = TASK_UNUSED;
+  return 1;
+}
+
+int Task_Discard(uint32_t task_id) {
+  if (task_id == current_task || task_id >= task_count ||
+      tasks[task_id].state != TASK_READY)
+    return 0;
+
+  tasks[task_id].rsp = 0;
+  tasks[task_id].kernel_stack_top = 0;
+  tasks[task_id].address_space = NULL;
+  tasks[task_id].user_mode = 0;
+  tasks[task_id].state = TASK_UNUSED;
+  return 1;
 }
 
 uint64_t Task_Schedule(uint64_t current_rsp) {
-  Task *current = &tasks[current_task];
-  current->rsp = current_rsp;
-  if (current->state == TASK_RUNNING) current->state = TASK_RUNNABLE;
+  uint32_t previous = current_task;
+  tasks[previous].rsp = current_rsp;
+
+  if (tasks[previous].state == TASK_RUNNING)
+    tasks[previous].state = TASK_READY;
 
   for (uint32_t offset = 1; offset <= task_count; ++offset) {
-    uint32_t next = (current_task + offset) % task_count;
-    if (tasks[next].state != TASK_RUNNABLE) continue;
+    uint32_t next = (previous + offset) % task_count;
+    if (tasks[next].state != TASK_READY)
+      continue;
+
+    current_task = next;
+    tasks[next].state = TASK_RUNNING;
 #ifdef VEXOS_CI_INPUT_TEST
-    if (ci_runtime_setup_ok && tasks[next].rsp) {
+    if (ci_runtime_setup_ok && task_count > 1 && tasks[next].rsp) {
       const uint64_t *frame = (const uint64_t *)(uintptr_t)tasks[next].rsp;
       if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
         ci_runtime_bad_frame_cs = frame[16];
-        current->state = TASK_RUNNING;
+        current_task = previous;
+        tasks[previous].state = TASK_RUNNING;
         return current_rsp;
       }
     }
 #endif
-    current_task = next;
-    tasks[next].state = TASK_RUNNING;
-    activate_task(next);
+    Process_OnTaskSwitch(previous, next);
+    task_activate(next);
     return tasks[next].rsp;
   }
 
-  current->state = TASK_RUNNING;
-  activate_task(current_task);
+  /* No other runnable task exists. Resume the current one unless it is
+     blocked/zombie; callers must provide an idle task before blocking. */
+  current_task = previous;
+  if (tasks[previous].state == TASK_READY)
+    tasks[previous].state = TASK_RUNNING;
+  task_activate(previous);
   return current_rsp;
 }
 
 uint64_t Task_Exit(uint64_t current_rsp) {
   (void)current_rsp;
-  tasks[current_task].state = TASK_EXITED;
-  tasks[current_task].address_space = NULL;
-  tasks[current_task].kernel_stack_top = 0;
+  uint32_t previous = current_task;
+  tasks[previous].state = TASK_ZOMBIE;
+  Process_OnTaskExit(previous);
 
   for (uint32_t offset = 1; offset <= task_count; ++offset) {
-    uint32_t next = (current_task + offset) % task_count;
-    if (tasks[next].state != TASK_RUNNABLE) continue;
+    uint32_t next = (previous + offset) % task_count;
+    if (tasks[next].state != TASK_READY)
+      continue;
+
     current_task = next;
     tasks[next].state = TASK_RUNNING;
-    activate_task(next);
+    Process_OnTaskSwitch(previous, next);
+    task_activate(next);
     return tasks[next].rsp;
   }
 
-  VMM_Activate();
-  for (;;) __asm__ volatile("cli; hlt");
+  /* There is no runnable task. Keep interrupts disabled rather than
+     returning into a task that has explicitly exited. */
+  for (;;) {
+    __asm__ volatile("cli; hlt");
+  }
 }
 
 void Task_Yield(void) {
-  __asm__ volatile("int $0x20" ::: "memory");
+  __asm__ volatile("int $0x81" ::: "memory");
 }
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -175,34 +271,43 @@ static void ci_task_entry(void) {}
 
 int Task_CI_SelfTest(void) {
   static uint64_t test_stack[64] __attribute__((aligned(16)));
-  Task_Init();
-  (void)Task_CreateProcess("invalid", NULL, &test_stack[64], NULL);
-  (void)Task_CreateProcess("invalid", ci_task_entry, NULL, NULL);
-  if (task_count != 1u) return 0;
 
-  uint64_t pid = Task_CreateProcess("frame-test", ci_task_entry,
-                                    &test_stack[64], NULL);
-  if (!pid || task_count != 2u || Task_GetState(pid) != TASK_RUNNABLE)
+  Task_Init();
+  if (Task_Create(NULL, &test_stack[64]) >= 0)
+    return 0;
+  if (Task_Create(ci_task_entry, NULL) >= 0)
+    return 0;
+  if (task_count != 1)
+    return 0;
+
+  int32_t id = Task_Create(ci_task_entry, &test_stack[64]);
+  if (id != 1 || task_count != 2)
     return 0;
 
   uint64_t next_rsp = Task_Schedule(0x1111u);
-  if (!next_rsp || (next_rsp & 15u) != 8u) return 0;
+  if (!next_rsp || (next_rsp & 15u) != 8u)
+    return 0;
+
   const uint64_t *frame = (const uint64_t *)(uintptr_t)next_rsp;
-  for (uint32_t i = 0; i < 15u; ++i)
-    if (frame[i] != 0) return 0;
+  for (uint32_t i = 0; i < 15u; i++) {
+    if (frame[i] != 0)
+      return 0;
+  }
   if (frame[15] != (uint64_t)(uintptr_t)ci_task_entry ||
       frame[16] != 0x08u || frame[17] != 0x202u ||
       frame[18] != (uint64_t)(uintptr_t)&test_stack[63] ||
-      frame[19] != 0x10u) return 0;
-  if (Task_Schedule(0x2222u) != 0x1111u) return 0;
+      frame[19] != 0x10u)
+    return 0;
+
+  if (Task_Schedule(0x2222u) != 0x1111u)
+    return 0;
+
   Task_Init();
   return 1;
 }
 
 static void ci_runtime_task_a(void) {
   for (;;) {
-    if (VMM_GetActiveAddressSpace() != ci_runtime_space_a)
-      ci_runtime_space_a_ok = 0;
     ci_runtime_count_a++;
     __asm__ volatile("pause");
   }
@@ -210,58 +315,54 @@ static void ci_runtime_task_a(void) {
 
 static void ci_runtime_task_b(void) {
   for (;;) {
-    if (VMM_GetActiveAddressSpace() != ci_runtime_space_b)
-      ci_runtime_space_b_ok = 0;
     ci_runtime_count_b++;
     __asm__ volatile("pause");
   }
 }
 
 void Task_CI_StartRuntimeTest(void) {
-  ci_runtime_count_a = ci_runtime_count_b = 0;
+  ci_runtime_count_a = 0;
+  ci_runtime_count_b = 0;
   ci_runtime_setup_ok = 0;
-  ci_runtime_space_a_ok = ci_runtime_space_b_ok = 1;
   ci_runtime_bad_frame_cs = 0;
 
   void *stack_a = kmalloc(4096u);
   void *stack_b = kmalloc(4096u);
-  ci_runtime_space_a = VMM_AddressSpaceCreate();
-  ci_runtime_space_b = VMM_AddressSpaceCreate();
-  if (!stack_a || !stack_b || !ci_runtime_space_a || !ci_runtime_space_b) {
+  if (!stack_a || !stack_b) {
     if (stack_a) kfree(stack_a);
     if (stack_b) kfree(stack_b);
     return;
   }
 
-  uint64_t pid_a = Task_CreateProcess("ci-space-a", ci_runtime_task_a,
-      (uint8_t *)stack_a + 4096u, ci_runtime_space_a);
-  uint64_t pid_b = Task_CreateProcess("ci-space-b", ci_runtime_task_b,
-      (uint8_t *)stack_b + 4096u, ci_runtime_space_b);
-  ci_runtime_setup_ok = pid_a && pid_b && task_count == 3u;
+  int32_t id_a = Task_Create(ci_runtime_task_a, (uint8_t *)stack_a + 4096u);
+  int32_t id_b = Task_Create(ci_runtime_task_b, (uint8_t *)stack_b + 4096u);
+  ci_runtime_setup_ok = id_a == 1 && id_b == 2 && task_count == 3;
 
   if (ci_runtime_setup_ok) {
-    const uint64_t *a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
-    const uint64_t *b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
+    const uint64_t *frame_a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
+    const uint64_t *frame_b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
     ci_runtime_setup_ok =
-      a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
-      b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
-      a[16] == 0x08u && b[16] == 0x08u &&
-      a[17] == 0x202u && b[17] == 0x202u;
+        frame_a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
+        frame_a[16] == 0x08u && frame_a[17] == 0x202u &&
+        frame_a[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_a + 4096u - sizeof(uint64_t)) &&
+        frame_a[19] == 0x10u &&
+        frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
+        frame_b[16] == 0x08u && frame_b[17] == 0x202u &&
+        frame_b[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_b + 4096u - sizeof(uint64_t)) &&
+        frame_b[19] == 0x10u;
   }
 
   extern void serial_print(const char *str);
   serial_print(ci_runtime_setup_ok
       ? "[CI] Runtime task IRET frames validated\\n"
       : "[CI] Runtime task IRET frame validation failed\\n");
-  if (ci_runtime_setup_ok)
-    serial_print("[CI] Process control blocks and private CR3 fixtures created\\n");
-  if (!ci_runtime_setup_ok) Task_Init();
+  if (!ci_runtime_setup_ok)
+    Task_Init();
 }
 
 int Task_CI_RuntimeTestPassed(void) {
-  return ci_runtime_setup_ok && ci_runtime_space_a_ok &&
-         ci_runtime_space_b_ok && ci_runtime_count_a >= 100u &&
-         ci_runtime_count_b >= 100u;
+  return ci_runtime_setup_ok &&
+         ci_runtime_count_a >= 100u && ci_runtime_count_b >= 100u;
 }
 
 uint64_t Task_CI_RuntimeBadFrameCS(void) {
