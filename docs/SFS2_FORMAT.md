@@ -4,9 +4,7 @@ SFS2 is the next native VexOS filesystem format. This document describes the
 metadata contract introduced by `src/include/sfs2.h` and its validation helpers
 in `src/kernel/core/sfs2.c`.
 
-**Status:** metadata definitions and pure validation/allocation helpers are
-implemented. SFS2 is not yet mounted by the kernel, and no formatter or
-migration tool is provided. Existing SFS1 volumes remain the supported
+**Status:** metadata definitions, non-destructive read-only mount, namespace validation, path lookup, stat, directory enumeration, and ranged file reads are implemented as a standalone backend. It is not yet selected by the kernel's storage mount path or exposed through VFS. No formatter, writable backend, journal, or migration tool is provided. Existing SFS1 volumes remain the supported
 writable native format. Normal boot must never format or migrate a volume.
 
 ## Sector layout
@@ -71,9 +69,9 @@ or an extent tree are a future format revision, not an implicit assumption.
   validation.
 - Bounds-checked bitmap-bit lookup.
 - Search for a contiguous free bitmap run.
-- CI-only in-memory metadata and bitmap regression helper
-  (`sfs2_ci_metadata_self_test`).
+- Read-only mount API using caller-supplied sector I/O callbacks; it never writes or formats.
+- Full inode-table loading with table-padding handling, root/parent/type checks, unique sibling names, and rejection of orphaned/cyclic directory trees.
+- Absolute or relative path resolution, stat, directory enumeration, and ranged reads across sector boundaries.
+- CI-only metadata checks (`sfs2_ci_metadata_self_test`) and an in-memory disk-image test (`sfs2_ci_mount_read_test`) covering mount, empty directories, lookup, file reads, and damaged metadata rejection.
 
-The next milestone is a disk-image fixture and read-only SFS2 mount/list/read
-path. Writable allocation, persistent directory mutation, crash recovery, and
-SFS1 migration follow only after those tests exist.
+The next milestone is connecting this read-only backend to the actual storage probe and VFS, then adding a separate host-side formatter and a journaled writable backend. SFS1 migration follows only after crash-recovery and image-level tests exist.
