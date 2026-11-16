@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the offline SFS2 image tooling."""
+"""Regression tests for the offline SFS2 image tooling (SFS2-only CI)."""
 from __future__ import annotations
 
 import struct
