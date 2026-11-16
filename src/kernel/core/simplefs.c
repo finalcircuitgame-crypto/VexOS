@@ -1,4 +1,5 @@
 #include "simplefs.h"
+#include "sfs2.h"
 #include "ata_pio.h"
 #include "ahci.h"
 #include <stdint.h>
@@ -9,6 +10,7 @@ typedef enum {
   STORAGE_FS_NONE = 0,
   STORAGE_FS_SFS = 1,
   STORAGE_FS_FAT32 = 2,
+  STORAGE_FS_SFS2 = 3,
 } storage_fs_kind_t;
 
 #define SFS_MAGIC 0x31465353u /* 'SFS1' */
@@ -44,6 +46,13 @@ static sfs_file_t g_table[SFS_MAX_FILES];
 
 static storage_fs_kind_t g_kind = STORAGE_FS_NONE;
 static uint8_t g_mounted;
+static sfs2_volume_t g_sfs2;
+
+static int sfs2_storage_read(uint64_t lba, void *sector) {
+  if (lba > 0xFFFFFFFFull || lba >= storage_sector_limit())
+    return 0;
+  return storage_read_sector((uint32_t)lba, sector);
+}
 
 // ---------------- FAT32 (minimal, root-dir, short names, read-only) ---------
 
@@ -558,6 +567,15 @@ int simplefs_ci_validate_metadata_self_test(void) {
 int simplefs_file_size(const char *name, uint32_t *out_size) {
   if (!g_storage_ready || !name)
     return 0;
+  if (g_kind == STORAGE_FS_SFS2) {
+    sfs2_stat_t info;
+    if (!sfs2_stat_path(&g_sfs2, name, &info) ||
+        info.type != SFS2_INODE_FILE || info.size_bytes > UINT32_MAX)
+      return 0;
+    if (out_size)
+      *out_size = (uint32_t)info.size_bytes;
+    return 1;
+  }
   if (g_kind == STORAGE_FS_FAT32) {
     uint32_t idx = 0;
     if (!fat_find(name, &idx))
@@ -653,6 +671,15 @@ int simplefs_init(void) {
     return 0;
   }
 
+  /* SFS2 is probed before legacy formats. Its mount path is read-only. */
+  if (sfs2_mount(&g_sfs2, sfs2_storage_read, NULL,
+                 storage_sector_limit())) {
+    g_kind = STORAGE_FS_SFS2;
+    serial_print("[SFS2] mounted read-only\\n");
+    g_mounted = 1;
+    return 1;
+  }
+
   // Prefer FAT32 if detected on the storage disk.
   if (fat_mount_and_scan_root()) {
     g_kind = STORAGE_FS_FAT32;
@@ -736,7 +763,54 @@ static int sfs_alloc_entry(uint32_t *out_idx) {
   return 0;
 }
 
+
+static int sfs2_build_relative_path(uint32_t inode_index, char *out,
+                                    uint32_t out_cap) {
+  uint32_t chain[SFS2_INODE_MAX];
+  uint32_t depth = 0;
+  uint32_t current = inode_index;
+  while (depth < SFS2_INODE_MAX) {
+    const sfs2_inode_t *inode = &g_sfs2.inodes[current];
+    if (inode->inode_id == g_sfs2.superblock.root_inode)
+      break;
+    chain[depth++] = current;
+    uint32_t parent_found = SFS2_INODE_MAX;
+    for (uint32_t i = 0; i < g_sfs2.superblock.inode_capacity; ++i) {
+      if (g_sfs2.inodes[i].inode_id == inode->parent_id) {
+        parent_found = i;
+        break;
+      }
+    }
+    if (parent_found == SFS2_INODE_MAX)
+      return 0;
+    current = parent_found;
+  }
+  if (depth == 0 || depth >= SFS2_INODE_MAX)
+    return 0;
+  uint32_t written = 0;
+  while (depth) {
+    const char *name = g_sfs2.inodes[chain[--depth]].name;
+    uint32_t n = str_len32(name);
+    if (!n || written + n + (written ? 1u : 0u) >= out_cap)
+      return 0;
+    if (written)
+      out[written++] = '/';
+    for (uint32_t j = 0; j < n; ++j)
+      out[written++] = name[j];
+  }
+  out[written] = 0;
+  return 1;
+}
+
 uint32_t simplefs_file_count(void) {
+  if (g_kind == STORAGE_FS_SFS2) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < g_sfs2.superblock.inode_capacity; ++i)
+      if (g_sfs2.inodes[i].inode_id &&
+          g_sfs2.inodes[i].type == SFS2_INODE_FILE)
+        ++count;
+    return count;
+  }
   if (g_kind == STORAGE_FS_FAT32)
     return g_fat_file_count;
   if (g_kind == STORAGE_FS_SFS) {
@@ -753,6 +827,19 @@ uint32_t simplefs_file_count(void) {
 int simplefs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap) {
   if (!out_name || out_cap == 0)
     return 0;
+
+  if (g_kind == STORAGE_FS_SFS2) {
+    uint32_t current = 0;
+    for (uint32_t i = 0; i < g_sfs2.superblock.inode_capacity; ++i) {
+      if (!g_sfs2.inodes[i].inode_id ||
+          g_sfs2.inodes[i].type != SFS2_INODE_FILE)
+        continue;
+      if (current++ == index)
+        return sfs2_build_relative_path(i, out_name, out_cap);
+    }
+    out_name[0] = 0;
+    return 0;
+  }
 
   if (g_kind == STORAGE_FS_FAT32) {
     if (index >= g_fat_file_count) {
@@ -780,6 +867,23 @@ int simplefs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap) {
 uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap) {
   if (!out || out_cap == 0)
     return 0;
+
+  if (g_kind == STORAGE_FS_SFS2) {
+    uint32_t written = 0;
+    for (uint32_t i = 0; i < simplefs_file_count(); ++i) {
+      char path[VFS_PATH_MAX];
+      if (!simplefs_file_name_at(i, path, sizeof(path)))
+        continue;
+      uint32_t n = str_len32(path);
+      if (written + n + 1u >= out_cap)
+        break;
+      for (uint32_t j = 0; j < n; ++j)
+        out[written++] = path[j];
+      out[written++] = '\\n';
+    }
+    out[written] = 0;
+    return written;
+  }
 
   if (g_kind == STORAGE_FS_FAT32) {
     uint32_t w = 0;
@@ -911,6 +1015,17 @@ int simplefs_read_file(const char *name, void *out, uint32_t maxlen,
   if (!g_storage_ready || !name || !out)
     return 0;
 
+  if (g_kind == STORAGE_FS_SFS2) {
+    sfs2_stat_t info;
+    if (!sfs2_stat_path(&g_sfs2, name, &info) ||
+        info.type != SFS2_INODE_FILE || info.size_bytes > UINT32_MAX)
+      return 0;
+    if (out_len)
+      *out_len = (uint32_t)info.size_bytes;
+    uint32_t copied = 0;
+    return sfs2_read_file_at(&g_sfs2, name, 0u, out, maxlen, &copied);
+  }
+
   if (g_kind == STORAGE_FS_FAT32) {
     uint32_t idx = 0;
     if (!fat_find(name, &idx))
@@ -998,6 +1113,19 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
     *out_len = 0;
   if (!g_storage_ready || !name || (!out && maxlen != 0))
     return 0;
+
+  if (g_kind == STORAGE_FS_SFS2) {
+    sfs2_stat_t info;
+    if (!sfs2_stat_path(&g_sfs2, name, &info) ||
+        info.type != SFS2_INODE_FILE || info.size_bytes > UINT32_MAX)
+      return 0;
+    uint32_t copied = 0;
+    if (!sfs2_read_file_at(&g_sfs2, name, offset, out, maxlen, &copied))
+      return 0;
+    if (out_len)
+      *out_len = copied;
+    return 1;
+  }
 
   uint32_t file_size = 0;
   uint32_t idx = 0;
