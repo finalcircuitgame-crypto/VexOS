@@ -234,7 +234,65 @@ int VMM_Init(void) {
     return 1;
 }
 
+/* PAGE_USER leaf frames are owned by their address space and released once
+   during teardown. Do not let two user virtual pages claim the same frame. */
+static int address_space_has_user_frame_alias(const AddressSpace *space,
+                                               uint64_t physical,
+                                               uint64_t target_va) {
+    if (!space || !space->pml4) return 0;
+
+    uint64_t target_page = target_va & ~(uint64_t)(PAGE_SIZE - 1u);
+    for (uint32_t i4 = 0; i4 < 256u; ++i4) {
+        uint64_t e4 = space->pml4->entries[i4];
+        if (!(e4 & PAGE_PRESENT) || (e4 & PAGE_LARGE)) continue;
+        const page_table *pdpt = (const page_table *)(uintptr_t)
+            (e4 & PHYSICAL_ADDRESS_MASK);
+
+        for (uint32_t i3 = 0; i3 < 512u; ++i3) {
+            uint64_t e3 = pdpt->entries[i3];
+            if (!(e3 & PAGE_PRESENT)) continue;
+            if (e3 & PAGE_LARGE) {
+                if (e3 & PAGE_USER) return 1;
+                continue;
+            }
+            const page_table *pd = (const page_table *)(uintptr_t)
+                (e3 & PHYSICAL_ADDRESS_MASK);
+
+            for (uint32_t i2 = 0; i2 < 512u; ++i2) {
+                uint64_t e2 = pd->entries[i2];
+                if (!(e2 & PAGE_PRESENT)) continue;
+                if (e2 & PAGE_LARGE) {
+                    if (e2 & PAGE_USER) return 1;
+                    continue;
+                }
+                const page_table *pt = (const page_table *)(uintptr_t)
+                    (e2 & PHYSICAL_ADDRESS_MASK);
+
+                for (uint32_t i1 = 0; i1 < 512u; ++i1) {
+                    uint64_t e1 = pt->entries[i1];
+                    if ((e1 & (PAGE_PRESENT | PAGE_USER)) !=
+                        (PAGE_PRESENT | PAGE_USER) ||
+                        (e1 & PHYSICAL_ADDRESS_MASK) != physical)
+                        continue;
+
+                    uint64_t mapped_va =
+                        ((uint64_t)i4 << 39) |
+                        ((uint64_t)i3 << 30) |
+                        ((uint64_t)i2 << 21) |
+                        ((uint64_t)i1 << 12);
+                    if (mapped_va != target_page)
+                        return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 int VMM_MapPage(void *virtual_addr, void *physical_addr, uint64_t flags) {
+    if (active_address_space)
+        return VMM_AddressSpaceMapPage(active_address_space, virtual_addr,
+                                       physical_addr, flags);
     return map_page_in_root(active_pml4, virtual_addr, physical_addr, flags);
 }
 int VMM_UnmapPage(void *virtual_addr, int free_physical) {
@@ -271,7 +329,14 @@ void VMM_AddressSpaceDestroy(AddressSpace *space) {
 
 int VMM_AddressSpaceMapPage(AddressSpace *space, void *va, void *pa,
                             uint64_t flags) {
-    return space ? map_page_in_root(space->pml4, va, pa, flags) : 0;
+    if (!space || !space->pml4)
+        return 0;
+    if ((flags & PAGE_USER) &&
+        address_space_has_user_frame_alias(
+            space, (uint64_t)(uintptr_t)pa,
+            (uint64_t)(uintptr_t)va))
+        return 0;
+    return map_page_in_root(space->pml4, va, pa, flags);
 }
 int VMM_AddressSpaceUnmapPage(AddressSpace *space, void *va, int free_physical) {
     return space ? unmap_page_in_root(space->pml4, va, free_physical) : 0;
