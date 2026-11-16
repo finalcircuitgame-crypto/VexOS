@@ -40,6 +40,7 @@ Provide a filesystem-independent kernel interface while preserving existing Simp
 - Slash-separated paths are stored in the existing SFS1 name field; no SFS1 metadata structure or version changed.
 - `vfs_create` creates an empty file. `vfs_write` creates or replaces a file. `vfs_unlink` clears a file-table entry and allows the slot to be reused.
 - SFS1 allocation is append-only. Unlink and replacement do not reclaim old data sectors because SFS1 has no free-space map. Repeated writes/deletes can exhaust the data area even when the table has free entries.
+- Mount validates every live table entry before exposing it: bounded relative path syntax, no duplicate or file/directory-conflicting names, no overlapping data extents, file-count consistency, and extents within the committed allocation and device-addressable bounds. ATA PIO currently enforces its 28-bit LBA address ceiling; it does not yet expose exact IDENTIFY capacity.
 - Metadata writes are not journaled or crash-atomic. A power loss during table/superblock updates can leave inconsistent metadata.
 
 ### FAT32
