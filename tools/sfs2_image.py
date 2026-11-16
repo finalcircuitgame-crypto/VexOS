@@ -179,44 +179,89 @@ def verify_image(image: Path):
         if len(raw) != SECTOR:
             raise ValueError("image is empty")
         fields = SB.unpack(raw)
-        magic, version, header_size, sector_size, volume, _generation, bitmap_lba, bitmap_n, inode_lba, inode_n, cap, data_lba, root, sb_sum, _reserved = fields
+        (magic, version, header_size, sector_size, volume, _generation,
+         bitmap_lba, bitmap_n, inode_lba, inode_n, cap, data_lba,
+         root, sb_sum, _reserved) = fields
         if (magic, version, header_size, sector_size) != (MAGIC, VERSION, SECTOR, SECTOR):
             raise ValueError("invalid SFS2 signature/version/header")
         if volume != size // SECTOR or root != 1 or sb_sum != checksum(raw, 68):
             raise ValueError("superblock checksum or geometry mismatch")
-        if bitmap_lba != 1 or inode_lba < bitmap_lba + bitmap_n or data_lba < inode_lba + inode_n or data_lba >= volume:
+        if not 1 <= cap <= INODE_MAX or bitmap_lba < 1 or bitmap_n == 0 or inode_n == 0:
+            raise ValueError("invalid SFS2 metadata capacity or region size")
+        bitmap_end = bitmap_lba + bitmap_n
+        inode_end = inode_lba + inode_n
+        if (bitmap_end < bitmap_lba or inode_lba < bitmap_end or
+                inode_end < inode_lba or data_lba < inode_end or data_lba >= volume):
             raise ValueError("invalid metadata region ordering")
-        f.seek(bitmap_lba * SECTOR); bitmap = f.read(bitmap_n * SECTOR)
-        f.seek(inode_lba * SECTOR); table = f.read(inode_n * SECTOR)
+        if bitmap_n * SECTOR * 8 < volume - data_lba:
+            raise ValueError("allocation bitmap does not cover the data region")
+        if inode_n * SECTOR < cap * INODE.size:
+            raise ValueError("inode table is too small for its declared capacity")
+        f.seek(bitmap_lba * SECTOR)
+        bitmap = f.read(bitmap_n * SECTOR)
+        f.seek(inode_lba * SECTOR)
+        table = f.read(inode_n * SECTOR)
         if len(bitmap) != bitmap_n * SECTOR or len(table) != inode_n * SECTOR:
             raise ValueError("truncated metadata")
+
         live = []
+        seen_ids = set()
+        seen_names = set()
+        extents = []
+        root_count = 0
         for i in range(cap):
             rec = table[i * INODE.size:(i + 1) * INODE.size]
-            vals = INODE.unpack(rec)
-            inode_id, parent, kind, _flags, _rsv, name, length, start, sectors, _gen, ino_sum, _tail = vals
-            if not inode_id:
+            (inode_id, parent, kind, _flags, _rsv, name_raw, length,
+             start, sectors, _gen, ino_sum, _tail) = INODE.unpack(rec)
+            if inode_id == 0:
                 continue
             if ino_sum != checksum(rec, 84):
                 raise ValueError(f"inode {inode_id} checksum mismatch")
-            if inode_id == 1:
-                if kind != 2 or parent != 0:
-                    raise ValueError("invalid root inode")
-            else:
-                if parent != 1 or kind != 1:
-                    raise ValueError("unsupported namespace in host image verifier")
-                need = ceildiv(length, SECTOR)
-                if (length == 0 and (start != 0 or sectors != 0)) or (length > 0 and (sectors < need or start < data_lba or start + sectors > volume)):
-                    raise ValueError(f"invalid extent for inode {inode_id}")
-                if length:
-                    for bit in range(start - data_lba, start + sectors - data_lba):
-                        if not (bitmap[bit >> 3] & (1 << (bit & 7))):
-                            raise ValueError(f"bitmap misses allocation for inode {inode_id}")
-                live.append((name.split(b"\0", 1)[0].decode("utf-8", "replace"), start, length))
-        if len(live) + 1 > cap:
-            raise ValueError("inode count exceeds capacity")
-    return {"sectors": volume, "files": live, "data_lba": data_lba}
+            if inode_id in seen_ids:
+                raise ValueError(f"duplicate inode ID: {inode_id}")
+            seen_ids.add(inode_id)
 
+            if inode_id == 1:
+                root_count += 1
+                if (kind != 2 or parent != 0 or
+                        name_raw != bytes(NAME_MAX) or length or start or sectors):
+                    raise ValueError("invalid root inode")
+                continue
+
+            if parent != 1 or kind != 1:
+                raise ValueError("host verifier currently expects root-level regular files")
+            name_bytes = name_raw.split(b"\\0", 1)[0]
+            if not name_bytes or len(name_bytes) >= NAME_MAX or b"/" in name_bytes or name_bytes in (b".", b".."):
+                raise ValueError(f"invalid filename in inode {inode_id}")
+            try:
+                name = name_bytes.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"filename in inode {inode_id} is not UTF-8") from exc
+            if name in seen_names:
+                raise ValueError(f"duplicate filename: {name!r}")
+            seen_names.add(name)
+
+            need = ceildiv(length, SECTOR)
+            if length == 0:
+                if start != 0 or sectors != 0:
+                    raise ValueError(f"invalid empty-file extent for inode {inode_id}")
+            else:
+                end_lba = start + sectors
+                if (sectors < need or start < data_lba or end_lba < start or
+                        end_lba > volume):
+                    raise ValueError(f"invalid extent for inode {inode_id}")
+                for old_start, old_end, old_id in extents:
+                    if start < old_end and old_start < end_lba:
+                        raise ValueError(f"overlapping extents for inodes {old_id} and {inode_id}")
+                extents.append((start, end_lba, inode_id))
+                for bit in range(start - data_lba, end_lba - data_lba):
+                    if not (bitmap[bit >> 3] & (1 << (bit & 7))):
+                        raise ValueError(f"bitmap misses allocation for inode {inode_id}")
+            live.append((name, start, length))
+
+        if root_count != 1:
+            raise ValueError("image must contain exactly one root inode")
+    return {"sectors": volume, "files": live, "data_lba": data_lba}
 
 def cmd_format(args):
     files = []
