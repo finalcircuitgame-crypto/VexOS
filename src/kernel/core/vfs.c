@@ -311,12 +311,13 @@ static int vfs_has_descendant(const char *directory) {
         if (dir_len == 0) {
             if (entry[0])
                 return 1;
-        } else if (entry[dir_len] == '/' &&
-                   entry[dir_len + 1u] != '\0') {
+        } else {
             uint32_t j = 0;
-            while (j < dir_len && entry[j] == directory[j])
+            while (j < dir_len && entry[j] &&
+                   entry[j] == directory[j])
                 ++j;
-            if (j == dir_len)
+            if (j == dir_len && entry[dir_len] == '/' &&
+                entry[dir_len + 1u] != '\0')
                 return 1;
         }
     }
@@ -754,8 +755,11 @@ int vfs_dir_read(vfs_dir_t *dir, char *out_name, uint32_t out_cap,
             *out_stat = exact_info;
         }
 
-        if (child_len + 1u > out_cap)
+        if (child_len + 1u > out_cap) {
+            /* Do not consume the entry: callers can retry with a larger buffer. */
+            --dir->next_index;
             return -1;
+        }
         for (uint32_t i = 0; i <= child_len; ++i)
             out_name[i] = child[i];
         return 1;
