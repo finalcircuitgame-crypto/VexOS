@@ -443,6 +443,7 @@ int simplefs_init(void) {
      callers may safely request initialization more than once. */
   if (g_mounted)
     return 1;
+  g_kind = STORAGE_FS_NONE;
 
   /*
    * Prefer legacy ATA PIO when present (the pc machine uses it for the
@@ -480,6 +481,7 @@ int simplefs_init(void) {
 
   if (!sfs_load_superblock()) {
     serial_print("[SFS] read superblock failed\n");
+    g_kind = STORAGE_FS_NONE;
     return 0;
   }
 
@@ -491,18 +493,18 @@ int simplefs_init(void) {
       g_sb.data_lba < table_end ||
       g_sb.next_free_lba < g_sb.data_lba ||
       g_sb.file_count > SFS_MAX_FILES) {
-    serial_print("[SFS] unrecognized or invalid SFS1 volume; refusing to format\\n");
+    serial_print("[SFS] unrecognized or invalid SFS1 volume; refusing to format\n");
     g_kind = STORAGE_FS_NONE;
     return 0;
   }
 
   if (!sfs_load_table()) {
-    serial_print("[SFS] file table unreadable; refusing destructive recovery\\n");
+    serial_print("[SFS] file table unreadable; refusing destructive recovery\n");
     g_kind = STORAGE_FS_NONE;
     return 0;
   }
 
-  serial_print("[SFS] mounted\\n");
+  serial_print("[SFS] mounted\n");
   g_mounted = 1;
   return 1;
 }
