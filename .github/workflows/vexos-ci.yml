@@ -465,12 +465,30 @@ jobs:
                       ("down", "DOWN"),
                       ("up", "UP"),
                   ):
+                      # Send explicit key-down and key-up events around a timed hold.
+                      # This guarantees the guest sees a continuous 2.5-second press.
                       command({
-                          "execute": "send-key",
-                          "arguments": {
-                              "keys": [{"type": "qcode", "data": qcode}],
-                              "hold-time": 2500
-                          }
+                          "execute": "input-send-event",
+                          "arguments": {"events": [
+                              {"type": "key", "data": {
+                                  "down": True,
+                                  "key": {"type": "qcode", "data": qcode}
+                              }}
+                          ]}
+                      })
+                      hold_started = time.monotonic()
+                      time.sleep(2.5)
+                      held_seconds = time.monotonic() - hold_started
+                      if held_seconds < 2.5:
+                          raise RuntimeError(f"{label} was held only {held_seconds:.3f}s")
+                      command({
+                          "execute": "input-send-event",
+                          "arguments": {"events": [
+                              {"type": "key", "data": {
+                                  "down": False,
+                                  "key": {"type": "qcode", "data": qcode}
+                              }}
+                          ]}
                       })
                       expected = (
                           f"[CI] USB arrow {label} down",
