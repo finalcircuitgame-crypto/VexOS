@@ -139,20 +139,18 @@ static int sys_read(int fd, void *buf, uint32_t count) {
         !state->files[fd].used)
         return -1;
 
-    if (count == 0)
+    vfs_file_t *file = &state->files[fd].file;
+    if (!file->is_open)
+        return -1;
+    if (count == 0 || file->offset >= file->size)
         return 0;
-    if (!VMM_IsUserRange(buf, count, 1)) {
-        /* Validate only the bytes that can actually be read. */
-        vfs_file_t *file = &state->files[fd].file;
-        if (!file->is_open || file->offset >= file->size)
-            return 0;
-        uint32_t available = file->size - file->offset;
-        uint32_t wanted = count < available ? count : available;
-        if (!VMM_IsUserRange(buf, wanted, 1))
-            return -1;
-    }
 
-    return vfs_file_read(&state->files[fd].file, buf, count);
+    uint32_t available = file->size - file->offset;
+    uint32_t wanted = count < available ? count : available;
+    if (!VMM_IsUserRange(buf, wanted, 1))
+        return -1;
+
+    return vfs_file_read(file, buf, wanted);
 }
 
 static int sys_seek(int fd, int offset, int whence) {
