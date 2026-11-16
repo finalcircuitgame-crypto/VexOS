@@ -97,6 +97,9 @@ jobs:
           python3 tools/sfs2_image.py format dist/storage.img dist/ci.txt --force --sectors 131072 --inodes 256
           python3 tools/sfs2_image.py verify dist/storage.img
           test "$(stat -c %s dist/storage.img)" -eq $((131072 * 512))
+          # A separate disposable SATA disk is attached to QEMU's AHCI HBA.
+          # The OS self-test writes sectors 16-17, never the boot/SFS2 disks.
+          truncate -s 64M dist/ahci-test.img
 
       - name: Boot SFS2 disk in QEMU, verify kernel tests, and record MP4
         shell: bash
@@ -178,6 +181,9 @@ jobs:
             -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
             -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
             -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device ahci,id=ahci \
+            -drive if=none,id=ahci-test-disk,format=raw,file=dist/ahci-test.img \
+            -device ide-hd,drive=ahci-test-disk,bus=ahci.0 \
             -display sdl \
             -monitor none \
             -serial file:serial.log \
@@ -192,6 +198,7 @@ jobs:
             "[CI] VFS hierarchical paths and directory iteration passed"
             "[CI] VFS create/unlink and open-node reference rules passed"
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed"
+            "[CI] AHCI SATA identify, two-sector DMA write/read, and bounds checks passed"
           )
           deadline=$((SECONDS + 120))
           while (( SECONDS < deadline )); do
@@ -227,7 +234,7 @@ jobs:
 
           # Keep a short, useful post-test capture of the successful boot.
           sleep 3
-          echo "PASS: UEFI booted VexOS from the SFS2 test disk; SFS2, journal, VFS, and persistent file I/O markers observed."
+          echo "PASS: UEFI booted VexOS with SFS2 and AHCI disks; SFS2, journal, VFS, persistent file I/O, and AHCI DMA markers observed."
           printf '%s\n' "${required_markers[@]}" > artifacts/sfs2-required-markers.txt
           cp serial.log artifacts/serial.log
           cp qemu.log artifacts/qemu.log
