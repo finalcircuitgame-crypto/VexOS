@@ -8,10 +8,12 @@
 extern void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 extern void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task);
 extern void Process_OnTaskExit(uint32_t task_id);
+extern void Process_ExitKernelCurrent(int32_t exit_code);
 
 static Task tasks[TASK_MAX];
 static uint32_t task_count;
 static uint32_t current_task;
+static void (*kernel_task_entries[TASK_MAX])(void);
 
 #ifdef VEXOS_CI_INPUT_TEST
 static volatile uint64_t ci_runtime_bad_frame_cs;
@@ -19,6 +21,20 @@ static volatile int ci_runtime_setup_ok;
 static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
 #endif
+
+static void task_entry_trampoline(void) {
+  uint32_t task_id = current_task;
+  void (*entry)(void) =
+      task_id < TASK_MAX ? kernel_task_entries[task_id] : NULL;
+  if (!entry)
+    Process_ExitKernelCurrent(-1);
+
+  entry();
+
+  /* A kernel task that returns has completed normally. The process manager
+     marks it exited and the scheduler switches away from its stack. */
+  Process_ExitKernelCurrent(0);
+}
 
 static void task_activate(uint32_t id) {
   if (id >= task_count)
@@ -43,6 +59,7 @@ void Task_Init(void) {
     tasks[i].address_space = NULL;
     tasks[i].state = TASK_UNUSED;
     tasks[i].user_mode = 0;
+    kernel_task_entries[i] = NULL;
   }
 
   task_count = 1;
@@ -90,7 +107,8 @@ int32_t Task_Create(void (*entry)(void), void *stack_top) {
     return -1;
 
   uint64_t *stack = (uint64_t *)stack_top;
-  build_kernel_task_frame(&stack, entry);
+  kernel_task_entries[slot] = entry;
+  build_kernel_task_frame(&stack, task_entry_trampoline);
 
   tasks[slot].rsp = (uint64_t)(uintptr_t)stack;
   tasks[slot].kernel_stack_top = (uint64_t)(uintptr_t)stack_top;
@@ -132,6 +150,7 @@ int32_t Task_CreateUser(AddressSpace *space, uint64_t entry,
   tasks[slot].kernel_stack_top = (uint64_t)(uintptr_t)kernel_stack_top;
   tasks[slot].address_space = space;
   tasks[slot].user_mode = 1;
+  kernel_task_entries[slot] = NULL;
   tasks[slot].state = TASK_READY;
 
   if ((uint32_t)slot >= task_count)
@@ -187,6 +206,7 @@ int Task_Reap(uint32_t task_id) {
   tasks[task_id].kernel_stack_top = 0;
   tasks[task_id].address_space = NULL;
   tasks[task_id].user_mode = 0;
+  kernel_task_entries[task_id] = NULL;
   tasks[task_id].state = TASK_UNUSED;
   return 1;
 }
@@ -314,7 +334,7 @@ int Task_CI_SelfTest(void) {
     if (frame[i] != 0)
       return 0;
   }
-  if (frame[15] != (uint64_t)(uintptr_t)ci_task_entry ||
+  if (frame[15] != (uint64_t)(uintptr_t)task_entry_trampoline ||
       frame[16] != 0x08u || frame[17] != 0x202u ||
       frame[18] != (uint64_t)(uintptr_t)&test_stack[63] ||
       frame[19] != 0x10u)
@@ -363,11 +383,11 @@ void Task_CI_StartRuntimeTest(void) {
     const uint64_t *frame_a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
     const uint64_t *frame_b = (const uint64_t *)(uintptr_t)tasks[2].rsp;
     ci_runtime_setup_ok =
-        frame_a[15] == (uint64_t)(uintptr_t)ci_runtime_task_a &&
+        frame_a[15] == (uint64_t)(uintptr_t)task_entry_trampoline &&
         frame_a[16] == 0x08u && frame_a[17] == 0x202u &&
         frame_a[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_a + 4096u - sizeof(uint64_t)) &&
         frame_a[19] == 0x10u &&
-        frame_b[15] == (uint64_t)(uintptr_t)ci_runtime_task_b &&
+        frame_b[15] == (uint64_t)(uintptr_t)task_entry_trampoline &&
         frame_b[16] == 0x08u && frame_b[17] == 0x202u &&
         frame_b[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_b + 4096u - sizeof(uint64_t)) &&
         frame_b[19] == 0x10u;
