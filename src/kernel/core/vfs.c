@@ -48,15 +48,26 @@ static volatile uint32_t g_backend_lock;
 static volatile uint32_t g_namespace_lock;
 static volatile uint32_t g_mount_lock;
 
-static void vfs_lock(volatile uint32_t *lock) {
+/* VFS is called by preemptively scheduled tasks on a single CPU. Disable
+   local interrupts before taking a lock so PIT preemption cannot switch to a
+   second task that spins forever on a lock held by the preempted task. */
+static uint64_t vfs_lock(volatile uint32_t *lock) {
+    uint64_t irq_flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(irq_flags) :: "memory");
     while (__sync_lock_test_and_set(lock, 1u)) {
         __asm__ volatile("pause");
     }
+    return irq_flags;
 }
 
-static void vfs_unlock(volatile uint32_t *lock) {
+static void vfs_unlock(volatile uint32_t *lock, uint64_t irq_flags) {
     __sync_lock_release(lock);
+    if (irq_flags & (1ull << 9))
+        __asm__ volatile("sti" ::: "memory");
 }
+
+#define VFS_LOCK(lock) uint64_t lock##_irq_flags = vfs_lock(&(lock))
+#define VFS_UNLOCK(lock) vfs_unlock(&(lock), lock##_irq_flags)
 
 static int vfs_string_equal(const char *a, const char *b) {
     if (!a || !b)
@@ -147,35 +158,35 @@ static vfs_mount_t g_root_mount = {
    and allocator. These are task-context operations, never interrupt handlers. */
 static int vfs_backend_stat(const char *name, vfs_stat_t *out) {
     int result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->stat(name, out);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static int vfs_backend_read_at(const char *name, uint32_t offset, void *out,
                                uint32_t max_len, uint32_t *out_len) {
     int result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->read_at(name, offset, out, max_len, out_len);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static int vfs_backend_read(const char *name, void *out, uint32_t max_len,
                             uint32_t *out_len) {
     int result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->read(name, out, max_len, out_len);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static int vfs_backend_write(const char *name, const void *data, uint32_t len) {
     int result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->write(name, data, len);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
@@ -183,50 +194,50 @@ static int vfs_backend_unlink(const char *name) {
     int result;
     if (!g_root_mount.ops->unlink)
         return 0;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->unlink(name);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static uint32_t vfs_backend_count(void) {
     uint32_t result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->count ? g_root_mount.ops->count() : 0;
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static int vfs_backend_name_at(uint32_t index, char *out, uint32_t cap) {
     int result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->name_at &&
              g_root_mount.ops->name_at(index, out, cap);
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 static uint32_t vfs_backend_list(char *out, uint32_t cap) {
     uint32_t result;
-    vfs_lock(&g_backend_lock);
+    VFS_LOCK(g_backend_lock);
     result = g_root_mount.ops->list ? g_root_mount.ops->list(out, cap) : 0;
-    vfs_unlock(&g_backend_lock);
+    VFS_UNLOCK(g_backend_lock);
     return result;
 }
 
 int vfs_init(void) {
     int result = 0;
-    vfs_lock(&g_mount_lock);
+    VFS_LOCK(g_mount_lock);
     if (g_root_mount.mounted) {
         result = 1;
     } else if (g_root_mount.ops && g_root_mount.ops->mount) {
-        vfs_lock(&g_backend_lock);
+        VFS_LOCK(g_backend_lock);
         result = g_root_mount.ops->mount();
-        vfs_unlock(&g_backend_lock);
+        VFS_UNLOCK(g_backend_lock);
         if (result)
             g_root_mount.mounted = 1;
     }
-    vfs_unlock(&g_mount_lock);
+    VFS_UNLOCK(g_mount_lock);
     return result;
 }
 
@@ -360,7 +371,7 @@ static struct vfs_node *vfs_node_find_locked(const char *path) {
 static struct vfs_node *vfs_node_acquire(const char *path,
                                          const vfs_stat_t *info) {
     struct vfs_node *node = NULL;
-    vfs_lock(&g_node_lock);
+    VFS_LOCK(g_node_lock);
     node = vfs_node_find_locked(path);
     if (node) {
         if (node->busy || node->references == UINT32_MAX) {
@@ -384,14 +395,14 @@ static struct vfs_node *vfs_node_acquire(const char *path,
             }
         }
     }
-    vfs_unlock(&g_node_lock);
+    VFS_UNLOCK(g_node_lock);
     return node;
 }
 
 static void vfs_node_release(struct vfs_node *node) {
     if (!node)
         return;
-    vfs_lock(&g_node_lock);
+    VFS_LOCK(g_node_lock);
     if (node->used && node->references > 0) {
         --node->references;
         if (node->references == 0 && !node->busy) {
@@ -401,12 +412,12 @@ static void vfs_node_release(struct vfs_node *node) {
             node->type = 0;
         }
     }
-    vfs_unlock(&g_node_lock);
+    VFS_UNLOCK(g_node_lock);
 }
 
 static struct vfs_node *vfs_node_reserve_path(const char *path) {
     struct vfs_node *node = NULL;
-    vfs_lock(&g_node_lock);
+    VFS_LOCK(g_node_lock);
     node = vfs_node_find_locked(path);
     if (node) {
         if (node->busy || node->references != 0)
@@ -427,14 +438,14 @@ static struct vfs_node *vfs_node_reserve_path(const char *path) {
             }
         }
     }
-    vfs_unlock(&g_node_lock);
+    VFS_UNLOCK(g_node_lock);
     return node;
 }
 
 static void vfs_node_release_reservation(struct vfs_node *node) {
     if (!node)
         return;
-    vfs_lock(&g_node_lock);
+    VFS_LOCK(g_node_lock);
     if (node->used && node->busy && node->references == 0) {
         node->used = 0;
         node->busy = 0;
@@ -442,7 +453,7 @@ static void vfs_node_release_reservation(struct vfs_node *node) {
         node->size = 0;
         node->type = 0;
     }
-    vfs_unlock(&g_node_lock);
+    VFS_UNLOCK(g_node_lock);
 }
 
 int vfs_stat(const char *path, vfs_stat_t *out_stat) {
@@ -511,22 +522,22 @@ int vfs_write(const char *path, const void *data, uint32_t len) {
     /* Keep parent/type checks, reservation, and backend update atomic with
        respect to other namespace mutations. Otherwise two tasks could race
        to create both "node" and "node/child". */
-    vfs_lock(&g_namespace_lock);
+    VFS_LOCK(g_namespace_lock);
     if (vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
         vfs_has_descendant(name)) {
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
 
     struct vfs_node *reservation = vfs_node_reserve_path(name);
     if (!reservation) {
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
     static const uint8_t empty = 0;
     int result = vfs_backend_write(name, data ? data : &empty, len);
     vfs_node_release_reservation(reservation);
-    vfs_unlock(&g_namespace_lock);
+    VFS_UNLOCK(g_namespace_lock);
     return result;
 }
 
@@ -537,23 +548,23 @@ int vfs_create(const char *path) {
     if (!vfs_resolve(path, name, sizeof(name)))
         return 0;
 
-    vfs_lock(&g_namespace_lock);
+    VFS_LOCK(g_namespace_lock);
     vfs_stat_t info;
     if (vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
         vfs_backend_stat(name, &info) || vfs_has_descendant(name)) {
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
 
     struct vfs_node *reservation = vfs_node_reserve_path(name);
     if (!reservation) {
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
     static const uint8_t empty = 0;
     int result = vfs_backend_write(name, &empty, 0);
     vfs_node_release_reservation(reservation);
-    vfs_unlock(&g_namespace_lock);
+    VFS_UNLOCK(g_namespace_lock);
     return result;
 }
 
@@ -565,21 +576,21 @@ int vfs_unlink(const char *path) {
         vfs_string_equal(name, "/"))
         return 0;
 
-    vfs_lock(&g_namespace_lock);
+    VFS_LOCK(g_namespace_lock);
     struct vfs_node *reservation = vfs_node_reserve_path(name);
     if (!reservation) {
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
     vfs_stat_t info;
     if (!vfs_backend_stat(name, &info) || info.type != VFS_NODE_FILE) {
         vfs_node_release_reservation(reservation);
-        vfs_unlock(&g_namespace_lock);
+        VFS_UNLOCK(g_namespace_lock);
         return 0;
     }
     int result = vfs_backend_unlink(name);
     vfs_node_release_reservation(reservation);
-    vfs_unlock(&g_namespace_lock);
+    VFS_UNLOCK(g_namespace_lock);
     return result;
 }
 
