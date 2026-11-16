@@ -1,5 +1,6 @@
 #include "shell_commands.h"
 #include "terminal.h"
+#include "../../graphics/graphics.h"
 
 static uint8_t shell_command_matches(const char *line, uint32_t length,
                                      const char *command,
@@ -49,6 +50,71 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
     serial_print("[CI] Shell help command executed\n");
 #endif
     terminal_append("help clear cls echo mem ver uptime pos rand specs ring3 fs explorer view notepad setup wall\n");
+    return 1;
+  }
+
+  if (length >= 4u && line[0] == 'f' && line[1] == 'o' &&
+      line[2] == 'n' && line[3] == 't' &&
+      (length == 4u || line[4] == ' ')) {
+    uint32_t pos = 4u;
+    while (pos < length && line[pos] == ' ') pos++;
+    uint32_t token_start = pos;
+    while (pos < length && line[pos] != ' ') pos++;
+    uint32_t token_length = pos - token_start;
+    gfx_font_family_t family = gfx_get_font_family();
+    uint8_t scale = gfx_get_font_scale();
+    uint8_t bold = gfx_get_font_bold();
+
+    if (!token_length) {
+      terminal_append("Fonts: inter, lato, dejavu, mono\\n");
+      terminal_append("Usage: font <family> [1|2|3] [bold|regular]\\n");
+      return 1;
+    }
+    if (token_length == 5u &&
+        line[token_start] == 'i' && line[token_start + 1u] == 'n' &&
+        line[token_start + 2u] == 't' && line[token_start + 3u] == 'e' &&
+        line[token_start + 4u] == 'r') family = GFX_FONT_INTER;
+    else if (token_length == 4u &&
+        line[token_start] == 'l' && line[token_start + 1u] == 'a' &&
+        line[token_start + 2u] == 't' && line[token_start + 3u] == 'o')
+      family = GFX_FONT_LATO;
+    else if (token_length == 6u &&
+        line[token_start] == 'd' && line[token_start + 1u] == 'e' &&
+        line[token_start + 2u] == 'j' && line[token_start + 3u] == 'a' &&
+        line[token_start + 4u] == 'v' && line[token_start + 5u] == 'u')
+      family = GFX_FONT_DEJAVU_SANS;
+    else if (token_length == 4u &&
+        line[token_start] == 'm' && line[token_start + 1u] == 'o' &&
+        line[token_start + 2u] == 'n' && line[token_start + 3u] == 'o')
+      family = GFX_FONT_DEJAVU_MONO;
+    else {
+      terminal_append("Unknown font. Use: inter, lato, dejavu, mono\\n");
+      return 1;
+    }
+
+    while (pos < length && line[pos] == ' ') pos++;
+    if (pos < length) {
+      if (line[pos] >= '1' && line[pos] <= '3' &&
+          (pos + 1u == length || line[pos + 1u] == ' ')) {
+        scale = (uint8_t)(line[pos] - '0');
+        pos++;
+        while (pos < length && line[pos] == ' ') pos++;
+      }
+      uint32_t style_length = length - pos;
+      if (style_length == 4u && line[pos] == 'b' &&
+          line[pos + 1u] == 'o' && line[pos + 2u] == 'l' &&
+          line[pos + 3u] == 'd') bold = 1u;
+      else if (style_length == 7u && line[pos] == 'r' &&
+          line[pos + 1u] == 'e' && line[pos + 2u] == 'g' &&
+          line[pos + 3u] == 'u' && line[pos + 4u] == 'l' &&
+          line[pos + 5u] == 'a' && line[pos + 6u] == 'r') bold = 0u;
+      else if (style_length) {
+        terminal_append("Style must be bold or regular.\\n");
+        return 1;
+      }
+    }
+    gfx_set_font(family, scale, bold);
+    terminal_append("System font updated.\\n");
     return 1;
   }
 
