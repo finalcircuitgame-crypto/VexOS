@@ -56,7 +56,7 @@ jobs:
           # Build Doom and fetch its IWAD only after the final clean/rebuild above.
           # This keeps both inputs intact for the subsequent SimpleFS packaging step.
           # Compile the separate ring-3 DoomGeneric ELF (no WAD is bundled).
-          make doom
+          make VEXOS_CI=1 doom
           test -s dist/doom.elf
           readelf -h dist/doom.elf | grep -q 'EXEC'
 
@@ -455,6 +455,47 @@ jobs:
                           + serial_delta[-12000:]
                       )
                   time.sleep(2.0)
+
+                  # Regression test: hold each arrow key long enough to exercise
+                  # sustained movement, then verify the USB driver and Doom
+                  # backend both observe the matching release transition.
+                  for qcode, label in (
+                      ("right", "RIGHT"),
+                      ("left", "LEFT"),
+                      ("down", "DOWN"),
+                      ("up", "UP"),
+                  ):
+                      command({
+                          "execute": "send-key",
+                          "arguments": {
+                              "keys": [{"type": "qcode", "data": qcode}],
+                              "hold-time": 800
+                          }
+                      })
+                      expected = (
+                          f"[CI] USB arrow {label} down",
+                          f"[CI] USB arrow {label} released",
+                          f"[CI] Doom backend received {label} down",
+                          f"[CI] Doom backend received {label} released",
+                      )
+                      deadline = time.time() + 4
+                      serial = ""
+                      while time.time() < deadline:
+                          try:
+                              with open("serial.log", encoding="utf-8", errors="replace") as log:
+                                  serial = log.read()
+                          except OSError:
+                              serial = ""
+                          if all(marker in serial for marker in expected):
+                              break
+                          time.sleep(0.05)
+                      else:
+                          raise RuntimeError(
+                              f"Held {label} arrow press/release did not reach both input layers.\\n"
+                              + serial[-10000:]
+                          )
+                      time.sleep(0.15)
+
                   command({"execute": "screendump", "arguments": {"filename": "artifacts/04-doom.png"}})
                   # Close Doom through its window control so desktop tests can continue.
                   # QEMU's absolute tablet axes are 0..32767 (not 0..65535).
