@@ -377,7 +377,7 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   xhci_print_u32_dec(interval);
   serial_print(" service_period_us=");
   xhci_print_u32_dec(interval_us);
-  serial_print("\\n");
+  serial_print("\n");
   ep->dword0 = (interval & 0xFFu) << 16;
   ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
 
