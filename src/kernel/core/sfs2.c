@@ -2,6 +2,11 @@
 
 #include <stddef.h>
 
+_Static_assert(sizeof(sfs2_superblock_t) == SFS2_SECTOR_SIZE,
+               "SFS2 superblock must occupy exactly one sector");
+_Static_assert(sizeof(sfs2_inode_t) == 96u,
+               "SFS2 inode record size is part of the disk format");
+
 static void sfs2_zero(void *ptr, uint32_t length) {
     uint8_t *bytes = (uint8_t *)ptr;
     for (uint32_t i = 0; i < length; ++i)
