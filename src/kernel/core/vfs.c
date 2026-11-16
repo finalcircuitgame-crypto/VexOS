@@ -362,7 +362,8 @@ static int vfs_path_parent_is_file(const char *name) {
             parent[j] = name[j];
         parent[i] = '\0';
         vfs_stat_t info;
-        if (vfs_backend_stat(parent, &info))
+        if (vfs_backend_stat(parent, &info) &&
+            info.type == VFS_NODE_FILE)
             return 1;
     }
     return 0;
