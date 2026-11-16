@@ -7,7 +7,6 @@ offline: it never touches a block device, only regular image files.
 from __future__ import annotations
 
 import argparse
-import os
 import struct
 import sys
 from pathlib import Path
@@ -91,7 +90,9 @@ def read_sfs1(image: Path):
         return sectors, entries
 
 
-def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, bytes]], inode_capacity: int):
+def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, bytes]], inode_capacity: int, force: bool = False):
+    if destination.exists() and not force:
+        raise ValueError(f"refusing to overwrite existing image: {destination} (use --force)")
     if volume_sectors < 32 or volume_sectors > 0xFFFFFFFFFFFFFFFF:
         raise ValueError("volume must contain at least 32 sectors")
     if not 2 <= inode_capacity <= INODE_MAX:
@@ -224,14 +225,17 @@ def cmd_format(args):
         if not p.is_file():
             raise ValueError(f"not a regular file: {source}")
         files.append((p.name, p.read_bytes()))
-    result = build_image(Path(args.output), args.sectors, files, args.inodes)
+    result = build_image(Path(args.output), args.sectors, files, args.inodes, args.force)
     print(f"Formatted {args.output}: {result}")
 
 
 def cmd_migrate(args):
-    source = Path(args.source)
+    source = Path(args.source).resolve()
+    destination = Path(args.output).resolve()
+    if source == destination:
+        raise ValueError("migration source and destination must be different files")
     sectors, files = read_sfs1(source)
-    result = build_image(Path(args.output), args.sectors or sectors, files, args.inodes)
+    result = build_image(destination, args.sectors or sectors, files, args.inodes, args.force)
     verified = verify_image(Path(args.output))
     verified_files = verified["files"]
     if [name for name, _start, _length in verified_files] != [name for name, _data in files]:
@@ -252,6 +256,7 @@ def main():
     fmt.add_argument("output")
     fmt.add_argument("--sectors", type=int, default=131072)
     fmt.add_argument("--inodes", type=int, default=INODE_MAX)
+    fmt.add_argument("--force", action="store_true", help="replace an existing output image")
     fmt.add_argument("files", nargs="*")
     fmt.set_defaults(func=cmd_format)
     mig = sub.add_parser("migrate-sfs1", help="copy a legacy SFS1 image into a new SFS2 image")
@@ -259,6 +264,7 @@ def main():
     mig.add_argument("output")
     mig.add_argument("--sectors", type=int, default=0)
     mig.add_argument("--inodes", type=int, default=INODE_MAX)
+    mig.add_argument("--force", action="store_true", help="replace an existing destination image")
     mig.set_defaults(func=cmd_migrate)
     ver = sub.add_parser("verify", help="verify SFS2 image metadata and allocation bitmap")
     ver.add_argument("image")
