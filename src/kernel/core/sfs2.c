@@ -15,7 +15,7 @@ typedef struct __attribute__((packed)) {
     uint64_t sequence;
     uint64_t targets[SFS2_JOURNAL_MAX_RECORDS];
     uint32_t data_checksums[SFS2_JOURNAL_MAX_RECORDS];
-    uint8_t reserved[392];
+    uint8_t reserved[104];
 } sfs2_journal_header_t;
 
 _Static_assert(sizeof(sfs2_journal_header_t) == SFS2_SECTOR_SIZE,
@@ -230,7 +230,7 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
     return 0;
 }
 
-#define SFS2_MAX_FILE_SECTORS 4096u
+#define SFS2_MAX_FILE_SECTORS 32768u /* 16 MiB */
 
 typedef struct {
     uint32_t count;
@@ -972,7 +972,7 @@ typedef struct __attribute__((packed)) {
     uint64_t sequence;
     uint64_t targets[SFS2_JOURNAL_MAX_RECORDS];
     uint32_t data_checksums[SFS2_JOURNAL_MAX_RECORDS];
-    uint8_t reserved[392];
+    uint8_t reserved[104];
 } sfs2_test_journal_header_t;
 
 static void sfs2_test_finish_inode(sfs2_inode_t *inode) {
