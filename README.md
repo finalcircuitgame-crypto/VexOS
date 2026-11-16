@@ -11,9 +11,9 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan. The VFS foundation supports hierarchical paths, open-node lifetime tracking, and create/unlink operations on SFS1. Normal storage mounting is non-destructive: unknown or damaged volumes are rejected rather than automatically formatted.
 
-SFS2 has a checksummed metadata format and a non-destructive read-only kernel mount with VFS path, stat, directory, and ranged-read support. The offline host utility in [`tools/sfs2_image.py`](tools/sfs2_image.py) can format image files, verify SFS2 metadata, and migrate supported SFS1 images into separate SFS2 images. It refuses to overwrite existing output files unless `--force` is explicitly supplied.
+SFS2 has checksummed metadata, VFS path/stat/directory/ranged-read support, and an optional redo journal. Journal-enabled images support transactional root-level file create/replace/unlink (up to 2 MiB per file), with journal replay before metadata validation. Legacy SFS2 images without a journal remain read-only. The offline host utility in [`tools/sfs2_image.py`](tools/sfs2_image.py) formats journal-enabled images, verifies metadata, and migrates supported SFS1 images into separate SFS2 images. It refuses to overwrite existing output files unless `--force` is explicitly supplied.
 
-**Important:** SFS2 is not yet writable in the kernel. Kernel-side create/replace/unlink, persistent bitmap updates, a write-ahead journal, crash recovery, and QEMU fault-injection coverage remain outstanding. SFS1 remains the writable native filesystem. See [`docs/SFS2_FORMAT.md`](docs/SFS2_FORMAT.md) and [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md).
+**Limitations:** nested-directory writes, files larger than 2 MiB, journal power-loss fault injection, and broad physical-device qualification remain outstanding. SFS1 remains supported. See [`docs/SFS2_FORMAT.md`](docs/SFS2_FORMAT.md) and [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md).
 
 ## Prerequisites
 - GNU toolchain: gcc, ld, objcopy, make
