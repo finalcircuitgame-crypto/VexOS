@@ -469,7 +469,7 @@ jobs:
                           "execute": "send-key",
                           "arguments": {
                               "keys": [{"type": "qcode", "data": qcode}],
-                              "hold-time": 800
+    "hold-time": 2500
                           }
                       })
                       expected = (
