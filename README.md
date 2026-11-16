@@ -7,6 +7,10 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 - Kernel core (src/kernel/core): framebuffer console, PMM (physical memory manager), VMM (virtual memory), heap, PCI enumeration and drivers (xhci), simple desktop UI and setup wizard
 - SimpleFS persistent storage image (dist/storage.img) and image embedding helper in run.sh
 
+## Development roadmap
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan to reach a general-purpose operating system, including verified progress and remaining work. The next subsystem is the VFS; its integration plan is documented in [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md).
+
 ## Prerequisites
 - GNU toolchain: gcc, ld, objcopy, make
 - mtools (mformat, mmd, mcopy) for writing the EFI image
