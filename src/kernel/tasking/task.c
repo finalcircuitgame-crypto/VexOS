@@ -266,6 +266,18 @@ void Task_Yield(void) {
   __asm__ volatile("int $0x81" ::: "memory");
 }
 
+void Task_ExitCurrent(void) {
+  if (current_task >= task_count)
+    for (;;) __asm__ volatile("cli; hlt");
+
+  tasks[current_task].state = TASK_ZOMBIE;
+  Process_OnTaskExit(current_task);
+  Task_Yield();
+
+  /* A successfully exited task must never be resumed. */
+  for (;;) __asm__ volatile("cli; hlt");
+}
+
 #ifdef VEXOS_CI_INPUT_TEST
 static void ci_task_entry(void) {}
 
