@@ -1,6 +1,7 @@
 #include "../../include/process.h"
 #include "../../include/pmm.h"
 #include "../../include/vmm.h"
+#include "../../include/gdt.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -498,6 +499,25 @@ int Process_CI_SelfTest(void) {
           (const void *)(uintptr_t)code_va, 1, 0) &&
       VMM_AddressSpaceIsUserRange(space,
           (const void *)(uintptr_t)(stack_va + PAGE_SIZE - 1u), 1, 1);
+
+  /* Exercise the real scheduler path, not just the VMM activation helper.
+     The synthetic saved RSP values are never dereferenced in this CI-only
+     direct scheduler test; both task frames were validated above. */
+  if (user_ok) {
+    const uint32_t user_task_id = info.task_id;
+    (void)Task_Schedule(0x11110000u);
+    user_ok = Task_GetCurrentId() == user_task_id &&
+        Process_GetCurrentId() == user_pid &&
+        Process_IsCurrentUser() &&
+        VMM_GetActiveAddressSpace() == space &&
+        TSS_GetRSP0() == user->kernel_stack_top;
+
+    (void)Task_Schedule(0x22220000u);
+    user_ok = user_ok &&
+        Task_GetCurrentId() == 0u &&
+        Process_GetCurrentId() == parent_pid &&
+        VMM_GetActiveAddressSpace() == NULL;
+  }
 
   if (user)
     ci_discard_unstarted(user);
