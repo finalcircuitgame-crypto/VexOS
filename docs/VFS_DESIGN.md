@@ -12,9 +12,19 @@ Introduce a filesystem-independent kernel interface while preserving the current
 - User-mode descriptors are task-local and own VFS file handles with independent offsets; process cleanup closes outstanding handles.
 - Desktop file viewing, wallpaper loading, ELF loading through the ring-3 loader, shell listing, File Manager enumeration, and Notepad load/save now use VFS. The VFS backend is the intended boundary for SimpleFS access.
 
-## VFS v1 implementation
+## Current VFS implementation
 
-`src/include/vfs.h` and `src/kernel/core/vfs.c` define the first adapter layer. It has a root mount with a backend operation table and supports stat, read, ranged read, write, count, and flat-file listing. It normalizes absolute and relative root-file paths, strips `.` components, and rejects `..` traversal and nested paths. It also provides per-open file handles with independent offsets, read, seek, and close; user-mode open/read/seek/close syscalls now use these handles, and process cleanup closes outstanding handles. Desktop file consumers use VFS for metadata, reads, writes, and listing; direct SimpleFS operations are contained behind the VFS backend except for storage-specific regression fixtures. This is intentionally a compatibility layer; it is not yet a hierarchical VFS with vnode caching or mount-point routing.
+`src/include/vfs.h` and `src/kernel/core/vfs.c` define a root-mounted backend boundary. The existing SFS1 name field is 32 bytes, so the VFS stores normalized slash-separated relative paths in the current name field, up to 31 bytes excluding the terminator. No SFS1 structure or version changed.
+
+Directories are implicit: a directory exists while at least one stored file has that path as a component prefix. Directory iteration returns immediate children and de-duplicates synthesized directories. Empty directories are not persisted. File Manager supports folder navigation; the shell's `fs` command lists the root directory.
+
+VFS maintains a bounded cache of 64 unique node paths. Each open file handle retains a reference to its node, while independent opens retain independent offsets. A path cannot be replaced or unlinked while any handle references it. A separate reservation state serializes mutations against open operations. Backend calls are serialized with a spinlock because SimpleFS maintains a mutable global table and allocator. These APIs are task-context-only and must not be called from interrupt handlers; the current kernel is single-core, and SMP/preemption-locking assumptions need a separate audit.
+
+VFS exposes path-based write, create-empty, and unlink. SFS1 unlink clears the file-table entry and makes the slot reusable, but it does not reclaim the old data sectors because SFS1 uses append-only allocation and has no free-space map. FAT32 ranged reads now follow cluster chains; FAT32 remains root-only, short-name, and read-only. Ring-3 currently has read/open/seek/close syscalls, not write/create/unlink or directory syscalls.
+
+`simplefs_init()` may still format a disk that is not recognized as FAT32 or a valid SFS1 volume. That pre-existing behavior must be resolved before arbitrary physical-disk support or an installer is introduced.
+
+`vfs_file_t` and `vfs_dir_t` must be zero-initialized before their corresponding open call. A directory iterator returns 1 for an entry, 0 at end, and -1 for an invalid handle or insufficient output buffer; an insufficient-buffer result does not consume the entry.
 
 ## Required repository audit before further implementation
 
