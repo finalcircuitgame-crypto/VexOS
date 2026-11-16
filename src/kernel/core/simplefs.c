@@ -923,8 +923,11 @@ uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap) {
 }
 
 int simplefs_delete_file(const char *name) {
-  if (!g_storage_ready || !name || g_kind != STORAGE_FS_SFS ||
-      str_len32(name) == 0 || str_len32(name) >= SFS_NAME_MAX)
+  if (!g_storage_ready || !name || str_len32(name) == 0)
+    return 0;
+  if (g_kind == STORAGE_FS_SFS2)
+    return sfs2_unlink_file(&g_sfs2, name);
+  if (g_kind != STORAGE_FS_SFS || str_len32(name) >= SFS_NAME_MAX)
     return 0;
 
   uint32_t idx = 0;
@@ -962,9 +965,12 @@ int simplefs_delete_file(const char *name) {
 
 int simplefs_write_file(const char *name, const void *data, uint32_t len) {
   /* Never let direct SimpleFS callers write after a failed/unmounted probe. */
-  if (!g_storage_ready || g_kind != STORAGE_FS_SFS || !name || !data)
+  if (!g_storage_ready || !name || (!data && len) || str_len32(name) == 0)
     return 0;
-  if (str_len32(name) == 0 || str_len32(name) >= SFS_NAME_MAX)
+  if (g_kind == STORAGE_FS_SFS2)
+    return sfs2_write_file(&g_sfs2, name, data, len);
+  if (g_kind != STORAGE_FS_SFS || !data ||
+      str_len32(name) >= SFS_NAME_MAX)
     return 0;
 
   uint32_t idx = 0;
