@@ -111,7 +111,8 @@ void Process_Init(void) {
 ProcessId Process_RegisterTask(const char *name, uint32_t task_id,
                                void *external_stack_base) {
   if (!process_manager_ready || task_id >= TASK_MAX ||
-      task_id == Task_GetCurrentId() || find_by_task(task_id))
+      task_id == Task_GetCurrentId() || find_by_task(task_id) ||
+      !external_stack_base || !Task_GetTaskKernelStackTop(task_id))
     return 0;
 
   Process *process = allocate_record();
