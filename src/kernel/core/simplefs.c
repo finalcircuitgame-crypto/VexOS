@@ -808,7 +808,7 @@ uint32_t simplefs_file_count(void) {
     uint32_t count = 0;
     for (uint32_t i = 0; i < g_sfs2.superblock.inode_capacity; ++i)
       if (g_sfs2.inodes[i].inode_id &&
-          g_sfs2.inodes[i].type == SFS2_INODE_FILE)
+          g_sfs2.inodes[i].inode_id != g_sfs2.superblock.root_inode)
         ++count;
     return count;
   }
@@ -833,7 +833,7 @@ int simplefs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap) {
     uint32_t current = 0;
     for (uint32_t i = 0; i < g_sfs2.superblock.inode_capacity; ++i) {
       if (!g_sfs2.inodes[i].inode_id ||
-          g_sfs2.inodes[i].type != SFS2_INODE_FILE)
+          g_sfs2.inodes[i].inode_id == g_sfs2.superblock.root_inode)
         continue;
       if (current++ == index)
         return sfs2_build_relative_path(i, out_name, out_cap);
@@ -1220,6 +1220,14 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
   if (out_len)
     *out_len = copied;
   return 1;
+}
+
+int simplefs_is_directory(const char *name) {
+  if (!name || g_kind != STORAGE_FS_SFS2)
+    return 0;
+  sfs2_stat_t info;
+  return sfs2_stat_path(&g_sfs2, name, &info) &&
+         info.type == SFS2_INODE_DIRECTORY;
 }
 
 uint32_t simplefs_path_limit(void) {
