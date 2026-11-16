@@ -6,10 +6,10 @@ defined in `src/include/sfs2.h` and validated by `src/kernel/core/sfs2.c`.
 **Kernel status:** SFS2 mounts read/write only when the image has the optional
 redo-journal extension and the storage backend supplies durable sector writes.
 Legacy SFS2 images with no journal remain read-only. The current transactional
-writer supports root-directory regular files only, with a 2 MiB per-file limit;
-it supports create, replace, and unlink. Nested directory mutation is not yet
-supported. A committed redo journal is replayed before inode metadata is
-trusted. SFS1 remains supported as the legacy writable format.
+writer supports nested regular files, with missing parent directories created
+transactionally, and a 16 MiB per-file limit. It supports create, replace, and
+unlink. A committed redo journal is replayed before inode metadata is trusted.
+SFS1 remains supported as the legacy writable format.
 
 **Host-tool status:** `tools/sfs2_image.py` provides an offline formatter,
 metadata verifier, and SFS1-to-SFS2 image migration command. These tools operate
@@ -37,7 +37,7 @@ The validator rejects overlapping/out-of-order regions, out-of-device volume
 sizes, undersized metadata regions, and invalid checksums.
 
 The optional journal occupies a fixed region before the bitmap. The first
-journal sector is a checksummed commit header; up to eight following sectors
+journal sector is a checksummed commit header; up to 32 following sectors
 hold redo images for home sectors. A transaction writes journal payloads,
 commits the header, applies home sectors, then clears the header. On mount, a
 committed transaction is replayed before inode-table validation. Images with
@@ -46,8 +46,8 @@ zero journal geometry remain compatible as read-only SFS2 volumes.
 The bitmap has one bit per data-area sector (bit zero describes LBA
 `data_lba`). A set bit means allocated. Journaled root-file operations update
 the bitmap and inode record in one redo transaction. Each file is limited to
-4096 sectors (2 MiB) so the bitmap and inode updates fit within the eight-record
-journal limit.
+32768 sectors (16 MiB), using a 32-record journal so replacement can atomically
+update both old and new contiguous extents, inode metadata, and the superblock.
 
 ## Inodes
 
@@ -122,22 +122,23 @@ python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 - Bounds-checked bitmap-bit lookup and contiguous free-run search helpers.
 - Mount using caller-supplied sector I/O callbacks, including committed redo
   journal replay before metadata validation.
-- Journaled root-file create/replace/unlink, contiguous allocation, bitmap
-  persistence, inode updates, and superblock generation updates.
+- Journaled nested-file create/replace/unlink, automatic transactional parent
+  directory creation, contiguous allocation, bitmap persistence, inode updates,
+  and superblock generation updates. Files up to 16 MiB are supported.
 - Full inode-table loading with table-padding handling, root/parent/type checks,
   unique sibling names, and rejection of orphaned/cyclic directory trees.
 - Absolute or relative path resolution, stat, directory enumeration, and
   ranged reads across sector boundaries.
 - CI-only metadata checks and in-memory disk-image tests covering mount, empty
   directories, lookup, ranged reads, damaged metadata rejection, interrupted
-  journal replay, create/replace/readback, and unlink.
+  journal replay, nested directory creation/listing, 3 MiB file writes and
+  readback, and failure injection at every write boundary of a replacement
+  transaction.
 
 ## Remaining kernel milestones
 
-1. Add fault-injection tests for interruption after each journal payload, commit
-   header, home-sector write, and journal-clear operation.
-2. Extend transactions to nested directories and larger files using a scalable
-   extent and journal design.
-3. Add explicit concurrency protection around the transaction scratch state.
-4. Qualify write ordering and flush behavior across physical AHCI/ATA devices.
-5. Keep old no-journal SFS2 images read-only and preserve SFS1 compatibility.
+1. Add explicit concurrency protection around the transaction scratch state.
+2. Qualify write ordering and flush behavior across physical AHCI/ATA devices.
+3. Consider extent trees or extent chains to reduce contiguous-allocation
+   failures for heavily fragmented volumes.
+4. Keep old no-journal SFS2 images read-only and preserve SFS1 compatibility.
