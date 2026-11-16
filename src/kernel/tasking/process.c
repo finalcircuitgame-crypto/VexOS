@@ -573,6 +573,25 @@ static volatile ProcessId ci_orphan_child_pid;
 static uint32_t ci_unauthorized_target_task;
 static volatile int ci_unauthorized_reap_result;
 
+#define CI_STRESS_WORKERS 4u
+#define CI_STRESS_YIELDS 12u
+static volatile uint32_t ci_stress_counts[CI_STRESS_WORKERS];
+
+static void ci_stress_worker(uint32_t worker) {
+  for (uint32_t i = 0; i < CI_STRESS_YIELDS; ++i) {
+    ++ci_stress_counts[worker];
+    Task_Yield();
+  }
+}
+static void ci_stress_worker_0(void) { ci_stress_worker(0); }
+static void ci_stress_worker_1(void) { ci_stress_worker(1); }
+static void ci_stress_worker_2(void) { ci_stress_worker(2); }
+static void ci_stress_worker_3(void) { ci_stress_worker(3); }
+static void (*const ci_stress_entries[CI_STRESS_WORKERS])(void) = {
+  ci_stress_worker_0, ci_stress_worker_1,
+  ci_stress_worker_2, ci_stress_worker_3
+};
+
 static void ci_orphan_leaf_entry(void) {
   /* Returning through the trampoline should yield exit code zero. */
 }
@@ -639,6 +658,44 @@ int Process_CI_SelfTest(void) {
       Process_Wait(parent_pid, &ignored_exit_code) != -1 ||
       Process_Wait(0xFFFFFFFFFFFFFFFEULL, &ignored_exit_code) != -1)
     return 0;
+
+  /* Repeatedly build and destroy private page-table trees. Every user
+     frame and every page-table page must return to the physical allocator. */
+  const uint64_t pmm_free_baseline = PMM_GetFreePageCount();
+  for (uint32_t cycle = 0; cycle < 4u; ++cycle) {
+    AddressSpace *cleanup_space = VMM_AddressSpaceCreate();
+    if (!cleanup_space)
+      return 0;
+
+    void *owned_pages[3] = { NULL, NULL, NULL };
+    int mapped[3] = { 0, 0, 0 };
+    int cleanup_ok = 1;
+    for (uint32_t page = 0; page < 3u; ++page) {
+      owned_pages[page] = PMM_AllocatePage();
+      if (!owned_pages[page] ||
+          !VMM_AddressSpaceMapPage(
+              cleanup_space,
+              (void *)(uintptr_t)(code_va + (uint64_t)page * PAGE_SIZE),
+              owned_pages[page], PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
+        cleanup_ok = 0;
+        break;
+      }
+      mapped[page] = 1;
+    }
+
+    if (!cleanup_ok) {
+      for (uint32_t page = 0; page < 3u; ++page) {
+        if (owned_pages[page] && !mapped[page])
+          PMM_FreePage(owned_pages[page]);
+      }
+      VMM_AddressSpaceDestroy(cleanup_space);
+      return 0;
+    }
+
+    VMM_AddressSpaceDestroy(cleanup_space);
+    if (PMM_GetFreePageCount() != pmm_free_baseline)
+      return 0;
+  }
 
   AddressSpace *space = VMM_AddressSpaceCreate();
   if (!space)
@@ -735,6 +792,39 @@ int Process_CI_SelfTest(void) {
   }
 
   if (!kernel_ok || Process_GetCount() != initial_count ||
+      Process_GetCurrentId() != parent_pid)
+    return 0;
+
+  /* Run several runnable children together. Each voluntarily yields many
+     times while the parent is blocked in Wait; every child must make progress,
+     exit, wake the parent, and be reaped exactly once. */
+  ProcessId stress_pids[CI_STRESS_WORKERS] = { 0, 0, 0, 0 };
+  for (uint32_t i = 0; i < CI_STRESS_WORKERS; ++i) {
+    ci_stress_counts[i] = 0;
+    stress_pids[i] = Process_CreateKernel(
+        "ci-scheduler-stress", ci_stress_entries[i]);
+    if (!stress_pids[i]) {
+      for (uint32_t j = 0; j < i; ++j) {
+        Process *unfinished = find_by_pid(stress_pids[j]);
+        if (unfinished)
+          ci_discard_unstarted(unfinished);
+      }
+      return 0;
+    }
+  }
+
+  int stress_ok = 1;
+  for (uint32_t i = 0; i < CI_STRESS_WORKERS; ++i) {
+    int32_t worker_exit = -999;
+    if (Process_Wait(stress_pids[i], &worker_exit) != 0 ||
+        worker_exit != 0 ||
+        ci_stress_counts[i] != CI_STRESS_YIELDS ||
+        find_by_pid(stress_pids[i])) {
+      stress_ok = 0;
+      break;
+    }
+  }
+  if (!stress_ok || Process_GetCount() != initial_count ||
       Process_GetCurrentId() != parent_pid)
     return 0;
 
