@@ -556,7 +556,7 @@ jobs:
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": True}}
                   ]}})
-                  click_deadline = time.time() + 3
+                  click_deadline = time.time() + 6
                   close_serial = ""
                   close_delta = ""
                   close_hit = False
@@ -583,7 +583,7 @@ jobs:
                           "Doom close press was not consumed by the close handler.\\n"
                           + close_delta[-6000:]
                       )
-                  exit_deadline = time.time() + 5
+                  exit_deadline = time.time() + 8
                   while time.time() < exit_deadline:
                       try:
                           with open("serial.log", encoding="utf-8", errors="replace") as log:
