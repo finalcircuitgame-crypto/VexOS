@@ -83,7 +83,8 @@ static int sfs2_replay_journal(const sfs2_superblock_t *sb,
     }
 
     /* Clearing the commit header is the final durable journal operation. */
-    sfs2_zero(header_sector, sizeof(header_sector));
+    for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
+        header_sector[i] = 0;
     return write_sector(sb->journal_lba, header_sector);
 }
 
