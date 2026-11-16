@@ -24,46 +24,62 @@ void serial_print(const char *str);
 #define USER_STACK_PAGES 32u
 #define MAX_USER_IMAGE_PAGES 16384u
 
-/* One user process is active at a time in the current task model. */
-static uint64_t *g_user_mapped_pages;
-static uint32_t g_user_mapped_page_count;
-static void *g_user_kernel_stack;
-static void *g_deferred_kernel_stack;
-static uint8_t g_user_process_active;
-static AddressSpace *g_user_address_space;
+typedef struct {
+    uint64_t *mapped_pages;
+    uint32_t mapped_page_count;
+    void *kernel_stack;
+    void *deferred_kernel_stack;
+    AddressSpace *address_space;
+    uint8_t active;
+} usermode_context_t;
+
+/* Execution-loader allocations are indexed by scheduler task ID. A task that
+   is switched out retains its image, mappings, and transition stack until its
+   own exit; another user process cannot overwrite these globals. */
+static usermode_context_t g_usermode_contexts[TASK_MAX];
+
+static usermode_context_t *usermode_context_for_task(uint32_t task_id) {
+    if (task_id >= TASK_MAX)
+        return NULL;
+    return &g_usermode_contexts[task_id];
+}
 
 void usermode_cleanup_current(void) {
-    if (!g_user_process_active)
+    usermode_context_t *context =
+        usermode_context_for_task(Task_GetCurrentId());
+    if (!context || !context->active)
         return;
 
+    /* Switch away from the process CR3 before releasing its private tables.
+       Keep the transition stack allocated until the scheduler has left it. */
     Process_AttachCurrentAddressSpace(NULL);
     Process_SetCurrentKernelStack(0);
     Process_DetachCurrentAddressSpace();
     VMM_Activate();
-    if (g_user_address_space) {
-        VMM_AddressSpaceDestroy(g_user_address_space);
-        g_user_address_space = NULL;
-    }
-    if (g_user_mapped_pages)
-        kfree(g_user_mapped_pages);
-    g_user_mapped_pages = NULL;
-    g_user_mapped_page_count = 0;
 
-    /* Do not free the active ring-transition stack while the exception or
-       syscall handler is still running on it. Reap it from the kernel task. */
-    if (g_user_kernel_stack)
-        g_deferred_kernel_stack = g_user_kernel_stack;
-    g_user_kernel_stack = NULL;
-    g_user_process_active = 0;
+    if (context->address_space) {
+        VMM_AddressSpaceDestroy(context->address_space);
+        context->address_space = NULL;
+    }
+    if (context->mapped_pages)
+        kfree(context->mapped_pages);
+    context->mapped_pages = NULL;
+    context->mapped_page_count = 0;
+
+    context->deferred_kernel_stack = context->kernel_stack;
+    context->kernel_stack = NULL;
+    context->active = 0;
 }
 
 void usermode_reap_deferred(void) {
-    if (!g_deferred_kernel_stack)
-        return;
-
-    void *stack = g_deferred_kernel_stack;
-    g_deferred_kernel_stack = NULL;
-    PMM_FreePage(stack);
+    for (uint32_t i = 0; i < TASK_MAX; ++i) {
+        usermode_context_t *context = &g_usermode_contexts[i];
+        if (!context->deferred_kernel_stack)
+            continue;
+        void *stack = context->deferred_kernel_stack;
+        context->deferred_kernel_stack = NULL;
+        PMM_FreePage(stack);
+    }
 }
 
 typedef struct {
@@ -301,6 +317,13 @@ int usermode_ci_self_test(void) {
 #endif
 
 void usermode_launch(const char *filename) {
+    usermode_context_t *context =
+        usermode_context_for_task(Task_GetCurrentId());
+    if (!context || context->active || context->deferred_kernel_stack) {
+        serial_print("[USERMODE] task already owns an image or pending stack\\n");
+        return;
+    }
+
     uint32_t elf_size = 0;
     if (!filename || !filename[0])
         filename = "doom.elf";
@@ -509,11 +532,11 @@ void usermode_launch(const char *filename) {
 
     /* Retain the page list until the process exits or faults, so its user
        mappings can be reclaimed without touching the kernel transition stack. */
-    g_user_address_space = space;
-    g_user_mapped_pages = mapped_pages;
-    g_user_mapped_page_count = mapped_count;
-    g_user_kernel_stack = kernel_stack;
-    g_user_process_active = 1;
+    context->address_space = space;
+    context->mapped_pages = mapped_pages;
+    context->mapped_page_count = mapped_count;
+    context->kernel_stack = kernel_stack;
+    context->active = 1;
 
     /* Bind the ring-3 execution context to the currently scheduled process.
        IRQ0 will restore this CR3 and TSS.RSP0 whenever the process resumes. */
