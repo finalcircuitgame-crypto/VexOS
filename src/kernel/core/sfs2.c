@@ -230,6 +230,368 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
     return 0;
 }
 
+#define SFS2_MAX_FILE_SECTORS 4096u
+
+typedef struct {
+    uint32_t count;
+    uint64_t targets[SFS2_JOURNAL_MAX_RECORDS];
+    uint8_t sectors[SFS2_JOURNAL_MAX_RECORDS][SFS2_SECTOR_SIZE];
+} sfs2_transaction_t;
+
+static sfs2_transaction_t g_sfs2_transaction;
+
+static int sfs2_tx_stage(sfs2_volume_t *volume, uint64_t lba,
+                         uint32_t *out_index) {
+    sfs2_transaction_t *tx = &g_sfs2_transaction;
+    if (!volume || !volume->mounted || !out_index ||
+        lba >= volume->superblock.volume_sectors ||
+        (lba >= volume->superblock.journal_lba &&
+         lba < volume->superblock.journal_lba +
+                   volume->superblock.journal_sectors))
+        return 0;
+    for (uint32_t i = 0; i < tx->count; ++i) {
+        if (tx->targets[i] == lba) {
+            *out_index = i;
+            return 1;
+        }
+    }
+    if (tx->count >= SFS2_JOURNAL_MAX_RECORDS ||
+        !volume->read_sector(lba, tx->sectors[tx->count]))
+        return 0;
+    tx->targets[tx->count] = lba;
+    *out_index = tx->count++;
+    return 1;
+}
+
+static int sfs2_tx_commit(sfs2_volume_t *volume) {
+    sfs2_transaction_t *tx = &g_sfs2_transaction;
+    if (!volume || !volume->mounted || !volume->write_sector ||
+        volume->superblock.journal_lba == 0 ||
+        volume->superblock.journal_sectors <
+            SFS2_JOURNAL_HEADER_SECTORS + SFS2_JOURNAL_MAX_RECORDS ||
+        tx->count == 0 || tx->count > SFS2_JOURNAL_MAX_RECORDS)
+        return 0;
+
+    sfs2_journal_header_t header;
+    sfs2_zero(&header, sizeof(header));
+    header.magic = SFS2_JOURNAL_MAGIC;
+    header.state = SFS2_JOURNAL_COMMITTED;
+    header.record_count = tx->count;
+    header.sequence = volume->superblock.generation + 1u;
+    for (uint32_t i = 0; i < tx->count; ++i) {
+        header.targets[i] = tx->targets[i];
+        header.data_checksums[i] = sfs2_checksum(
+            tx->sectors[i], SFS2_SECTOR_SIZE, SFS2_SECTOR_SIZE - 4u);
+        if (!volume->write_sector(volume->superblock.journal_lba + 1u + i,
+                                  tx->sectors[i])) {
+            volume->mounted = 0;
+            return 0;
+        }
+    }
+    header.checksum = sfs2_checksum(&header, sizeof(header),
+        (uint32_t)offsetof(sfs2_journal_header_t, checksum));
+    if (!volume->write_sector(volume->superblock.journal_lba, &header)) {
+        volume->mounted = 0;
+        return 0;
+    }
+
+    /* Once committed, any interruption is repaired by replay on next mount. */
+    for (uint32_t i = 0; i < tx->count; ++i) {
+        if (!volume->write_sector(tx->targets[i], tx->sectors[i])) {
+            volume->mounted = 0;
+            return 0;
+        }
+    }
+    uint8_t clean[SFS2_SECTOR_SIZE];
+    sfs2_zero(clean, sizeof(clean));
+    if (!volume->write_sector(volume->superblock.journal_lba, clean)) {
+        volume->mounted = 0;
+        return 0;
+    }
+    tx->count = 0;
+    return 1;
+}
+
+static int sfs2_tx_bitmap_bit(sfs2_volume_t *volume, uint64_t bit,
+                              int allocated) {
+    uint64_t data_bits = volume->superblock.volume_sectors -
+                         volume->superblock.data_lba;
+    if (bit >= data_bits)
+        return 0;
+    uint64_t byte = bit >> 3;
+    uint64_t bitmap_lba = volume->superblock.bitmap_lba +
+                          byte / SFS2_SECTOR_SIZE;
+    uint32_t index = 0;
+    if (!sfs2_tx_stage(volume, bitmap_lba, &index))
+        return 0;
+    uint32_t offset = (uint32_t)(byte % SFS2_SECTOR_SIZE);
+    uint8_t mask = (uint8_t)(1u << (bit & 7u));
+    if (allocated)
+        g_sfs2_transaction.sectors[index][offset] |= mask;
+    else
+        g_sfs2_transaction.sectors[index][offset] &= (uint8_t)~mask;
+    return 1;
+}
+
+static int sfs2_find_free_run_disk(sfs2_volume_t *volume, uint32_t needed,
+                                  uint64_t *out_start) {
+    if (!volume || !out_start || needed == 0 ||
+        needed > SFS2_MAX_FILE_SECTORS)
+        return 0;
+    uint64_t bits = volume->superblock.volume_sectors -
+                    volume->superblock.data_lba;
+    uint8_t sector[SFS2_SECTOR_SIZE];
+    uint64_t cached = UINT64_MAX;
+    uint32_t run = 0;
+    for (uint64_t bit = 0; bit < bits; ++bit) {
+        uint64_t byte = bit >> 3;
+        uint64_t sector_index = byte / SFS2_SECTOR_SIZE;
+        if (sector_index != cached) {
+            if (sector_index >= volume->superblock.bitmap_sectors ||
+                !volume->read_sector(volume->superblock.bitmap_lba +
+                                     sector_index, sector))
+                return 0;
+            cached = sector_index;
+        }
+        uint8_t value = sector[byte % SFS2_SECTOR_SIZE];
+        if ((value & (1u << (bit & 7u))) == 0) {
+            if (++run == needed) {
+                *out_start = bit + 1u - needed;
+                return 1;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    return 0;
+}
+
+static int sfs2_tx_extent(sfs2_volume_t *volume, uint64_t start,
+                          uint32_t count, int allocated) {
+    for (uint32_t i = 0; i < count; ++i)
+        if (!sfs2_tx_bitmap_bit(volume, start + i, allocated))
+            return 0;
+    return 1;
+}
+
+static int sfs2_tx_store_inode(sfs2_volume_t *volume, uint32_t inode_index,
+                               const sfs2_inode_t *inode) {
+    uint64_t offset = (uint64_t)inode_index * sizeof(*inode);
+    const uint8_t *src = (const uint8_t *)inode;
+    for (uint32_t i = 0; i < sizeof(*inode); ++i) {
+        uint64_t absolute = offset + i;
+        uint64_t lba = volume->superblock.inode_table_lba +
+                       absolute / SFS2_SECTOR_SIZE;
+        uint32_t index = 0;
+        if (!sfs2_tx_stage(volume, lba, &index))
+            return 0;
+        g_sfs2_transaction.sectors[index][absolute % SFS2_SECTOR_SIZE] =
+            src[i];
+    }
+    return 1;
+}
+
+static int sfs2_tx_store_superblock(sfs2_volume_t *volume,
+                                    sfs2_superblock_t *updated) {
+    uint32_t index = 0;
+    if (!sfs2_tx_stage(volume, 0u, &index))
+        return 0;
+    updated->generation++;
+    updated->checksum = sfs2_checksum(updated, sizeof(*updated),
+        (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    const uint8_t *src = (const uint8_t *)updated;
+    for (uint32_t i = 0; i < sizeof(*updated); ++i)
+        g_sfs2_transaction.sectors[index][i] = src[i];
+    return 1;
+}
+
+static int sfs2_root_filename(const char *path, const char **out_name,
+                              uint32_t *out_length) {
+    if (!path || !out_name || !out_length)
+        return 0;
+    while (*path == '/')
+        ++path;
+    if (!*path)
+        return 0;
+    const char *name = path;
+    uint32_t length = 0;
+    while (path[length] && path[length] != '/')
+        ++length;
+    if (!length || length >= SFS2_NAME_MAX)
+        return 0;
+    uint32_t tail = length;
+    while (path[tail] == '/')
+        ++tail;
+    if (path[tail])
+        return 0; /* Initial writable backend supports root files only. */
+    if ((length == 1u && name[0] == '.') ||
+        (length == 2u && name[0] == '.' && name[1] == '.'))
+        return 0;
+    *out_name = name;
+    *out_length = length;
+    return 1;
+}
+
+static int sfs2_find_root_file(sfs2_volume_t *volume, const char *name,
+                               uint32_t length, uint32_t *out_index) {
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        sfs2_inode_t *inode = &volume->inodes[i];
+        if (!inode->inode_id || inode->parent_id !=
+                volume->superblock.root_inode ||
+            inode->type != SFS2_INODE_FILE)
+            continue;
+        uint32_t n = 0;
+        while (n < SFS2_NAME_MAX && inode->name[n])
+            ++n;
+        if (n != length)
+            continue;
+        uint32_t j = 0;
+        while (j < n && inode->name[j] == name[j])
+            ++j;
+        if (j == n) {
+            if (out_index)
+                *out_index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int sfs2_next_inode_slot(sfs2_volume_t *volume, uint32_t *out_index,
+                                uint32_t *out_id) {
+    uint32_t free_index = UINT32_MAX;
+    uint32_t max_id = 1u;
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        if (!volume->inodes[i].inode_id && free_index == UINT32_MAX)
+            free_index = i;
+        if (volume->inodes[i].inode_id > max_id)
+            max_id = volume->inodes[i].inode_id;
+    }
+    if (free_index == UINT32_MAX || max_id == UINT32_MAX)
+        return 0;
+    *out_index = free_index;
+    *out_id = max_id + 1u;
+    return 1;
+}
+
+int sfs2_write_file(sfs2_volume_t *volume, const char *path,
+                    const void *data, uint32_t length) {
+    const char *name = 0;
+    uint32_t name_length = 0;
+    if (!volume || !volume->mounted || !volume->write_sector ||
+        volume->superblock.journal_lba == 0 ||
+        (!data && length) ||
+        !sfs2_root_filename(path, &name, &name_length))
+        return 0;
+    uint32_t sectors = (length + SFS2_SECTOR_SIZE - 1u) /
+                       SFS2_SECTOR_SIZE;
+    if (sectors > SFS2_MAX_FILE_SECTORS)
+        return 0;
+
+    uint32_t index = 0;
+    int exists = sfs2_find_root_file(volume, name, name_length, &index);
+    sfs2_inode_t previous;
+    if (exists) {
+        previous = volume->inodes[index];
+        if (previous.data_sectors > SFS2_MAX_FILE_SECTORS)
+            return 0;
+    } else {
+        uint32_t new_id = 0;
+        if (!sfs2_next_inode_slot(volume, &index, &new_id))
+            return 0;
+        sfs2_zero(&previous, sizeof(previous));
+        previous.inode_id = new_id;
+        previous.parent_id = volume->superblock.root_inode;
+        previous.type = SFS2_INODE_FILE;
+        for (uint32_t i = 0; i < name_length; ++i)
+            previous.name[i] = name[i];
+    }
+
+    uint64_t new_start_bit = 0;
+    if (sectors && !sfs2_find_free_run_disk(volume, sectors,
+                                             &new_start_bit))
+        return 0;
+    uint64_t new_lba = sectors
+        ? volume->superblock.data_lba + new_start_bit : 0;
+
+    /* Write new data before committing metadata; old contents stay intact. */
+    const uint8_t *source = (const uint8_t *)data;
+    uint8_t sector[SFS2_SECTOR_SIZE];
+    for (uint32_t i = 0; i < sectors; ++i) {
+        sfs2_zero(sector, sizeof(sector));
+        uint32_t offset = i * SFS2_SECTOR_SIZE;
+        uint32_t remaining = length - offset;
+        uint32_t chunk = remaining < SFS2_SECTOR_SIZE
+            ? remaining : SFS2_SECTOR_SIZE;
+        for (uint32_t j = 0; j < chunk; ++j)
+            sector[j] = source[offset + j];
+        if (!volume->write_sector(new_lba + i, sector))
+            return 0;
+    }
+
+    sfs2_transaction_t *tx = &g_sfs2_transaction;
+    tx->count = 0;
+    if (exists && previous.data_sectors) {
+        uint64_t old_bit = previous.data_lba -
+                           volume->superblock.data_lba;
+        if (!sfs2_tx_extent(volume, old_bit, previous.data_sectors, 0))
+            return 0;
+    }
+    if (sectors && !sfs2_tx_extent(volume, new_start_bit, sectors, 1))
+        return 0;
+
+    sfs2_inode_t updated = previous;
+    updated.size_bytes = length;
+    updated.data_lba = new_lba;
+    updated.data_sectors = sectors;
+    updated.generation++;
+    updated.checksum = sfs2_checksum(&updated, sizeof(updated),
+        (uint32_t)offsetof(sfs2_inode_t, checksum));
+    if (!sfs2_tx_store_inode(volume, index, &updated))
+        return 0;
+    sfs2_superblock_t updated_sb = volume->superblock;
+    if (!sfs2_tx_store_superblock(volume, &updated_sb) ||
+        !sfs2_tx_commit(volume))
+        return 0;
+    volume->superblock = updated_sb;
+    volume->inodes[index] = updated;
+    return 1;
+}
+
+int sfs2_unlink_file(sfs2_volume_t *volume, const char *path) {
+    const char *name = 0;
+    uint32_t name_length = 0;
+    if (!volume || !volume->mounted || !volume->write_sector ||
+        volume->superblock.journal_lba == 0 ||
+        !sfs2_root_filename(path, &name, &name_length))
+        return 0;
+    uint32_t index = 0;
+    if (!sfs2_find_root_file(volume, name, name_length, &index))
+        return 0;
+    sfs2_inode_t previous = volume->inodes[index];
+    if (previous.data_sectors > SFS2_MAX_FILE_SECTORS)
+        return 0;
+
+    g_sfs2_transaction.count = 0;
+    if (previous.data_sectors) {
+        uint64_t old_bit = previous.data_lba -
+                           volume->superblock.data_lba;
+        if (!sfs2_tx_extent(volume, old_bit, previous.data_sectors, 0))
+            return 0;
+    }
+    sfs2_inode_t empty;
+    sfs2_zero(&empty, sizeof(empty));
+    if (!sfs2_tx_store_inode(volume, index, &empty))
+        return 0;
+    sfs2_superblock_t updated_sb = volume->superblock;
+    if (!sfs2_tx_store_superblock(volume, &updated_sb) ||
+        !sfs2_tx_commit(volume))
+        return 0;
+    volume->superblock = updated_sb;
+    volume->inodes[index] = empty;
+    return 1;
+}
+
 
 static int sfs2_read_inode_table(sfs2_volume_t *volume) {
     uint8_t sector[SFS2_SECTOR_SIZE];
