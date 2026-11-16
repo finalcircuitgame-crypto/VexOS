@@ -100,6 +100,16 @@ static int storage_write_sector(uint32_t lba, const void *buf) {
   return ata_pio_write28(g_dev, lba, 1u, buf);
 }
 
+/* ATA PIO currently exposes only 28-bit LBA addressing. AHCI reports the
+   actual device capacity, so use it whenever that backend is active. */
+static uint64_t storage_sector_limit(void) {
+  if (!g_storage_ready)
+    return 0;
+  if (g_storage_uses_ahci)
+    return ahci_get_sector_count();
+  return 0x10000000ull;
+}
+
 static int fat_read_sector(uint32_t lba, void *buf) {
   return storage_read_sector(lba, buf);
 }
@@ -359,6 +369,7 @@ static int sfs_write_sector(uint32_t lba, const void *buf) {
 
 static int sfs_load_table(void) {
   uint8_t sector[SFS_SECTOR_SIZE];
+  mem_zero(&g_table[0], (uint32_t)sizeof(g_table));
   uint32_t idx = 0;
   for (uint32_t s = 0; s < g_sb.table_sectors; s++) {
     if (!sfs_read_sector(g_sb.table_lba + s, sector))
@@ -376,6 +387,173 @@ static int sfs_load_table(void) {
   }
   return 1;
 }
+
+/* Validate persisted names and extents before exposing any table entry to
+   VFS. SFS1 stores complete relative paths in a fixed 32-byte name field. */
+static int sfs_valid_stored_name(const char *name, uint32_t *out_len) {
+  uint32_t len = 0;
+  while (len < SFS_NAME_MAX && name[len])
+    ++len;
+  if (len == 0 || len >= SFS_NAME_MAX || len > 31u)
+    return 0;
+
+  uint32_t component_len = 0;
+  for (uint32_t i = 0; i <= len; ++i) {
+    if (i == len || name[i] == '/') {
+      if (component_len == 0 ||
+          (component_len == 1u && name[i - 1u] == '.') ||
+          (component_len == 2u && name[i - 1u] == '.' &&
+           name[i - 2u] == '.'))
+        return 0;
+      component_len = 0;
+    } else {
+      ++component_len;
+    }
+  }
+  if (out_len)
+    *out_len = len;
+  return 1;
+}
+
+static int sfs_names_conflict(const char *a, uint32_t a_len,
+                              const char *b, uint32_t b_len) {
+  uint32_t common = a_len < b_len ? a_len : b_len;
+  for (uint32_t i = 0; i < common; ++i)
+    if (a[i] != b[i])
+      return 0;
+  if (a_len == b_len)
+    return 1;
+  if (a_len < b_len)
+    return b[a_len] == '/';
+  return a[b_len] == '/';
+}
+
+static int sfs_validate_table(void) {
+  uint32_t actual_count = 0;
+  uint64_t device_limit = storage_sector_limit();
+  if (device_limit == 0 || g_sb.data_lba >= device_limit ||
+      g_sb.next_free_lba > device_limit)
+    return 0;
+
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i) {
+    const sfs_file_t *entry = &g_table[i];
+    if (entry->used > 1u)
+      return 0;
+    if (!entry->used)
+      continue;
+
+    ++actual_count;
+    uint32_t name_len = 0;
+    if (!sfs_valid_stored_name(entry->name, &name_len))
+      return 0;
+
+    uint64_t sectors = ((uint64_t)entry->size_bytes +
+                        (SFS_SECTOR_SIZE - 1u)) / SFS_SECTOR_SIZE;
+    if (sectors == 0)
+      sectors = 1;
+    uint64_t end_lba = (uint64_t)entry->start_lba + sectors;
+    if (entry->start_lba < g_sb.data_lba ||
+        end_lba > g_sb.next_free_lba || end_lba > device_limit)
+      return 0;
+
+    for (uint32_t j = 0; j < i; ++j) {
+      const sfs_file_t *previous = &g_table[j];
+      if (!previous->used)
+        continue;
+      uint32_t previous_len = 0;
+      if (!sfs_valid_stored_name(previous->name, &previous_len) ||
+          sfs_names_conflict(entry->name, name_len,
+                             previous->name, previous_len))
+        return 0;
+
+      uint64_t previous_sectors =
+          ((uint64_t)previous->size_bytes +
+           (SFS_SECTOR_SIZE - 1u)) / SFS_SECTOR_SIZE;
+      if (previous_sectors == 0)
+        previous_sectors = 1;
+      uint64_t previous_end =
+          (uint64_t)previous->start_lba + previous_sectors;
+      if ((uint64_t)entry->start_lba < previous_end &&
+          (uint64_t)previous->start_lba < end_lba)
+        return 0;
+    }
+  }
+  return actual_count == g_sb.file_count;
+}
+
+#ifdef VEXOS_CI_INPUT_TEST
+static void sfs_ci_set_entry(uint32_t index, const char *name,
+                             uint32_t start_lba, uint32_t size_bytes) {
+  mem_zero(&g_table[index], (uint32_t)sizeof(g_table[index]));
+  g_table[index].used = 1;
+  str_copy(g_table[index].name, name, SFS_NAME_MAX);
+  g_table[index].start_lba = start_lba;
+  g_table[index].size_bytes = size_bytes;
+}
+
+/* Exercise the metadata validator with synthetic in-memory tables. No disk
+   sectors are modified by this test. */
+int simplefs_ci_validate_metadata_self_test(void) {
+  sfs_file_t saved_table[SFS_MAX_FILES];
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    saved_table[i] = g_table[i];
+  sfs_superblock_t saved_superblock = g_sb;
+  int ok = 1;
+
+  mem_zero(g_table, (uint32_t)sizeof(g_table));
+  g_sb.data_lba = 9u;
+  g_sb.next_free_lba = 16u;
+  g_sb.file_count = 1u;
+  sfs_ci_set_entry(0u, "docs/file.txt", 9u, 512u);
+  if (!sfs_validate_table())
+    ok = 0;
+
+  if (ok) {
+    str_copy(g_table[0].name, "../escape", SFS_NAME_MAX);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    for (uint32_t i = 0; i < SFS_NAME_MAX; ++i)
+      g_table[0].name[i] = 'x';
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 2u;
+    sfs_ci_set_entry(0u, "node", 9u, 1u);
+    sfs_ci_set_entry(1u, "node/child", 10u, 1u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 2u;
+    sfs_ci_set_entry(0u, "first", 9u, 1024u);
+    sfs_ci_set_entry(1u, "second", 10u, 1u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  if (ok) {
+    mem_zero(g_table, (uint32_t)sizeof(g_table));
+    g_sb.file_count = 1u;
+    g_sb.next_free_lba = 10u;
+    sfs_ci_set_entry(0u, "past-end", 10u, 1024u);
+    if (sfs_validate_table())
+      ok = 0;
+  }
+
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    g_table[i] = saved_table[i];
+  g_sb = saved_superblock;
+  return ok;
+}
+#endif
 
 int simplefs_file_size(const char *name, uint32_t *out_size) {
   if (!g_storage_ready || !name)
@@ -437,33 +615,18 @@ static int sfs_load_superblock(void) {
   return 1;
 }
 
-static int sfs_format(void) {
-  mem_zero(&g_sb, (uint32_t)sizeof(g_sb));
-  mem_zero(&g_table[0], (uint32_t)sizeof(g_table));
-
-  g_sb.magic = SFS_MAGIC;
-  g_sb.version = SFS_VERSION;
-  g_sb.table_lba = 1;
-  g_sb.table_sectors = 8; // 8 * 512 = 4096 bytes table storage
-  g_sb.data_lba = g_sb.table_lba + g_sb.table_sectors;
-  g_sb.next_free_lba = g_sb.data_lba;
-  g_sb.file_count = 0;
-
-  if (!sfs_store_superblock())
-    return 0;
-  if (!sfs_store_table())
-    return 0;
-
-  serial_print("[SFS] formatted\n");
-  return 1;
-}
-
 int simplefs_init(void) {
   /* Mounting is a one-time operation. Re-running ATA IDENTIFY after the
      AHCI controller and runtime interrupts are active can stall the desktop;
      callers may safely request initialization more than once. */
+  /*
+   * Mounting is deliberately non-destructive. A future installer may add a
+   * separate format operation after explicit confirmation; normal boot and
+   * VFS initialization must never format unknown or damaged media.
+   */
   if (g_mounted)
     return 1;
+  g_kind = STORAGE_FS_NONE;
 
   /*
    * Prefer legacy ATA PIO when present (the pc machine uses it for the
@@ -501,23 +664,31 @@ int simplefs_init(void) {
 
   if (!sfs_load_superblock()) {
     serial_print("[SFS] read superblock failed\n");
+    g_kind = STORAGE_FS_NONE;
     return 0;
   }
 
+  uint64_t table_end =
+      (uint64_t)g_sb.table_lba + (uint64_t)g_sb.table_sectors;
   if (g_sb.magic != SFS_MAGIC || g_sb.version != SFS_VERSION ||
-      g_sb.table_sectors == 0 || g_sb.table_sectors > 64) {
-    serial_print("[SFS] superblock invalid; formatting\n");
-    if (!sfs_format())
-      return 0;
-  } else {
-    if (!sfs_load_table()) {
-      serial_print("[SFS] load table failed; formatting\n");
-      if (!sfs_format())
-        return 0;
-    }
-    serial_print("[SFS] mounted\n");
+      g_sb.table_lba == 0 || g_sb.table_sectors != 8u ||
+      table_end > storage_sector_limit() ||
+      g_sb.data_lba < table_end ||
+      g_sb.next_free_lba < g_sb.data_lba ||
+      g_sb.next_free_lba > storage_sector_limit() ||
+      g_sb.file_count > SFS_MAX_FILES) {
+    serial_print("[SFS] unrecognized or invalid SFS1 volume; refusing to format\n");
+    g_kind = STORAGE_FS_NONE;
+    return 0;
   }
 
+  if (!sfs_load_table()) {
+    serial_print("[SFS] file table unreadable; refusing destructive recovery\n");
+    g_kind = STORAGE_FS_NONE;
+    return 0;
+  }
+
+  serial_print("[SFS] mounted\n");
   g_mounted = 1;
   return 1;
 }
@@ -678,11 +849,8 @@ int simplefs_delete_file(const char *name) {
 }
 
 int simplefs_write_file(const char *name, const void *data, uint32_t len) {
-  if (g_kind == STORAGE_FS_FAT32) {
-    // FAT32 write support not implemented yet.
-    return 0;
-  }
-  if (!g_storage_ready || !name || !data)
+  /* Never let direct SimpleFS callers write after a failed/unmounted probe. */
+  if (!g_storage_ready || g_kind != STORAGE_FS_SFS || !name || !data)
     return 0;
   if (str_len32(name) == 0 || str_len32(name) >= SFS_NAME_MAX)
     return 0;
@@ -693,10 +861,16 @@ int simplefs_write_file(const char *name, const void *data, uint32_t len) {
       return 0;
   }
 
-  uint32_t sectors = (len + (SFS_SECTOR_SIZE - 1u)) / SFS_SECTOR_SIZE;
-  if (sectors == 0)
-    sectors = 1;
-
+  uint64_t sectors64 =
+      ((uint64_t)len + (SFS_SECTOR_SIZE - 1u)) / SFS_SECTOR_SIZE;
+  if (sectors64 == 0)
+    sectors64 = 1;
+  uint64_t end_lba = (uint64_t)g_sb.next_free_lba + sectors64;
+  uint64_t device_limit = storage_sector_limit();
+  if (sectors64 > UINT32_MAX || end_lba > device_limit ||
+      end_lba > 0xFFFFFFFFull)
+    return 0;
+  uint32_t sectors = (uint32_t)sectors64;
   uint32_t start_lba = g_sb.next_free_lba;
 
   const uint8_t *src = (const uint8_t *)data;

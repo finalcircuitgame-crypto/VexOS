@@ -51,14 +51,14 @@ Implemented:
 - Added FAT32 ranged reads by following the file's cluster chain. FAT32 remains root-only, short-name, and read-only.
 - Updated File Manager for folder navigation and the shell `fs` command for root directory listing.
 - Added CI coverage for nested paths, implicit directories, directory enumeration, independent opens, create/unlink, and open-node lifetime rules.
+- Added ring-3 create, whole-file replacement write, unlink, stat, directory-open, and directory-read syscalls with bounded kernel copies and user-buffer validation.
 - Preserved the existing SFS1 disk layout and existing file names.
 
 Remaining:
 1. Design a versioned SFS2 or compatible metadata layer with a free-space map, persisted directory records (including empty directories), longer paths, and crash-safe metadata updates. Keep existing SFS1 volumes mountable and define a recovery/migration path before changing formats.
 2. Add FAT32 subdirectory traversal and long-filename handling; retain explicit read-only behavior until writes are designed and tested.
-3. Add ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process permissions.
-4. Stress-test concurrent open/read/create/unlink, cache exhaustion, interrupted storage I/O, and process-exit cleanup.
-5. Review SimpleFS's existing behavior that may format an unrecognized disk. Formatting must require an explicit installer workflow before supporting arbitrary physical disks.
+3. Stress-test concurrent open/read/create/unlink, cache exhaustion, interrupted storage I/O, and process-exit cleanup.
+4. Add a separate installer-only format operation that requires explicit user confirmation; normal mount code must remain non-destructive.
 
 Acceptance criteria:
 - Existing SFS1 files remain readable and writable without changing their disk structure.

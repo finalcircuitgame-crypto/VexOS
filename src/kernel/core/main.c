@@ -356,6 +356,7 @@ static void ci_address_space_self_test(void) {
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
+extern int simplefs_ci_validate_metadata_self_test(void);
 
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -459,6 +460,9 @@ static void ci_syscall_self_test(void) {
   // CI prepares a small SFS1 image with ci.txt on the ATA primary slave.
   if (!simplefs_init())
     ci_memory_test_fail("SimpleFS fixture mount");
+  if (!simplefs_ci_validate_metadata_self_test())
+    ci_memory_test_fail("SFS1 metadata validation and extent safety");
+  serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
@@ -597,6 +601,11 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("VFS unlink and open-file lifetime");
   if (vfs_write("/ci.txt/child", "x", 2u))
     ci_memory_test_fail("VFS rejects file as parent directory");
+  if (!vfs_write("/tree/leaf", nested_payload, sizeof(nested_payload)) ||
+      vfs_write("/tree", "x", 2u) || vfs_create("/tree") ||
+      vfs_write("/tree/leaf/child", "x", 2u) ||
+      !vfs_unlink("/tree/leaf") || vfs_stat("/tree", &directory_stat))
+    ci_memory_test_fail("VFS namespace parent/child type consistency");
   if (vfs_create("/"))
     ci_memory_test_fail("VFS rejects creating root directory as file");
   serial_print("[CI] VFS create/unlink and open-node reference rules passed\\n");

@@ -28,7 +28,8 @@ Provide a filesystem-independent kernel interface while preserving existing Simp
 ### Locking
 
 - SimpleFS owns mutable global tables and storage allocator state, so VFS serializes backend operations with a spinlock.
-- Node records and mount initialization use separate spinlocks.
+- Node records and mount initialization use separate spinlocks. Lock acquisition saves the caller's interrupt-enable state and disables local interrupts while held, preventing the single-core PIT scheduler from preempting a task that owns a VFS lock. This is not an SMP lock implementation.
+- Namespace mutations (create, replace/write, and unlink) hold a namespace lock across parent/type validation, node reservation, and backend commit. This prevents concurrent mutations from creating both a file and a child beneath that file.
 - VFS calls are task-context-only; do not call them from interrupt handlers.
 - The current kernel is single-core. SMP, interrupt/preemption lock ordering, and lock-holder starvation require a separate audit before multicore support.
 
@@ -39,6 +40,7 @@ Provide a filesystem-independent kernel interface while preserving existing Simp
 - Slash-separated paths are stored in the existing SFS1 name field; no SFS1 metadata structure or version changed.
 - `vfs_create` creates an empty file. `vfs_write` creates or replaces a file. `vfs_unlink` clears a file-table entry and allows the slot to be reused.
 - SFS1 allocation is append-only. Unlink and replacement do not reclaim old data sectors because SFS1 has no free-space map. Repeated writes/deletes can exhaust the data area even when the table has free entries.
+- Mount validates every live table entry before exposing it: bounded relative path syntax, no duplicate or file/directory-conflicting names, no overlapping data extents, file-count consistency, and extents within the committed allocation and device-addressable bounds. ATA PIO currently enforces its 28-bit LBA address ceiling; it does not yet expose exact IDENTIFY capacity.
 - Metadata writes are not journaled or crash-atomic. A power loss during table/superblock updates can leave inconsistent metadata.
 
 ### FAT32
@@ -56,12 +58,13 @@ Ring-3 has task-local file and directory descriptors. In addition to open/read/s
 
 ## Known safety issue
 
-`simplefs_init()` retains pre-existing behavior that may format a disk if it is neither recognized FAT32 nor a valid SFS1 volume. This must be removed or moved behind an explicit installer/format confirmation path before supporting arbitrary physical disks, an installer, or automatic disk discovery. Never claim the current mount path is safe for arbitrary user disks.
+`simplefs_init()` only mounts recognized FAT32 or validated SFS1 volumes. It refuses to format unrecognized media and refuses destructive recovery when an SFS1 file table cannot be read. There is no in-kernel format operation; a future installer must make formatting a separate, explicitly confirmed action. A failed mount leaves the volume unavailable rather than overwriting it.
 
 ## Regression coverage
 
 The CI QEMU test harness now checks:
 - Existing SFS1 file stat/read and path normalization.
+- In-memory malformed-table fixtures covering traversal names, unterminated names, file/directory conflicts, overlapping extents, and extents beyond the committed allocation boundary.
 - Nested path write/read and implicit directory stat.
 - Root and child directory iteration, including duplicate synthetic-directory suppression.
 - Retry after a directory read with an undersized output buffer.
@@ -77,4 +80,4 @@ The latest CI run must be checked against the exact PR head before this work is 
 2. Add a FAT32 image fixture covering fragmented files, multi-cluster reads, invalid cluster chains, and end-of-chain handling; later design subdirectory and long-name support.
 3. Add safe ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process policy.
 4. Add tests for cache exhaustion, concurrent operations, interrupted I/O, and repeated create/delete cycles.
-5. Remove implicit formatting of unrecognized disks and require explicit confirmation for destructive formatting.
+5. Add a separate installer-only format operation that requires explicit user confirmation; normal mount code must remain non-destructive.
