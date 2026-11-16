@@ -58,7 +58,7 @@ Remaining:
 2. Add FAT32 subdirectory traversal and long-filename handling; retain explicit read-only behavior until writes are designed and tested.
 3. Add ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process permissions.
 4. Stress-test concurrent open/read/create/unlink, cache exhaustion, interrupted storage I/O, and process-exit cleanup.
-5. Review SimpleFS's existing behavior that may format an unrecognized disk. Formatting must require an explicit installer workflow before supporting arbitrary physical disks.
+5. Add a separate installer-only format operation that requires explicit user confirmation; normal mount code must remain non-destructive.
 
 Acceptance criteria:
 - Existing SFS1 files remain readable and writable without changing their disk structure.
