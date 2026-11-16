@@ -1,7 +1,7 @@
 #include "../../include/interrupts.h"
 #include "../../include/process.h"
 #include "../../include/heap.h"
-#include "../../include/simplefs.h"
+#include "../../include/vfs.h"
 #include "../../include/vmm.h"
 #include "../../include/pmm.h"
 #include "../../include/desktop.h"
@@ -139,7 +139,7 @@ static int sys_open(const char *filename) {
     }
 
     uint32_t size = 0;
-    if (!simplefs_file_size(name_buf, &size)) {
+    if (!vfs_file_size(name_buf, &size)) {
         serial_print("[USERMODE] file lookup failed: ");
         serial_print(name_buf);
         serial_print("\n");
@@ -168,7 +168,7 @@ static int sys_read(int fd, void *buf, uint32_t count) {
     if (!VMM_IsUserRange(buf, to_read, 1)) return -1;
 
     uint32_t bytes_read = 0;
-    if (!simplefs_read_file_at(file->name, file->cursor, buf,
+    if (!vfs_read_at(file->name, file->cursor, buf,
                                to_read, &bytes_read))
         return -1;
     if (bytes_read > to_read)
