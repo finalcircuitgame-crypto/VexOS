@@ -104,6 +104,59 @@ void VEXOS_DoomTraceTiccmd(int maketic, int angleturn,
     (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
 }
 
+
+/*
+ * Trace the actual player object after P_PlayerThink has applied the ticcmd
+ * and world movement. This separates held input from residual world momentum.
+ */
+void VEXOS_DoomTracePlayerState(int leveltime, int angleturn,
+                                int forwardmove, int sidemove,
+                                int momx, int momy, unsigned int angle) {
+    static int previous_valid;
+    static int previous_angleturn;
+    static int previous_forward;
+    static int previous_side;
+    static int previous_momx;
+    static int previous_momy;
+    static unsigned int previous_angle;
+
+    if (previous_valid && angleturn == previous_angleturn &&
+        forwardmove == previous_forward && sidemove == previous_side &&
+        momx == previous_momx && momy == previous_momy &&
+        angle == previous_angle)
+        return;
+
+    previous_valid = 1;
+    previous_angleturn = angleturn;
+    previous_forward = forwardmove;
+    previous_side = sidemove;
+    previous_momx = momx;
+    previous_momy = momy;
+    previous_angle = angle;
+
+    char message[224];
+    uint32_t length = 0;
+    length = log_append_text(message, length, "[DOOM][PLAYER] tick=");
+    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
+    length = log_append_text(message, length, " leveltic=");
+    length = log_append_i32(message, length, leveltime);
+    length = log_append_text(message, length, " cmd_turn=");
+    length = log_append_i32(message, length, angleturn);
+    length = log_append_text(message, length, " cmd_forward=");
+    length = log_append_i32(message, length, forwardmove);
+    length = log_append_text(message, length, " cmd_side=");
+    length = log_append_i32(message, length, sidemove);
+    length = log_append_text(message, length, " momx=");
+    length = log_append_i32(message, length, momx);
+    length = log_append_text(message, length, " momy=");
+    length = log_append_i32(message, length, momy);
+    length = log_append_text(message, length, " angle=");
+    length = log_append_u64(message, length, angle);
+    length = log_append_text(message, length,
+        (momx == 0 && momy == 0) ? " momentum=STOPPED\n" : " momentum=ACTIVE\n");
+    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+}
+
 static const char *arrow_label_from_usage(uint8_t usage) {
     switch (usage) {
         case 0x4F: return "RIGHT";
