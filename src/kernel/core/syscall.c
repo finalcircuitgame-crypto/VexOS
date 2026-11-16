@@ -279,7 +279,7 @@ static int sys_vfs_readdir(int fd, char *user_name, uint32_t capacity,
     char name[VFS_NAME_MAX];
     vfs_stat_t info;
     int result = vfs_dir_read(&state->files[fd].directory, name,
-                              sizeof(name), &info);
+                              capacity, &info);
     if (result <= 0)
         return result;
     if (info.type != VFS_NODE_FILE && info.type != VFS_NODE_DIRECTORY)
