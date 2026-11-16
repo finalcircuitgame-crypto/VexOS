@@ -1742,6 +1742,10 @@ void desktop_tick(void) {
     }
   }
 
+  /* Adopted children are reaped only from the system process after the
+     scheduler has switched away from their execution stacks. */
+  Process_ReapOrphans();
+
   if (!g_bi)
     return;
 
