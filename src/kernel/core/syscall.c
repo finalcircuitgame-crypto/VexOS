@@ -64,9 +64,8 @@ void syscall_process_cleanup_task(uint32_t task_id) {
 
     syscall_process_state_t *state = &g_process_states[task_id];
     for (int fd = 0; fd < MAX_OPEN_FILES; ++fd) {
-        state->files[fd].name[0] = '\0';
-        state->files[fd].size = 0;
-        state->files[fd].cursor = 0;
+        if (state->files[fd].used)
+            vfs_close(&state->files[fd].file);
         state->files[fd].used = 0;
     }
 
