@@ -56,6 +56,12 @@ static int sfs2_storage_read(uint64_t lba, void *sector) {
   return storage_read_sector((uint32_t)lba, sector);
 }
 
+static int sfs2_storage_write(uint64_t lba, const void *sector) {
+  if (lba > 0xFFFFFFFFull || lba >= storage_sector_limit())
+    return 0;
+  return storage_write_sector((uint32_t)lba, sector);
+}
+
 // ---------------- FAT32 (minimal, root-dir, short names, read-only) ---------
 
 #define FAT_SECTOR_SIZE 512u
@@ -674,7 +680,7 @@ int simplefs_init(void) {
   }
 
   /* SFS2 is probed before legacy formats. Its mount path is read-only. */
-  if (sfs2_mount(&g_sfs2, sfs2_storage_read, NULL,
+  if (sfs2_mount(&g_sfs2, sfs2_storage_read, sfs2_storage_write,
                  storage_sector_limit())) {
     g_kind = STORAGE_FS_SFS2;
     serial_print("[SFS2] mounted read-only\n");
