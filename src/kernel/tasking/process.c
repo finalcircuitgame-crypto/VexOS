@@ -309,6 +309,21 @@ void Process_OnTaskExit(uint32_t task_id) {
   process->info.exit_code = -1;
 }
 
+void Process_ExitKernelCurrent(int32_t exit_code) {
+  Process *process = find_by_task(Task_GetCurrentId());
+  if (process) {
+    process->info.exit_code = exit_code;
+    process->info.state = PROCESS_ZOMBIE;
+
+    Process *parent = find_by_pid(process->info.parent_pid);
+    if (parent && parent->info.state == PROCESS_BLOCKED) {
+      parent->info.state = PROCESS_READY;
+      Task_MakeReady(parent->info.task_id);
+    }
+  }
+  Task_ExitCurrent();
+}
+
 uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code) {
   uint32_t task_id = Task_GetCurrentId();
   Process *process = find_by_task(task_id);
