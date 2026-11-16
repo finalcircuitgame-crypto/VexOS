@@ -47,6 +47,7 @@ static sfs_file_t g_table[SFS_MAX_FILES];
 static storage_fs_kind_t g_kind = STORAGE_FS_NONE;
 static uint8_t g_mounted;
 static sfs2_volume_t g_sfs2;
+static uint64_t storage_sector_limit(void);
 
 static int sfs2_storage_read(uint64_t lba, void *sector) {
   if (lba > 0xFFFFFFFFull || lba >= storage_sector_limit())
@@ -871,7 +872,7 @@ uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap) {
   if (g_kind == STORAGE_FS_SFS2) {
     uint32_t written = 0;
     for (uint32_t i = 0; i < simplefs_file_count(); ++i) {
-      char path[VFS_PATH_MAX];
+      char path[128u];
       if (!simplefs_file_name_at(i, path, sizeof(path)))
         continue;
       uint32_t n = str_len32(path);
