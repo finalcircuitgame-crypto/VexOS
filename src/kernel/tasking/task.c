@@ -15,6 +15,20 @@ static uint32_t task_count;
 static uint32_t current_task;
 static void (*kernel_task_entries[TASK_MAX])(void);
 
+#define TASK_IDLE_SLOT (TASK_MAX - 1u)
+static uint64_t idle_task_stack[512] __attribute__((aligned(16)));
+
+static uint64_t task_irq_save_disable(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+  return flags;
+}
+
+static void task_irq_restore(uint64_t flags) {
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
 #ifdef VEXOS_CI_INPUT_TEST
 static volatile uint64_t ci_runtime_bad_frame_cs;
 static volatile int ci_runtime_setup_ok;
@@ -34,6 +48,14 @@ static __attribute__((noreturn)) void task_entry_trampoline(void) {
   /* A kernel task that returns has completed normally. The process manager
      marks it exited and the scheduler switches away from its stack. */
   Process_ExitKernelCurrent(0);
+}
+
+static __attribute__((noreturn)) void task_idle_entry(void) {
+  for (;;) {
+    /* The idle context is the scheduler's safe destination when every
+       ordinary task is BLOCKED or ZOMBIE. STI;HLT closes the lost-wakeup gap. */
+    __asm__ volatile("sti; hlt" ::: "memory");
+  }
 }
 
 static void task_activate(uint32_t id) {
@@ -62,13 +84,25 @@ void Task_Init(void) {
     kernel_task_entries[i] = NULL;
   }
 
-  task_count = 1;
+  /* Keep the idle task permanently reserved in the final scheduler slot.
+     Ordinary task allocation uses slots 1..TASK_IDLE_SLOT-1. */
+  task_count = TASK_MAX;
   current_task = 0;
   tasks[0].state = TASK_RUNNING;
+
+  uint64_t *idle_stack = &idle_task_stack[512];
+  kernel_task_entries[TASK_IDLE_SLOT] = task_idle_entry;
+  build_kernel_task_frame(&idle_stack, task_entry_trampoline);
+  tasks[TASK_IDLE_SLOT].rsp = (uint64_t)(uintptr_t)idle_stack;
+  tasks[TASK_IDLE_SLOT].kernel_stack_top =
+      (uint64_t)(uintptr_t)&idle_task_stack[512];
+  tasks[TASK_IDLE_SLOT].address_space = NULL;
+  tasks[TASK_IDLE_SLOT].user_mode = 0;
+  tasks[TASK_IDLE_SLOT].state = TASK_READY;
 }
 
 static int32_t find_free_task_slot(void) {
-  for (uint32_t i = 1; i < TASK_MAX; ++i) {
+  for (uint32_t i = 1; i < TASK_IDLE_SLOT; ++i) {
     if (tasks[i].state == TASK_UNUSED)
       return (int32_t)i;
   }
@@ -99,12 +133,17 @@ static void build_kernel_task_frame(uint64_t **stack_ptr,
 }
 
 int32_t Task_Create(void (*entry)(void), void *stack_top) {
-  if (!entry || !stack_top)
+  uint64_t irq_flags = task_irq_save_disable();
+  if (!entry || !stack_top) {
+    task_irq_restore(irq_flags);
     return -1;
+  }
 
   int32_t slot = find_free_task_slot();
-  if (slot < 0)
+  if (slot < 0) {
+    task_irq_restore(irq_flags);
     return -1;
+  }
 
   uint64_t *stack = (uint64_t *)stack_top;
   kernel_task_entries[slot] = entry;
@@ -116,24 +155,30 @@ int32_t Task_Create(void (*entry)(void), void *stack_top) {
   tasks[slot].user_mode = 0;
   tasks[slot].state = TASK_READY;
 
-  if ((uint32_t)slot >= task_count)
-    task_count = (uint32_t)slot + 1u;
+  task_irq_restore(irq_flags);
   return slot;
 }
 
 int32_t Task_CreateUser(AddressSpace *space, uint64_t entry,
                         uint64_t user_stack_top, void *kernel_stack_top) {
-  if (!space || !entry || !user_stack_top || !kernel_stack_top)
+  uint64_t irq_flags = task_irq_save_disable();
+  if (!space || !entry || !user_stack_top || !kernel_stack_top) {
+    task_irq_restore(irq_flags);
     return -1;
+  }
   if (!VMM_AddressSpaceIsUserRange(space, (const void *)(uintptr_t)entry, 1, 0) ||
       user_stack_top < 1u ||
       !VMM_AddressSpaceIsUserRange(space,
-          (const void *)(uintptr_t)(user_stack_top - 1u), 1, 1))
+          (const void *)(uintptr_t)(user_stack_top - 1u), 1, 1)) {
+    task_irq_restore(irq_flags);
     return -1;
+  }
 
   int32_t slot = find_free_task_slot();
-  if (slot < 0)
+  if (slot < 0) {
+    task_irq_restore(irq_flags);
     return -1;
+  }
 
   uint64_t *stack = (uint64_t *)kernel_stack_top;
 
@@ -153,22 +198,25 @@ int32_t Task_CreateUser(AddressSpace *space, uint64_t entry,
   kernel_task_entries[slot] = NULL;
   tasks[slot].state = TASK_READY;
 
-  if ((uint32_t)slot >= task_count)
-    task_count = (uint32_t)slot + 1u;
+  task_irq_restore(irq_flags);
   return slot;
 }
 
 int Task_SetTaskContext(uint32_t task_id, AddressSpace *space,
                         uint64_t kernel_stack_top, int user_mode) {
+  uint64_t irq_flags = task_irq_save_disable();
   if (task_id >= task_count || tasks[task_id].state == TASK_UNUSED ||
-      tasks[task_id].state == TASK_ZOMBIE)
+      tasks[task_id].state == TASK_ZOMBIE) {
+    task_irq_restore(irq_flags);
     return 0;
+  }
 
   tasks[task_id].address_space = space;
   tasks[task_id].kernel_stack_top = kernel_stack_top;
   tasks[task_id].user_mode = user_mode ? 1u : 0u;
   if (task_id == current_task)
     task_activate(task_id);
+  task_irq_restore(irq_flags);
   return 1;
 }
 
@@ -188,19 +236,26 @@ uint64_t Task_GetTaskKernelStackTop(uint32_t task_id) {
 }
 
 void Task_BlockCurrent(void) {
-  if (tasks[current_task].state == TASK_RUNNING)
+  uint64_t irq_flags = task_irq_save_disable();
+  if (current_task < task_count && tasks[current_task].state == TASK_RUNNING)
     tasks[current_task].state = TASK_BLOCKED;
+  task_irq_restore(irq_flags);
 }
 
 void Task_MakeReady(uint32_t task_id) {
+  uint64_t irq_flags = task_irq_save_disable();
   if (task_id < task_count && tasks[task_id].state == TASK_BLOCKED)
     tasks[task_id].state = TASK_READY;
+  task_irq_restore(irq_flags);
 }
 
 int Task_Reap(uint32_t task_id) {
+  uint64_t irq_flags = task_irq_save_disable();
   if (task_id == current_task || task_id >= task_count ||
-      tasks[task_id].state != TASK_ZOMBIE)
+      tasks[task_id].state != TASK_ZOMBIE) {
+    task_irq_restore(irq_flags);
     return 0;
+  }
 
   tasks[task_id].rsp = 0;
   tasks[task_id].kernel_stack_top = 0;
@@ -208,13 +263,17 @@ int Task_Reap(uint32_t task_id) {
   tasks[task_id].user_mode = 0;
   kernel_task_entries[task_id] = NULL;
   tasks[task_id].state = TASK_UNUSED;
+  task_irq_restore(irq_flags);
   return 1;
 }
 
 int Task_Discard(uint32_t task_id) {
+  uint64_t irq_flags = task_irq_save_disable();
   if (task_id == current_task || task_id >= task_count ||
-      tasks[task_id].state != TASK_READY)
+      tasks[task_id].state != TASK_READY) {
+    task_irq_restore(irq_flags);
     return 0;
+  }
 
   tasks[task_id].rsp = 0;
   tasks[task_id].kernel_stack_top = 0;
@@ -222,6 +281,7 @@ int Task_Discard(uint32_t task_id) {
   tasks[task_id].user_mode = 0;
   kernel_task_entries[task_id] = NULL;
   tasks[task_id].state = TASK_UNUSED;
+  task_irq_restore(irq_flags);
   return 1;
 }
 
@@ -232,36 +292,41 @@ uint64_t Task_Schedule(uint64_t current_rsp) {
   if (tasks[previous].state == TASK_RUNNING)
     tasks[previous].state = TASK_READY;
 
-  for (uint32_t offset = 1; offset <= task_count; ++offset) {
-    uint32_t next = (previous + offset) % task_count;
-    if (tasks[next].state != TASK_READY)
-      continue;
+  /* Ordinary work always outranks idle. If every ordinary task is blocked
+     or exited, the reserved idle frame is the only legal scheduler fallback. */
+  for (uint32_t pass = 0; pass < 2; ++pass) {
+    for (uint32_t offset = 1; offset <= task_count; ++offset) {
+      uint32_t next = (previous + offset) % task_count;
+      if ((next == TASK_IDLE_SLOT) != (pass == 1u) ||
+          tasks[next].state != TASK_READY)
+        continue;
 
-    current_task = next;
-    tasks[next].state = TASK_RUNNING;
+      current_task = next;
+      tasks[next].state = TASK_RUNNING;
 #ifdef VEXOS_CI_INPUT_TEST
-    if (ci_runtime_setup_ok && task_count > 1 && tasks[next].rsp) {
-      const uint64_t *frame = (const uint64_t *)(uintptr_t)tasks[next].rsp;
-      if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
-        ci_runtime_bad_frame_cs = frame[16];
-        current_task = previous;
-        tasks[previous].state = TASK_RUNNING;
-        return current_rsp;
+      if (ci_runtime_setup_ok && tasks[next].rsp) {
+        const uint64_t *frame = (const uint64_t *)(uintptr_t)tasks[next].rsp;
+        if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
+          ci_runtime_bad_frame_cs = frame[16];
+          current_task = previous;
+          if (tasks[previous].state != TASK_BLOCKED &&
+              tasks[previous].state != TASK_ZOMBIE)
+            tasks[previous].state = TASK_RUNNING;
+          return current_rsp;
+        }
       }
-    }
 #endif
-    Process_OnTaskSwitch(previous, next);
-    task_activate(next);
-    return tasks[next].rsp;
+      Process_OnTaskSwitch(previous, next);
+      task_activate(next);
+      return tasks[next].rsp;
+    }
   }
 
-  /* No other runnable task exists. Resume the current one unless it is
-     blocked/zombie; callers must provide an idle task before blocking. */
-  current_task = previous;
-  if (tasks[previous].state == TASK_READY)
-    tasks[previous].state = TASK_RUNNING;
-  task_activate(previous);
-  return current_rsp;
+  /* Task_Init permanently installs a ready idle frame, so reaching this
+     means scheduler state has been corrupted. Never resume a blocked task. */
+  for (;;) {
+    __asm__ volatile("cli; hlt");
+  }
 }
 
 uint64_t Task_Exit(uint64_t current_rsp) {
@@ -270,20 +335,22 @@ uint64_t Task_Exit(uint64_t current_rsp) {
   tasks[previous].state = TASK_ZOMBIE;
   Process_OnTaskExit(previous);
 
-  for (uint32_t offset = 1; offset <= task_count; ++offset) {
-    uint32_t next = (previous + offset) % task_count;
-    if (tasks[next].state != TASK_READY)
-      continue;
+  for (uint32_t pass = 0; pass < 2; ++pass) {
+    for (uint32_t offset = 1; offset <= task_count; ++offset) {
+      uint32_t next = (previous + offset) % task_count;
+      if ((next == TASK_IDLE_SLOT) != (pass == 1u) ||
+          tasks[next].state != TASK_READY)
+        continue;
 
-    current_task = next;
-    tasks[next].state = TASK_RUNNING;
-    Process_OnTaskSwitch(previous, next);
-    task_activate(next);
-    return tasks[next].rsp;
+      current_task = next;
+      tasks[next].state = TASK_RUNNING;
+      Process_OnTaskSwitch(previous, next);
+      task_activate(next);
+      return tasks[next].rsp;
+    }
   }
 
-  /* There is no runnable task. Keep interrupts disabled rather than
-     returning into a task that has explicitly exited. */
+  /* The reserved idle frame should always be runnable. */
   for (;;) {
     __asm__ volatile("cli; hlt");
   }
@@ -319,11 +386,12 @@ int Task_CI_SelfTest(void) {
     return 0;
   if (Task_Create(ci_task_entry, NULL) >= 0)
     return 0;
-  if (task_count != 1)
+  if (task_count != TASK_MAX ||
+      tasks[TASK_IDLE_SLOT].state != TASK_READY)
     return 0;
 
   int32_t id = Task_Create(ci_task_entry, &test_stack[64]);
-  if (id != 1 || task_count != 2)
+  if (id != 1 || task_count != TASK_MAX)
     return 0;
 
   uint64_t next_rsp = Task_Schedule(0x1111u);
@@ -341,7 +409,21 @@ int Task_CI_SelfTest(void) {
       frame[19] != 0x10u)
     return 0;
 
-  if (Task_Schedule(0x2222u) != 0x1111u)
+  if (Task_Schedule(0x2222u) != 0x1111u ||
+      Task_GetCurrentId() != 0u)
+    return 0;
+
+  /* A blocked final ordinary task must yield to idle, never resume itself. */
+  tasks[1].state = TASK_BLOCKED;
+  Task_BlockCurrent();
+  next_rsp = Task_Schedule(0x3333u);
+  if (Task_GetCurrentId() != TASK_IDLE_SLOT ||
+      next_rsp != tasks[TASK_IDLE_SLOT].rsp ||
+      tasks[TASK_IDLE_SLOT].state != TASK_RUNNING)
+    return 0;
+  Task_MakeReady(0u);
+  if (Task_Schedule(0x4444u) != 0x3333u ||
+      Task_GetCurrentId() != 0u)
     return 0;
 
   Task_Init();
@@ -378,7 +460,7 @@ void Task_CI_StartRuntimeTest(void) {
 
   int32_t id_a = Task_Create(ci_runtime_task_a, (uint8_t *)stack_a + 4096u);
   int32_t id_b = Task_Create(ci_runtime_task_b, (uint8_t *)stack_b + 4096u);
-  ci_runtime_setup_ok = id_a == 1 && id_b == 2 && task_count == 3;
+  ci_runtime_setup_ok = id_a == 1 && id_b == 2 && task_count == TASK_MAX;
 
   if (ci_runtime_setup_ok) {
     const uint64_t *frame_a = (const uint64_t *)(uintptr_t)tasks[1].rsp;
