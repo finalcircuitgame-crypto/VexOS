@@ -236,7 +236,7 @@ fail:
     (void)vexfs_syscall3(1u, (uint64_t)(uintptr_t)failed,
                          sizeof(failed) - 1u, 0);
 }
-#endiff
+#endif
 
 void DG_Init(void) {
     mouse_buttons = 0;
