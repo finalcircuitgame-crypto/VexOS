@@ -459,6 +459,9 @@ static void ci_syscall_self_test(void) {
   // CI prepares a small SFS1 image with ci.txt on the ATA primary slave.
   if (!simplefs_init())
     ci_memory_test_fail("SimpleFS fixture mount");
+  if (!simplefs_ci_validate_metadata_self_test())
+    ci_memory_test_fail("SFS1 metadata validation and extent safety");
+  serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
