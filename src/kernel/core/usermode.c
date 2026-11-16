@@ -545,10 +545,10 @@ void usermode_launch(const char *filename) {
        transition stack have been installed in this process's address space. */
     if (!Process_BeginUserModeCurrent(
             space, (uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE)) {
-        PMM_FreePage(kernel_stack);
-        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
         Process_AttachCurrentAddressSpace(NULL);
         VMM_Activate();
+        PMM_FreePage(kernel_stack);
+        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
         VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         serial_print("[USERMODE] failed to commit ring-3 process context\n");
