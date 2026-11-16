@@ -130,4 +130,4 @@ Milestones:
 
 ## Immediate next objective
 
-Design a versioned storage format with a free-space map, durable directory metadata, and crash-safe metadata updates while keeping existing SFS1 volumes mountable. Before any installer or arbitrary physical-disk support, remove SimpleFS's implicit format-on-unrecognized-disk behavior and require explicit user confirmation for destructive formatting.
+Finish the SFS2 implementation in stages: disk-image fixture and read-only mount first, then writable allocation and persistent directories, then crash recovery and verified SFS1 migration. Keep SFS1 mountable throughout. Before any installer or arbitrary physical-disk support, require explicit user confirmation for destructive formatting.
