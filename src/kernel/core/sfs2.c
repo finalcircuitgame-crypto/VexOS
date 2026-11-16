@@ -1060,6 +1060,9 @@ int sfs2_ci_mount_read_test(void) {
     if (!sfs2_read_file_at(&volume, "/hello", 2u, tail, 3u, &bytes) ||
         bytes != 3u || tail[0] != 'x' || tail[1] != 'o' || tail[2] != 's')
         return 0;
+    /* Old SFS2 images without a journal must remain read-only. */
+    if (sfs2_write_file(&volume, "/hello", "X", 1u))
+        return 0;
     /* A damaged inode checksum must prevent mounting. */
     g_sfs2_test_disk[2][sizeof(sfs2_inode_t) + 12u] ^= 0x80u;
     volume.mounted = 0;
@@ -1113,6 +1116,15 @@ int sfs2_ci_mount_read_test(void) {
     inode.data_sectors = 1u;
     sfs2_test_finish_inode(&inode);
     sfs2_test_store_inode_at(11u, 1u, &inode);
+
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 3u;
+    inode.parent_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    inode.name[0] = 'd'; inode.name[1] = 'i'; inode.name[2] = 'r';
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(11u, 2u, &inode);
+
     g_sfs2_test_disk[10][0] = 0x01u;
     g_sfs2_test_disk[12][0] = 'J';
 
@@ -1150,6 +1162,10 @@ int sfs2_ci_mount_read_test(void) {
         !sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
     if (!sfs2_stat_path(&volume, "/journal", &info))
+        return 0;
+
+    /* Existing directory names must not be shadowed by regular files. */
+    if (sfs2_write_file(&volume, "/dir", "D", 1u))
         return 0;
 
     /* Exercise journaled create, replace, readback, and unlink operations. */
