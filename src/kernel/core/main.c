@@ -333,7 +333,7 @@ static void ci_address_space_self_test(void) {
   VMM_Activate();
   VMM_AddressSpaceDestroy(space_a);
   VMM_AddressSpaceDestroy(space_b);
-  serial_print("[CI] Independent address spaces, CR3 switching, user-memory isolation, and kernel supervisor mappings passed\\n");
+  serial_print("[CI] Independent address spaces, CR3 switching, user-memory isolation, and kernel supervisor mappings passed\n");
 }
 #endif
 
