@@ -7,6 +7,86 @@ _Static_assert(sizeof(sfs2_superblock_t) == SFS2_SECTOR_SIZE,
 _Static_assert(sizeof(sfs2_inode_t) == 96u,
                "SFS2 inode record size is part of the disk format");
 
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t state;
+    uint32_t record_count;
+    uint32_t checksum;
+    uint64_t sequence;
+    uint64_t targets[SFS2_JOURNAL_MAX_RECORDS];
+    uint32_t data_checksums[SFS2_JOURNAL_MAX_RECORDS];
+    uint8_t reserved[392];
+} sfs2_journal_header_t;
+
+_Static_assert(sizeof(sfs2_journal_header_t) == SFS2_SECTOR_SIZE,
+               "SFS2 journal header must occupy one sector");
+
+static int sfs2_sector_is_zero(const uint8_t *sector) {
+    for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
+        if (sector[i] != 0)
+            return 0;
+    return 1;
+}
+
+static int sfs2_replay_journal(const sfs2_superblock_t *sb,
+                               sfs2_read_sector_fn read_sector,
+                               sfs2_write_sector_fn write_sector) {
+    if (!sb || !read_sector)
+        return 0;
+    if (sb->journal_lba == 0 && sb->journal_sectors == 0)
+        return 1;
+    if (sb->journal_lba == 0 ||
+        sb->journal_sectors < SFS2_JOURNAL_HEADER_SECTORS +
+                              SFS2_JOURNAL_MAX_RECORDS)
+        return 0;
+
+    uint8_t header_sector[SFS2_SECTOR_SIZE];
+    if (!read_sector(sb->journal_lba, header_sector))
+        return 0;
+    if (sfs2_sector_is_zero(header_sector))
+        return 1;
+
+    sfs2_journal_header_t header;
+    const uint8_t *src = header_sector;
+    uint8_t *dst = (uint8_t *)&header;
+    for (uint32_t i = 0; i < sizeof(header); ++i)
+        dst[i] = src[i];
+
+    if (header.magic != SFS2_JOURNAL_MAGIC ||
+        header.checksum != sfs2_checksum(&header, sizeof(header),
+            (uint32_t)offsetof(sfs2_journal_header_t, checksum)))
+        return 0;
+    if (header.state == 0u)
+        return header.record_count == 0u;
+    if (header.state != SFS2_JOURNAL_COMMITTED ||
+        header.record_count == 0u ||
+        header.record_count > SFS2_JOURNAL_MAX_RECORDS ||
+        !write_sector)
+        return 0;
+
+    uint8_t data[SFS2_SECTOR_SIZE];
+    for (uint32_t i = 0; i < header.record_count; ++i) {
+        uint64_t target = header.targets[i];
+        uint64_t journal_end = sb->journal_lba + sb->journal_sectors;
+        if (target >= sb->volume_sectors ||
+            (target >= sb->journal_lba && target < journal_end))
+            return 0;
+        for (uint32_t j = 0; j < i; ++j)
+            if (header.targets[j] == target)
+                return 0;
+        if (!read_sector(sb->journal_lba + 1u + i, data) ||
+            header.data_checksums[i] !=
+                sfs2_checksum(data, sizeof(data), SFS2_SECTOR_SIZE - 4u))
+            return 0;
+        if (!write_sector(target, data))
+            return 0;
+    }
+
+    /* Clearing the commit header is the final durable journal operation. */
+    sfs2_zero(header_sector, sizeof(header_sector));
+    return write_sector(sb->journal_lba, header_sector);
+}
+
 static void sfs2_zero(void *ptr, uint32_t length) {
     uint8_t *bytes = (uint8_t *)ptr;
     for (uint32_t i = 0; i < length; ++i)
@@ -44,7 +124,17 @@ int sfs2_validate_superblock(const sfs2_superblock_t *sb,
 
     uint64_t bitmap_end = sb->bitmap_lba + sb->bitmap_sectors;
     uint64_t inode_end = sb->inode_table_lba + sb->inode_table_sectors;
-    if (sb->bitmap_lba < 1u || sb->bitmap_sectors == 0 ||
+    uint64_t journal_end = sb->journal_lba + sb->journal_sectors;
+    int has_journal = sb->journal_lba != 0 || sb->journal_sectors != 0;
+    if ((has_journal &&
+         (sb->journal_lba < 1u ||
+          sb->journal_sectors < SFS2_JOURNAL_HEADER_SECTORS +
+                                SFS2_JOURNAL_MAX_RECORDS ||
+          journal_end < sb->journal_lba ||
+          journal_end > sb->volume_sectors ||
+          sb->bitmap_lba < journal_end)) ||
+        (!has_journal && sb->bitmap_lba < 1u) ||
+        sb->bitmap_sectors == 0 ||
         bitmap_end < sb->bitmap_lba || bitmap_end > sb->volume_sectors ||
         sb->inode_table_lba < bitmap_end || sb->inode_table_sectors == 0 ||
         inode_end < sb->inode_table_lba || inode_end > sb->volume_sectors ||
@@ -310,6 +400,17 @@ int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
         return 0;
     const uint8_t *src = sector;
     uint8_t *dst = (uint8_t *)&volume->superblock;
+    for (uint32_t i = 0; i < sizeof(volume->superblock); ++i)
+        dst[i] = src[i];
+    if (!sfs2_validate_superblock(&volume->superblock, device_sectors))
+        return 0;
+    if (!sfs2_replay_journal(&volume->superblock, read_sector, write_sector))
+        return 0;
+    /* Replay may have committed a new superblock generation; reload it. */
+    if (!read_sector(0, sector))
+        return 0;
+    src = sector;
+    dst = (uint8_t *)&volume->superblock;
     for (uint32_t i = 0; i < sizeof(volume->superblock); ++i)
         dst[i] = src[i];
     if (!sfs2_validate_superblock(&volume->superblock, device_sectors))
