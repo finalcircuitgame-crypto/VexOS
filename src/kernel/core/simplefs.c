@@ -620,6 +620,42 @@ uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap) {
   return w;
 }
 
+int simplefs_delete_file(const char *name) {
+  if (!g_storage_ready || !name || g_kind != STORAGE_FS_SFS ||
+      str_len32(name) == 0 || str_len32(name) >= SFS_NAME_MAX)
+    return 0;
+
+  uint32_t idx = 0;
+  if (!sfs_find(name, &idx))
+    return 0;
+
+  sfs_file_t previous = g_table[idx];
+  mem_zero(&g_table[idx], (uint32_t)sizeof(g_table[idx]));
+
+  uint32_t count = 0;
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    if (g_table[i].used)
+      ++count;
+  g_sb.file_count = count;
+
+  if (!sfs_store_table()) {
+    g_table[idx] = previous;
+    g_sb.file_count = count + 1u;
+    return 0;
+  }
+  if (!sfs_store_superblock()) {
+    g_table[idx] = previous;
+    g_sb.file_count = count + 1u;
+    (void)sfs_store_table();
+    (void)sfs_store_superblock();
+    return 0;
+  }
+
+  /* SFS1 is append-only: the directory entry is reclaimed, but its old
+     data sectors remain unavailable until a future versioned free-space map. */
+  return 1;
+}
+
 int simplefs_write_file(const char *name, const void *data, uint32_t len) {
   if (g_kind == STORAGE_FS_FAT32) {
     // FAT32 write support not implemented yet.
