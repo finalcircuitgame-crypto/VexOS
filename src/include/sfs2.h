@@ -12,7 +12,7 @@
 #define SFS2_INODE_DIRECTORY 2u
 #define SFS2_JOURNAL_MAGIC 0x524A3253u /* "S2JR" */
 #define SFS2_JOURNAL_COMMITTED 1u
-#define SFS2_JOURNAL_MAX_RECORDS 8u
+#define SFS2_JOURNAL_MAX_RECORDS 32u
 #define SFS2_JOURNAL_HEADER_SECTORS 1u
 
 typedef struct __attribute__((packed)) {
