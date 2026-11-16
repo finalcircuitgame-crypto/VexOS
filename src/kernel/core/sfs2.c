@@ -139,6 +139,249 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
     return 0;
 }
 
+
+static int sfs2_read_inode_table(sfs2_volume_t *volume) {
+    uint8_t sector[SFS2_SECTOR_SIZE];
+    uint32_t inode_index = 0;
+    uint32_t byte_offset = 0;
+    uint8_t record[sizeof(sfs2_inode_t)];
+    uint32_t record_bytes = 0;
+    uint64_t lba = volume->superblock.inode_table_lba;
+    for (uint32_t s = 0; s < volume->superblock.inode_table_sectors; ++s) {
+        if (!volume->read_sector(lba + s, sector))
+            return 0;
+        for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i, ++byte_offset) {
+            record[record_bytes++] = sector[i];
+            if (record_bytes == sizeof(sfs2_inode_t)) {
+                if (inode_index >= volume->superblock.inode_capacity)
+                    return 0;
+                uint8_t *dst = (uint8_t *)&volume->inodes[inode_index++];
+                for (uint32_t j = 0; j < sizeof(sfs2_inode_t); ++j)
+                    dst[j] = record[j];
+                record_bytes = 0;
+            }
+        }
+    }
+    return inode_index >= volume->superblock.inode_capacity &&
+           record_bytes == 0;
+}
+
+static int sfs2_find_inode_id(const sfs2_volume_t *volume, uint32_t id,
+                              uint32_t *out_index) {
+    if (!volume || !volume->mounted || id == 0)
+        return 0;
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        if (volume->inodes[i].inode_id == id) {
+            if (out_index)
+                *out_index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int sfs2_name_equal(const char *a, const char *b) {
+    if (!a || !b)
+        return 0;
+    uint32_t i = 0;
+    while (a[i] && b[i] && a[i] == b[i])
+        ++i;
+    return a[i] == b[i];
+}
+
+static int sfs2_validate_namespace(sfs2_volume_t *volume) {
+    uint32_t root_count = 0;
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        sfs2_inode_t *inode = &volume->inodes[i];
+        if (inode->inode_id == 0)
+            continue;
+        if (!sfs2_validate_inode(inode, volume->superblock.data_lba,
+                                 volume->superblock.volume_sectors))
+            return 0;
+        if (inode->inode_id == volume->superblock.root_inode) {
+            if (inode->type != SFS2_INODE_DIRECTORY)
+                return 0;
+            ++root_count;
+        } else {
+            uint32_t parent_index = 0;
+            if (!sfs2_find_inode_id(volume, inode->parent_id, &parent_index) ||
+                volume->inodes[parent_index].type != SFS2_INODE_DIRECTORY)
+                return 0;
+        }
+        for (uint32_t j = 0; j < i; ++j) {
+            const sfs2_inode_t *other = &volume->inodes[j];
+            if (other->inode_id == 0)
+                continue;
+            if (other->inode_id == inode->inode_id)
+                return 0;
+            if (other->parent_id == inode->parent_id &&
+                inode->inode_id != volume->superblock.root_inode &&
+                other->inode_id != volume->superblock.root_inode &&
+                sfs2_name_equal(other->name, inode->name))
+                return 0;
+        }
+    }
+    return root_count == 1u;
+}
+
+int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
+               sfs2_write_sector_fn write_sector, uint64_t device_sectors) {
+    if (!volume || !read_sector || device_sectors == 0)
+        return 0;
+    volume->mounted = 0;
+    volume->read_sector = read_sector;
+    volume->write_sector = write_sector;
+    uint8_t sector[SFS2_SECTOR_SIZE];
+    if (!read_sector(0, sector))
+        return 0;
+    const uint8_t *src = sector;
+    uint8_t *dst = (uint8_t *)&volume->superblock;
+    for (uint32_t i = 0; i < sizeof(volume->superblock); ++i)
+        dst[i] = src[i];
+    if (!sfs2_validate_superblock(&volume->superblock, device_sectors))
+        return 0;
+    for (uint32_t i = 0; i < SFS2_INODE_MAX; ++i)
+        sfs2_zero(&volume->inodes[i], sizeof(sfs2_inode_t));
+    if (!sfs2_read_inode_table(volume))
+        return 0;
+    /* Temporarily mark mounted so parent-ID lookups can validate the tree. */
+    volume->mounted = 1;
+    if (!sfs2_validate_namespace(volume)) {
+        volume->mounted = 0;
+        return 0;
+    }
+    return 1;
+}
+
+static int sfs2_lookup_child(const sfs2_volume_t *volume, uint32_t parent_id,
+                             const char *name, uint32_t name_length,
+                             uint32_t *out_index) {
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        const sfs2_inode_t *inode = &volume->inodes[i];
+        if (!inode->inode_id || inode->parent_id != parent_id)
+            continue;
+        uint32_t n = 0;
+        while (n < SFS2_NAME_MAX && inode->name[n])
+            ++n;
+        if (n != name_length)
+            continue;
+        uint32_t j = 0;
+        while (j < n && inode->name[j] == name[j])
+            ++j;
+        if (j == n) {
+            if (out_index)
+                *out_index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int sfs2_resolve_path(const sfs2_volume_t *volume, const char *path,
+                             uint32_t *out_index) {
+    if (!volume || !volume->mounted || !path || !out_index)
+        return 0;
+    uint32_t current = 0;
+    if (!sfs2_find_inode_id(volume, volume->superblock.root_inode, &current))
+        return 0;
+    uint32_t pos = 0;
+    while (path[pos] == '/')
+        ++pos;
+    if (!path[pos]) {
+        *out_index = current;
+        return 1;
+    }
+    while (path[pos]) {
+        uint32_t start = pos;
+        while (path[pos] && path[pos] != '/')
+            ++pos;
+        uint32_t length = pos - start;
+        if (!length || length >= SFS2_NAME_MAX ||
+            (length == 1u && path[start] == '.') ||
+            (length == 2u && path[start] == '.' && path[start + 1u] == '.'))
+            return 0;
+        if (volume->inodes[current].type != SFS2_INODE_DIRECTORY)
+            return 0;
+        uint32_t child = 0;
+        if (!sfs2_lookup_child(volume, volume->inodes[current].inode_id,
+                               path + start, length, &child))
+            return 0;
+        current = child;
+        while (path[pos] == '/')
+            ++pos;
+        if (path[pos] && volume->inodes[current].type != SFS2_INODE_DIRECTORY)
+            return 0;
+    }
+    *out_index = current;
+    return 1;
+}
+
+int sfs2_stat_path(sfs2_volume_t *volume, const char *path,
+                   sfs2_stat_t *out_stat) {
+    uint32_t index = 0;
+    if (!out_stat || !sfs2_resolve_path(volume, path, &index))
+        return 0;
+    const sfs2_inode_t *inode = &volume->inodes[index];
+    out_stat->inode_id = inode->inode_id;
+    out_stat->parent_id = inode->parent_id;
+    out_stat->type = inode->type;
+    out_stat->size_bytes = inode->size_bytes;
+    return 1;
+}
+
+int sfs2_read_file_at(sfs2_volume_t *volume, const char *path,
+                      uint64_t offset, void *out, uint32_t length,
+                      uint32_t *out_read) {
+    if (out_read)
+        *out_read = 0;
+    uint32_t index = 0;
+    if ((!out && length) || !sfs2_resolve_path(volume, path, &index))
+        return 0;
+    const sfs2_inode_t *inode = &volume->inodes[index];
+    if (inode->type != SFS2_INODE_FILE || offset > inode->size_bytes)
+        return 0;
+    uint64_t available = inode->size_bytes - offset;
+    uint32_t wanted = available < length ? (uint32_t)available : length;
+    uint8_t sector[SFS2_SECTOR_SIZE];
+    uint8_t *destination = (uint8_t *)out;
+    uint32_t copied = 0;
+    while (copied < wanted) {
+        uint64_t absolute = offset + copied;
+        uint64_t lba = inode->data_lba + absolute / SFS2_SECTOR_SIZE;
+        uint32_t within = (uint32_t)(absolute % SFS2_SECTOR_SIZE);
+        uint32_t chunk = SFS2_SECTOR_SIZE - within;
+        if (chunk > wanted - copied)
+            chunk = wanted - copied;
+        if (!volume->read_sector(lba, sector))
+            return 0;
+        for (uint32_t i = 0; i < chunk; ++i)
+            destination[copied + i] = sector[within + i];
+        copied += chunk;
+    }
+    if (out_read)
+        *out_read = copied;
+    return 1;
+}
+
+int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
+                        uint32_t *cursor, sfs2_inode_t *out_inode) {
+    uint32_t directory_index = 0;
+    if (!cursor || !out_inode ||
+        !sfs2_resolve_path(volume, path, &directory_index) ||
+        volume->inodes[directory_index].type != SFS2_INODE_DIRECTORY)
+        return -1;
+    uint32_t parent_id = volume->inodes[directory_index].inode_id;
+    while (*cursor < volume->superblock.inode_capacity) {
+        uint32_t index = (*cursor)++;
+        if (volume->inodes[index].inode_id &&
+            volume->inodes[index].parent_id == parent_id) {
+            *out_inode = volume->inodes[index];
+            return 1;
+        }
+    }
+    return 0;
+}
+
 #ifdef VEXOS_CI_INPUT_TEST
 int sfs2_ci_metadata_self_test(void) {
     sfs2_superblock_t sb;
