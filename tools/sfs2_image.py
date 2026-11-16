@@ -232,20 +232,19 @@ def cmd_format(args):
 def cmd_migrate(args):
     source = Path(args.source)
     sectors, files = read_sfs1(source)
-    # Keep the destination separate and default to the source capacity.
     result = build_image(Path(args.output), args.sectors or sectors, files, args.inodes)
     verified = verify_image(Path(args.output))
-    for (name, payload), verified_name in zip(files, verified["files"]):
-        if name != verified_name:
-            raise ValueError("post-migration directory verification failed")
-    # Verify byte-for-byte file payloads from the generated image.
+    verified_files = verified["files"]
+    if [name for name, _start, _length in verified_files] != [name for name, _data in files]:
+        raise ValueError("post-migration filename verification failed")
     with Path(args.output).open("rb") as f:
-        for name, payload in files:
-            entry = next((x for x in range(1, args.inodes)
-                          if INODE.unpack_from(f.read(0) or bytes(INODE.size))[0] == -1), None)
-            del entry
+        for name, start, length in verified_files:
+            f.seek(start * SECTOR)
+            copied = f.read(length)
+            original = next(payload for old_name, payload in files if old_name == name)
+            if copied != original:
+                raise ValueError(f"post-migration byte verification failed for {name!r}")
     print(f"Migrated SFS1 to separate SFS2 image: {result}; source left untouched")
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
