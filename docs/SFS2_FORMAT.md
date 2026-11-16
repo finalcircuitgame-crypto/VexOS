@@ -44,7 +44,7 @@ committed transaction is replayed before inode-table validation. Images with
 zero journal geometry remain compatible as read-only SFS2 volumes.
 
 The bitmap has one bit per data-area sector (bit zero describes LBA
-`data_lba`). A set bit means allocated. Journaled root-file operations update
+`data_lba`). A set bit means allocated. Journaled nested-file operations update
 the bitmap and inode record in one redo transaction. Each file is limited to
 32768 sectors (16 MiB), using a 32-record journal so replacement can atomically
 update both old and new contiguous extents, inode metadata, and the superblock.
@@ -105,7 +105,7 @@ python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 ## Safety and compatibility
 
 - SFS1 remains unchanged and remains the kernel's writable native format.
-- Legacy SFS2 images without journal geometry mount read-only; journal-enabled images mount with the transactional root-file writer when durable sector writes are available. No normal boot path formats or migrates media.
+- Legacy SFS2 images without journal geometry mount read-only; journal-enabled images mount with the transactional nested-file writer when durable sector writes are available. No normal boot path formats or migrates media.
 - Never auto-format an unknown, damaged, or unsupported volume.
 - Host formatting and migration are explicit offline operations against image
   files, not automatic install or boot operations.
@@ -131,7 +131,7 @@ python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
   ranged reads across sector boundaries.
 - CI-only metadata checks and in-memory disk-image tests covering mount, empty
   directories, lookup, ranged reads, damaged metadata rejection, interrupted
-  journal replay, nested directory creation/listing, 3 MiB file writes and
+  journal replay, nested directory creation/listing, over-2-MiB file writes and
   readback, and failure injection at every write boundary of a replacement
   transaction.
 
