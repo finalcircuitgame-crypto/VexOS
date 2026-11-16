@@ -394,6 +394,9 @@ void usermode_launch(const char *filename) {
         serial_print("[USERMODE] failed to create isolated address space\\n");
         return;
     }
+    /* The kernel continues running on the inherited mappings while the new
+       root is active, allowing the loader to populate the user virtual image. */
+    VMM_ActivateAddressSpace(space);
 
     // Load each PT_LOAD segment. Pages are initially cleared so that BSS is
     // zero-filled before the initialized portion is copied into place.
@@ -414,6 +417,7 @@ void usermode_launch(const char *filename) {
             if (!pa || !VMM_AddressSpaceMapPage(space, (void *)(uintptr_t)va, pa, load_flags)) {
                 if (pa) PMM_FreePage(pa);
                 rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
                 kfree(mapped_pages);
                 kfree(elf_data);
@@ -433,6 +437,7 @@ void usermode_launch(const char *filename) {
             for (uint64_t va = start; va < end; va += PAGE_SIZE) {
                 if (!VMM_AddressSpaceSetPageWrite(space, (void *)(uintptr_t)va, 0)) {
                     rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
                     kfree(mapped_pages);
                     kfree(elf_data);
@@ -451,6 +456,7 @@ void usermode_launch(const char *filename) {
         void *pa = PMM_AllocatePage();
         if (!pa) {
             rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
             kfree(mapped_pages);
             kfree(elf_data);
@@ -461,6 +467,7 @@ void usermode_launch(const char *filename) {
                          PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
             PMM_FreePage(pa);
             rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
             kfree(mapped_pages);
             kfree(elf_data);
@@ -474,6 +481,7 @@ void usermode_launch(const char *filename) {
     void *kernel_stack = PMM_AllocatePage();
     if (!kernel_stack) {
         rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         kfree(elf_data);
@@ -484,6 +492,7 @@ void usermode_launch(const char *filename) {
     if (!VMM_AddressSpaceMapPage(space, kernel_stack, kernel_stack, PAGE_WRITE | PAGE_PRESENT)) {
         PMM_FreePage(kernel_stack);
         rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
                 VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         kfree(elf_data);
