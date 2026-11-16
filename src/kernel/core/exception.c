@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "../../include/task.h"
+#include "../../include/process.h"
 
 void serial_print(const char *str);
 extern void usermode_cleanup_current(void);
@@ -88,6 +89,9 @@ uint64_t exception_handler(uint64_t rsp) {
     desktop_user_app_exited(1);
 
     serial_print("[USERFAULT] Application terminated; kernel continues.\n");
+    if (Process_IsCurrentUser())
+      return Process_ExitCurrent(rsp, (int32_t)(128u + (uint32_t)f->vector));
+
     uint64_t next_rsp = Task_Exit(rsp);
     if (!next_rsp)
       kernel_panic_halt();
