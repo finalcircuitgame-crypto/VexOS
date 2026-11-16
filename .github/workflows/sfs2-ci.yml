@@ -1,0 +1,56 @@
+name: SFS2 CI
+
+on:
+  push:
+    branches: [main, feature/sfs2-foundation]
+    paths:
+      - "src/kernel/core/sfs2.c"
+      - "src/include/sfs2.h"
+      - "tools/sfs2_image.py"
+      - "tools/test_sfs2_image.py"
+      - "tools/sfs2_kernel_test.c"
+      - "docs/SFS2_FORMAT.md"
+      - ".github/workflows/sfs2-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/kernel/core/sfs2.c"
+      - "src/include/sfs2.h"
+      - "tools/sfs2_image.py"
+      - "tools/test_sfs2_image.py"
+      - "tools/sfs2_kernel_test.c"
+      - "docs/SFS2_FORMAT.md"
+      - ".github/workflows/sfs2-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-image-tests:
+    name: SFS2 image formatter and migration
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository (no submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Run SFS2 host-tool regression tests
+        run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
+
+  kernel-regression-tests:
+    name: SFS2 kernel logic, journal, and crash recovery
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository (no submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Compile standalone SFS2 kernel tests
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -DVEXOS_CI_INPUT_TEST -Isrc/include \
+            src/kernel/core/sfs2.c tools/sfs2_kernel_test.c \
+            -o /tmp/sfs2-kernel-tests
+      - name: Run SFS2 kernel regression tests
+        run: /tmp/sfs2-kernel-tests
