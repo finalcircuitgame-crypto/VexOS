@@ -4,6 +4,7 @@
 #include "d_event.h"
 
 #define SYS_EXIT       0u
+#define SYS_TICKS      7u
 #define SYS_DRAW       9u
 #define SYS_KEY_EVENT 10u
 #define SYS_APP_READY 11u
