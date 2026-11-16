@@ -52,7 +52,7 @@ Provide a filesystem-independent kernel interface while preserving existing Simp
 
 Ring-3 processes currently have task-local file descriptor tables. Open handles use VFS; reads validate the user buffer and advance the handle offset; seek and close operate on the same handle. Process cleanup closes remaining handles.
 
-Ring-3 create, write, unlink, directory iteration, and current-working-directory syscalls are not exposed yet. Kernel consumers can call the VFS path-based APIs directly.
+Ring-3 has task-local file and directory descriptors. In addition to open/read/seek/close, it exposes create, whole-file replacement write, unlink, stat, opendir, and readdir. The write path copies a bounded user buffer into kernel-owned memory before invoking VFS. Detailed register and return conventions are in [USER_SYSCALLS.md](USER_SYSCALLS.md). Per-user filesystem permissions are not implemented; ring-3 tasks share the volume namespace.
 
 ## Known safety issue
 
