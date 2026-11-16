@@ -10,6 +10,7 @@ typedef struct {
   ProcessInfo info;
   AddressSpace *address_space;
   void *kernel_stack_base;
+  uint64_t kernel_stack_top;
   uint8_t owns_kernel_stack;
 } Process;
 
@@ -72,6 +73,7 @@ void Process_Init(void) {
     processes[i].info.name[0] = '\0';
     processes[i].address_space = NULL;
     processes[i].kernel_stack_base = NULL;
+    processes[i].kernel_stack_top = 0;
     processes[i].owns_kernel_stack = 0;
   }
 
@@ -113,6 +115,7 @@ ProcessId Process_RegisterTask(const char *name, uint32_t task_id,
   copy_name(process->info.name, name);
   process->address_space = NULL;
   process->kernel_stack_base = external_stack_base;
+  process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
   return process->info.pid;
 }
@@ -141,6 +144,7 @@ ProcessId Process_CreateKernel(const char *name, void (*entry)(void)) {
     return 0;
   }
   Process *process = find_by_pid(pid);
+  process->kernel_stack_top = (uint64_t)(uintptr_t)stack + PAGE_SIZE;
   process->owns_kernel_stack = 1;
   return pid;
 }
@@ -179,9 +183,30 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
 
   Process *process = find_by_pid(pid);
   process->address_space = space;
+  process->kernel_stack_top = (uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE;
   process->owns_kernel_stack = 1;
   process->info.user_mode = 1;
   return pid;
+}
+
+void Process_AttachCurrentAddressSpace(AddressSpace *space) {
+  Process *process = find_by_task(Task_GetCurrentId());
+  if (!process)
+    return;
+  process->address_space = space;
+  if (space)
+    process->info.user_mode = 1;
+  Task_SetCurrentContext(space, process->kernel_stack_top,
+                         process->info.user_mode);
+}
+
+void Process_SetCurrentKernelStack(uint64_t stack_top) {
+  Process *process = find_by_task(Task_GetCurrentId());
+  if (!process)
+    return;
+  process->kernel_stack_top = stack_top;
+  Task_SetCurrentContext(process->address_space, stack_top,
+                         process->info.user_mode);
 }
 
 int Process_BeginUserModeCurrent(AddressSpace *space,
@@ -193,6 +218,7 @@ int Process_BeginUserModeCurrent(AddressSpace *space,
     return 0;
 
   process->address_space = space;
+  process->kernel_stack_top = kernel_stack_top;
   process->info.user_mode = 1;
   if (!Task_SetCurrentContext(space, kernel_stack_top, 1)) {
     process->address_space = NULL;
@@ -207,7 +233,7 @@ void Process_DetachCurrentAddressSpace(void) {
   if (!process)
     return;
   process->address_space = NULL;
-  Task_SetCurrentContext(NULL, 0, process->info.user_mode);
+  Task_SetCurrentContext(NULL, process->kernel_stack_top, process->info.user_mode);
   VMM_Activate();
 }
 
@@ -269,7 +295,7 @@ uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code) {
   if (process->address_space) {
     AddressSpace *space = process->address_space;
     process->address_space = NULL;
-    Task_SetCurrentContext(NULL, 0, 1);
+    Task_SetCurrentContext(NULL, process->kernel_stack_top, 1);
     VMM_Activate();
     VMM_AddressSpaceDestroy(space);
   }
@@ -332,6 +358,7 @@ int Process_ReapTask(uint32_t task_id) {
   process->info.user_mode = 0;
   process->info.name[0] = '\0';
   process->kernel_stack_base = NULL;
+  process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
   return 1;
 }
