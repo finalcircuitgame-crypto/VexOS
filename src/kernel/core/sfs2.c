@@ -39,7 +39,7 @@ int sfs2_validate_superblock(const sfs2_superblock_t *sb,
         sb->sector_size != SFS2_SECTOR_SIZE ||
         sb->volume_sectors == 0 || sb->volume_sectors > device_sectors ||
         sb->inode_capacity == 0 || sb->inode_capacity > SFS2_INODE_MAX ||
-        sb->root_inode == 0)
+        sb->root_inode != 1u)
         return 0;
 
     uint64_t bitmap_end = sb->bitmap_lba + sb->bitmap_sectors;
