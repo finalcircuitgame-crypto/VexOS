@@ -63,6 +63,7 @@ Ring-3 has task-local file and directory descriptors. In addition to open/read/s
 
 The CI QEMU test harness now checks:
 - Existing SFS1 file stat/read and path normalization.
+- In-memory malformed-table fixtures covering traversal names, unterminated names, file/directory conflicts, overlapping extents, and extents beyond the committed allocation boundary.
 - Nested path write/read and implicit directory stat.
 - Root and child directory iteration, including duplicate synthetic-directory suppression.
 - Retry after a directory read with an undersized output buffer.
