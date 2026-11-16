@@ -680,11 +680,14 @@ int simplefs_init(void) {
     return 0;
   }
 
-  /* SFS2 is probed before legacy formats. Its mount path is read-only. */
+  /* Probe SFS2 before legacy formats; journal geometry controls write support. */
   if (sfs2_mount(&g_sfs2, sfs2_storage_read, sfs2_storage_write,
                  storage_sector_limit())) {
     g_kind = STORAGE_FS_SFS2;
-    serial_print("[SFS2] mounted read-only\n");
+    if (g_sfs2.superblock.journal_lba)
+      serial_print("[SFS2] mounted with redo journal\n");
+    else
+      serial_print("[SFS2] mounted read-only (no journal)\n");
     g_mounted = 1;
     return 1;
   }
