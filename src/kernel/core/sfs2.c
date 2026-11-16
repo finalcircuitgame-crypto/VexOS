@@ -405,39 +405,12 @@ static int sfs2_tx_store_superblock(sfs2_volume_t *volume,
     return 1;
 }
 
-static int sfs2_root_filename(const char *path, const char **out_name,
-                              uint32_t *out_length) {
-    if (!path || !out_name || !out_length)
-        return 0;
-    while (*path == '/')
-        ++path;
-    if (!*path)
-        return 0;
-    const char *name = path;
-    uint32_t length = 0;
-    while (path[length] && path[length] != '/')
-        ++length;
-    if (!length || length >= SFS2_NAME_MAX)
-        return 0;
-    uint32_t tail = length;
-    while (path[tail] == '/')
-        ++tail;
-    if (path[tail])
-        return 0; /* Initial writable backend supports root files only. */
-    if ((length == 1u && name[0] == '.') ||
-        (length == 2u && name[0] == '.' && name[1] == '.'))
-        return 0;
-    *out_name = name;
-    *out_length = length;
-    return 1;
-}
-
-static int sfs2_find_root_entry(sfs2_volume_t *volume, const char *name,
-                               uint32_t length, uint32_t *out_index) {
+static int sfs2_find_child_entry(sfs2_volume_t *volume,
+                                   uint32_t parent_id, const char *name,
+                                   uint32_t length, uint32_t *out_index) {
     for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
         sfs2_inode_t *inode = &volume->inodes[i];
-        if (!inode->inode_id || inode->parent_id !=
-                volume->superblock.root_inode)
+        if (!inode->inode_id || inode->parent_id != parent_id)
             continue;
         uint32_t n = 0;
         while (n < SFS2_NAME_MAX && inode->name[n])
@@ -454,6 +427,99 @@ static int sfs2_find_root_entry(sfs2_volume_t *volume, const char *name,
         }
     }
     return 0;
+}
+
+static int sfs2_create_directory_entry(sfs2_volume_t *volume,
+                                       uint32_t parent_id, const char *name,
+                                       uint32_t name_length,
+                                       uint32_t *out_index) {
+    uint32_t index = 0;
+    uint32_t inode_id = 0;
+    if (!sfs2_next_inode_slot(volume, &index, &inode_id))
+        return 0;
+    sfs2_inode_t directory;
+    sfs2_zero(&directory, sizeof(directory));
+    directory.inode_id = inode_id;
+    directory.parent_id = parent_id;
+    directory.type = SFS2_INODE_DIRECTORY;
+    for (uint32_t i = 0; i < name_length; ++i)
+        directory.name[i] = name[i];
+    directory.generation = 1u;
+    directory.checksum = sfs2_checksum(&directory, sizeof(directory),
+        (uint32_t)offsetof(sfs2_inode_t, checksum));
+
+    g_sfs2_transaction.count = 0;
+    if (!sfs2_tx_store_inode(volume, index, &directory))
+        return 0;
+    sfs2_superblock_t updated_sb = volume->superblock;
+    if (!sfs2_tx_store_superblock(volume, &updated_sb) ||
+        !sfs2_tx_commit(volume))
+        return 0;
+    volume->superblock = updated_sb;
+    volume->inodes[index] = directory;
+    if (out_index)
+        *out_index = index;
+    return 1;
+}
+
+/* Resolve a file path to its parent directory and final component. Missing
+   intermediate directories are created transactionally for write operations. */
+static int sfs2_resolve_parent(sfs2_volume_t *volume, const char *path,
+                               int create_parents, uint32_t *out_parent_id,
+                               const char **out_name,
+                               uint32_t *out_name_length) {
+    if (!volume || !volume->mounted || !path || !out_parent_id ||
+        !out_name || !out_name_length)
+        return 0;
+    uint32_t parent_index = 0;
+    if (!sfs2_find_inode_id(volume, volume->superblock.root_inode,
+                            &parent_index))
+        return 0;
+    uint32_t pos = 0;
+    while (path[pos] == '/')
+        ++pos;
+    if (!path[pos])
+        return 0;
+
+    for (;;) {
+        uint32_t start = pos;
+        while (path[pos] && path[pos] != '/')
+            ++pos;
+        uint32_t length = pos - start;
+        if (!length || length >= SFS2_NAME_MAX ||
+            (length == 1u && path[start] == '.') ||
+            (length == 2u && path[start] == '.' && path[start + 1u] == '.'))
+            return 0;
+        uint32_t next = pos;
+        while (path[next] == '/')
+            ++next;
+        if (!path[next]) {
+            if (path[pos] == '/' && pos == next)
+                return 0;
+            *out_parent_id = volume->inodes[parent_index].inode_id;
+            *out_name = path + start;
+            *out_name_length = length;
+            return volume->inodes[parent_index].type ==
+                   SFS2_INODE_DIRECTORY;
+        }
+
+        if (volume->inodes[parent_index].type != SFS2_INODE_DIRECTORY)
+            return 0;
+        uint32_t child_index = 0;
+        if (!sfs2_find_child_entry(volume,
+                volume->inodes[parent_index].inode_id,
+                path + start, length, &child_index)) {
+            if (!create_parents ||
+                !sfs2_create_directory_entry(volume,
+                    volume->inodes[parent_index].inode_id,
+                    path + start, length, &child_index))
+                return 0;
+        }
+        if (volume->inodes[child_index].type != SFS2_INODE_DIRECTORY)
+            return 0;
+        parent_index = child_index;
+        pos = next;
+    }
 }
 
 static int sfs2_next_inode_slot(sfs2_volume_t *volume, uint32_t *out_index,
