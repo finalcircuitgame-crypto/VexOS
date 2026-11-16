@@ -1188,7 +1188,7 @@ int sfs2_ci_mount_read_test(void) {
     inode.name[3] = 'r'; inode.name[4] = 'n'; inode.name[5] = 'a';
     inode.name[6] = 'l';
     inode.size_bytes = 1u;
-    inode.data_lba = 12u;
+    inode.data_lba = 37u;
     inode.data_sectors = 1u;
     sfs2_test_finish_inode(&inode);
     sfs2_test_store_inode_at(35u, 1u, &inode);
@@ -1261,6 +1261,55 @@ int sfs2_ci_mount_read_test(void) {
     if (!sfs2_unlink_file(&volume, "/new") ||
         sfs2_stat_path(&volume, "/new", &info))
         return 0;
+
+    /* Nested parents are materialized as directory inodes automatically. */
+    if (!sfs2_write_file(&volume, "/dir/sub/leaf.bin", "nested", 6u) ||
+        !sfs2_stat_path(&volume, "/dir/sub", &info) ||
+        info.type != SFS2_INODE_DIRECTORY)
+        return 0;
+    char nested[6];
+    if (!sfs2_read_file_at(&volume, "/dir/sub/leaf.bin", 0u,
+                           nested, sizeof(nested), &read_count) ||
+        read_count != sizeof(nested) || nested[0] != 'n' ||
+        nested[1] != 'e' || nested[2] != 's' || nested[3] != 't' ||
+        nested[4] != 'e' || nested[5] != 'd')
+        return 0;
+    cursor = 0;
+    if (sfs2_list_directory(&volume, "/dir", &cursor, &listed) != 1 ||
+        listed.type != SFS2_INODE_DIRECTORY || listed.name[0] != 's')
+        return 0;
+    if (!sfs2_unlink_file(&volume, "/dir/sub/leaf.bin") ||
+        sfs2_stat_path(&volume, "/dir/sub/leaf.bin", &info))
+        return 0;
+
+    /* Inject a failed write at every transaction boundary. Before the
+       commit-header write the old file must survive; after it, replay must
+       complete the replacement on the next mount. */
+    static uint8_t sfs2_fault_baseline[64u][SFS2_SECTOR_SIZE];
+    for (uint32_t l = 0; l < 64u; ++l)
+        for (uint32_t b = 0; b < SFS2_SECTOR_SIZE; ++b)
+            sfs2_fault_baseline[l][b] = g_sfs2_test_disk[l][b];
+    for (uint32_t fail_at = 1u; fail_at <= 9u; ++fail_at) {
+        for (uint32_t l = 0; l < 64u; ++l)
+            for (uint32_t b = 0; b < SFS2_SECTOR_SIZE; ++b)
+                g_sfs2_test_disk[l][b] = sfs2_fault_baseline[l][b];
+        sfs2_zero(&volume, sizeof(volume));
+        if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u))
+            return 0;
+        g_sfs2_test_write_calls = 0;
+        g_sfs2_test_fail_write_call = fail_at;
+        if (sfs2_write_file(&volume, "/journal", "Z", 1u))
+            return 0;
+        g_sfs2_test_fail_write_call = 0;
+        if (!volume.mounted &&
+            !sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u))
+            return 0;
+        one = 0;
+        if (!sfs2_read_file_at(&volume, "/journal", 0u, &one, 1u,
+                               &read_count) || read_count != 1u ||
+            one != (fail_at >= 6u ? 'Z' : 'R'))
+            return 0;
+    }
     if (!sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
     return 1;
