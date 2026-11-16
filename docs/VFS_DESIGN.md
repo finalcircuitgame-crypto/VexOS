@@ -28,7 +28,7 @@ Provide a filesystem-independent kernel interface while preserving existing Simp
 ### Locking
 
 - SimpleFS owns mutable global tables and storage allocator state, so VFS serializes backend operations with a spinlock.
-- Node records and mount initialization use separate spinlocks.
+- Node records and mount initialization use separate spinlocks. Lock acquisition saves the caller's interrupt-enable state and disables local interrupts while held, preventing the single-core PIT scheduler from preempting a task that owns a VFS lock. This is not an SMP lock implementation.
 - Namespace mutations (create, replace/write, and unlink) hold a namespace lock across parent/type validation, node reservation, and backend commit. This prevents concurrent mutations from creating both a file and a child beneath that file.
 - VFS calls are task-context-only; do not call them from interrupt handlers.
 - The current kernel is single-core. SMP, interrupt/preemption lock ordering, and lock-holder starvation require a separate audit before multicore support.
