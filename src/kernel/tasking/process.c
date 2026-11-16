@@ -286,67 +286,94 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
 }
 
 int Process_AttachCurrentAddressSpace(AddressSpace *space) {
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_task(Task_GetCurrentId());
   if (!process || process->info.state != PROCESS_RUNNING ||
-      !process->kernel_stack_top)
+      !process->kernel_stack_top) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
 
   /* This may attach a loading image before ring 3 is entered. */
   process->address_space = space;
   if (!Task_SetCurrentContext(space, process->kernel_stack_top,
                               process->info.user_mode)) {
     process->address_space = NULL;
+    process_irq_restore(irq_flags);
     return 0;
   }
+  process_irq_restore(irq_flags);
   return 1;
 }
 
 void Process_SetCurrentKernelStack(uint64_t stack_top) {
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_task(Task_GetCurrentId());
-  if (!process)
-    return;
-  process->kernel_stack_top = stack_top;
-  Task_SetCurrentContext(process->address_space, stack_top,
-                         process->info.user_mode);
+  if (process) {
+    process->kernel_stack_top = stack_top;
+    Task_SetCurrentContext(process->address_space, stack_top,
+                           process->info.user_mode);
+  }
+  process_irq_restore(irq_flags);
 }
 
 int Process_BeginUserModeCurrent(AddressSpace *space,
                                  uint64_t kernel_stack_top) {
-  if (!process_manager_ready || !space || !kernel_stack_top)
+  uint64_t irq_flags = process_irq_save_disable();
+  if (!process_manager_ready || !space || !kernel_stack_top) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
   Process *process = find_by_task(Task_GetCurrentId());
-  if (!process || process->info.state != PROCESS_RUNNING)
+  if (!process || process->info.state != PROCESS_RUNNING) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
 
+  AddressSpace *old_space = process->address_space;
+  uint64_t old_stack_top = process->kernel_stack_top;
+  uint8_t old_user_mode = process->info.user_mode;
   process->address_space = space;
   process->kernel_stack_top = kernel_stack_top;
   process->info.user_mode = 1;
   if (!Task_SetCurrentContext(space, kernel_stack_top, 1)) {
-    process->address_space = NULL;
-    process->info.user_mode = 0;
+    process->address_space = old_space;
+    process->kernel_stack_top = old_stack_top;
+    process->info.user_mode = old_user_mode;
+    process_irq_restore(irq_flags);
     return 0;
   }
+  process_irq_restore(irq_flags);
   return 1;
 }
 
 void Process_DetachCurrentAddressSpace(void) {
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_task(Task_GetCurrentId());
-  if (!process)
-    return;
-  process->address_space = NULL;
-  Task_SetCurrentContext(NULL, process->kernel_stack_top, process->info.user_mode);
-  VMM_Activate();
+  if (process) {
+    process->address_space = NULL;
+    Task_SetCurrentContext(NULL, process->kernel_stack_top,
+                           process->info.user_mode);
+    VMM_Activate();
+  }
+  process_irq_restore(irq_flags);
 }
 
 int Process_IsCurrentUser(void) {
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_task(Task_GetCurrentId());
-  return process && process->info.user_mode &&
-         process->info.state == PROCESS_RUNNING;
+  int is_user = process && process->info.user_mode &&
+                process->info.state == PROCESS_RUNNING;
+  process_irq_restore(irq_flags);
+  return is_user;
 }
 
 ProcessId Process_GetCurrentId(void) {
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_task(Task_GetCurrentId());
-  return process ? process->info.pid : 0;
+  ProcessId pid = process ? process->info.pid : 0;
+  process_irq_restore(irq_flags);
+  return pid;
 }
 
 uint32_t Process_GetCount(void) {
