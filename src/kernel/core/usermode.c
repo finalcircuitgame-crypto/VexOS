@@ -35,6 +35,8 @@ void usermode_cleanup_current(void) {
     if (!g_user_process_active)
         return;
 
+    Process_AttachCurrentAddressSpace(NULL);
+    Process_SetCurrentKernelStack(0);
     VMM_Activate();
     if (g_user_address_space) {
         VMM_AddressSpaceDestroy(g_user_address_space);
@@ -511,6 +513,10 @@ void usermode_launch(const char *filename) {
     g_user_kernel_stack = kernel_stack;
     g_user_process_active = 1;
 
+    /* Bind the ring-3 execution context to the currently scheduled process.
+       IRQ0 will restore this CR3 and TSS.RSP0 whenever the process resumes. */
+    Process_AttachCurrentAddressSpace(space);
+    Process_SetCurrentKernelStack((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     TSS_Load((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     serial_print("[USERMODE] entering ring3\n");
     VMM_ActivateAddressSpace(space);
