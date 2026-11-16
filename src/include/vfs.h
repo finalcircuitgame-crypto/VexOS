@@ -27,7 +27,7 @@ typedef struct {
     struct vfs_node *node;
 } vfs_file_t;
 
-/* Directory handles enumerate immediate children, not backend-private names. */
+/* Zero-initialize before open. Iterators enumerate immediate children. */
 typedef struct {
     char path[VFS_PATH_MAX];
     uint32_t next_index;
