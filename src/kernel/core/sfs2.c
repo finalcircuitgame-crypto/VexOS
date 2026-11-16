@@ -77,7 +77,7 @@ int sfs2_validate_inode(const sfs2_inode_t *inode,
     /* Inode 1 is the unique root directory and has no parent or name. */
     if (inode->inode_id == 1u)
         return inode->type == SFS2_INODE_DIRECTORY &&
-               inode->parent_id == 0u && inode->name[0] == '\\0' &&
+               inode->parent_id == 0u && inode->name[0] == '\0' &&
                inode->size_bytes == 0 && inode->data_lba == 0 &&
                inode->data_sectors == 0;
 
