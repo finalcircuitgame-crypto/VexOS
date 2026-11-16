@@ -8,5 +8,6 @@
 void PMM_Init(uint64_t mem_size, void* bitmap_addr);
 void* PMM_AllocatePage();
 void PMM_FreePage(void* addr);
+uint64_t PMM_GetFreePageCount(void);
 
 #endif
