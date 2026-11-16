@@ -287,7 +287,14 @@ int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
             ++src;
     }
 
-    if (written == 0 || written >= out_cap) {
+    if (written == 0) {
+        if (out_cap < 2u)
+            return 0;
+        out[0] = '/';
+        out[1] = '\0';
+        return 1;
+    }
+    if (written >= out_cap) {
         out[0] = '\0';
         return 0;
     }
