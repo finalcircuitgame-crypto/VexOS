@@ -82,7 +82,7 @@ static void log_arrow_transition(const char *stage, uint8_t usage,
     length = log_append_text(message, length, pressed ? "DOWN" : "UP");
     length = log_append_text(message, length, " source=");
     length = log_append_text(message, length, source);
-    message[length++] = '\\n';
+    message[length++] = '\n';
     (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
 }
 
