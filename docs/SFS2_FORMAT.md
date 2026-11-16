@@ -3,10 +3,13 @@
 SFS2 is the next native VexOS filesystem format. Its on-disk metadata contract is
 defined in `src/include/sfs2.h` and validated by `src/kernel/core/sfs2.c`.
 
-**Kernel status:** SFS2 currently mounts read-only. The kernel exposes path
-lookup, stat, directory enumeration, and ranged file reads through
-SimpleFS/VFS. Kernel create, replace, unlink, bitmap persistence, journal
-recovery, and writable mount support are **not implemented**. SFS1 remains the
+**Kernel status:** SFS2 mounts read/write only when the image has the optional
+redo-journal extension and the storage backend supplies durable sector writes.
+Legacy SFS2 images with no journal remain read-only. The current transactional
+writer supports root-directory regular files only, with a 2 MiB per-file limit;
+it supports create, replace, and unlink. Nested directory mutation is not yet
+supported. A committed redo journal is replayed before inode metadata is
+trusted. SFS1 remains the
 writable native filesystem.
 
 **Host-tool status:** `tools/sfs2_image.py` provides an offline formatter,
@@ -32,9 +35,18 @@ metadata region bounds, inode capacity, root inode ID, and an FNV-1a checksum.
 The validator rejects overlapping/out-of-order regions, out-of-device volume
 sizes, undersized metadata regions, and invalid checksums.
 
+The optional journal occupies a fixed region before the bitmap. The first
+journal sector is a checksummed commit header; up to eight following sectors
+hold redo images for home sectors. A transaction writes journal payloads,
+commits the header, applies home sectors, then clears the header. On mount, a
+committed transaction is replayed before inode-table validation. Images with
+zero journal geometry remain compatible as read-only SFS2 volumes.
+
 The bitmap has one bit per data-area sector (bit zero describes LBA
-`data_lba`). A set bit means allocated. The kernel currently validates bitmap
-bits for existing file extents; it does not yet persist allocations or frees.
+`data_lba`). A set bit means allocated. Journaled root-file operations update
+the bitmap and inode record in one redo transaction. Each file is limited to
+4096 sectors (2 MiB) so the bitmap and inode updates fit within the eight-record
+journal limit.
 
 ## Inodes
 
@@ -117,9 +129,10 @@ python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 
 ## Remaining kernel milestones
 
-1. Define and reserve a journal region in a backward-compatible on-disk layout.
-2. Implement journal replay before trusting mutable metadata.
-3. Add write ordering and flush/error propagation to the storage abstraction.
-4. Implement transactional create/replace/unlink and bitmap updates.
-5. Add power-loss/fault-injection tests for every journal commit boundary.
-6. Enable writable SFS2 mount only after recovery and QEMU tests pass.
+1. Add fault-injection tests for interruption after each journal payload, commit
+   header, home-sector write, and journal-clear operation.
+2. Extend transactions to nested directories and larger files using a scalable
+   extent and journal design.
+3. Add explicit concurrency protection around the transaction scratch state.
+4. Qualify write ordering and flush behavior across physical AHCI/ATA devices.
+5. Keep old no-journal SFS2 images read-only and preserve SFS1 compatibility.
