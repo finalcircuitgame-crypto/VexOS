@@ -39,6 +39,7 @@ void serial_print(const char *str);
 #define ATA_CMD_IDENTIFY 0xEC
 #define ATA_CMD_READ_SECTORS 0x20
 #define ATA_CMD_WRITE_SECTORS 0x30
+#define ATA_CMD_FLUSH_CACHE 0xE7
 
 #define ATA_SR_BSY 0x80
 #define ATA_SR_DRDY 0x40
@@ -58,6 +59,8 @@ static int ata_wait_not_bsy(uint16_t io_base, uint16_t ctrl_base,
                             uint32_t spins) {
   for (uint32_t i = 0; i < spins; i++) {
     uint8_t s = inb((uint16_t)(io_base + ATA_REG_STATUS));
+    if (s & ATA_SR_ERR)
+      return 0;
     if (!(s & ATA_SR_BSY))
       return 1;
     (void)ctrl_base;
@@ -155,7 +158,7 @@ const ata_pio_device_t *ata_pio_get_storage_device(void) {
 
 int ata_pio_read28(const ata_pio_device_t *dev, uint32_t lba, uint8_t count,
                    void *out_buf) {
-  if (!dev || !dev->present || count == 0)
+  if (!dev || !dev->present || !in_buf || count == 0)
     return 0;
   if (lba & 0xF0000000u)
     return 0;
@@ -219,9 +222,10 @@ int ata_pio_write28(const ata_pio_device_t *dev, uint32_t lba, uint8_t count,
     io_delay_400ns(ctrl);
   }
 
-  // Flush cache (optional for QEMU); ignore errors.
-  outb((uint16_t)(io + ATA_REG_COMMAND), 0xE7);
-  (void)ata_wait_not_bsy(io, ctrl, 1000000);
+  /* Do not report a durable write when the device rejects or stalls flush. */
+  outb((uint16_t)(io + ATA_REG_COMMAND), ATA_CMD_FLUSH_CACHE);
+  if (!ata_wait_not_bsy(io, ctrl, 1000000))
+    return 0;
 
   return 1;
 }
