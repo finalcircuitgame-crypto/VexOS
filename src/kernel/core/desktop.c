@@ -1192,12 +1192,18 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
     shell_append("mounting fs...\n");
     if (vfs_init()) {
-      char listing[2048];
-      uint32_t listing_len = vfs_list_to_buffer(listing, sizeof(listing));
-      if (listing_len)
-        shell_append(listing);
-      else
+      uint32_t file_count = vfs_file_count();
+      if (file_count == 0) {
         shell_append("(empty)\n");
+      } else {
+        for (uint32_t i = 0; i < file_count; ++i) {
+          char entry[VFS_PATH_MAX];
+          if (vfs_file_name_at(i, entry, sizeof(entry))) {
+            shell_append(entry);
+            shell_append("\n");
+          }
+        }
+      }
     } else {
       shell_append("fs init failed\n");
     }
