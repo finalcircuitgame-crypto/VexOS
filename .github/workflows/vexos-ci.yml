@@ -270,6 +270,7 @@ jobs:
             "[CI] Heap allocator alignment/free/coalesce passed" \
             "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
             "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
+            "[CI] Independent address spaces, CR3 switching, user-memory isolation, and kernel supervisor mappings passed" \
             "[CI] ELF header/segment validation and rollback passed" \
             "[CI] Task IRET frame and scheduler checks passed" \
             "[CI] Runtime task IRET frames validated" \
