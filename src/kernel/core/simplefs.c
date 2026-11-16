@@ -285,7 +285,7 @@ static int fat_mount_and_scan_root(void) {
       return 0;
     if (next >= 0x0FFFFFF8u)
       return 1;
-    if (next < 2u)
+    if (next < 2u || next >= g_fat.cluster_count + 2u)
       return 0;
     cluster = next;
   }
