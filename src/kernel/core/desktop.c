@@ -440,6 +440,10 @@ static void draw_app_icon(uint32_t x, uint32_t y, uint32_t size,
 static void ring3_task_entry(void) {
   usermode_launch(g_ring3_elf_name);
 
+  // A loader failure must not be preempted between publishing deferred
+  // cleanup and marking this launcher task as a zombie.
+  __asm__ volatile("cli" ::: "memory");
+
   // On success usermode_launch transfers to ring 3 and never returns. A
   // return means the loader rejected the image or failed before the switch.
   shell_append("ring3: loader returned; see serial log\n");
