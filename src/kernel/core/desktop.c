@@ -5,7 +5,7 @@
 #include "../../include/usermode.h"
 #include "../../include/task.h"
 #include "../../include/process.h"
-#include "../../include/simplefs.h"
+#include "../../include/vfs.h"
 #include "../../include/ramfs.h"
 #include "../../include/png.h"
 #include "../../include/jpeg.h"
@@ -132,16 +132,18 @@ static int viewer_load_file(const char *name) {
   uint8_t header[8] = {0};
   static const uint8_t png_signature[8] = {137u, 80u, 78u, 71u, 13u, 10u, 26u, 10u};
 
-  if (!name || !simplefs_init() || !simplefs_file_size(name, &file_size) ||
-      file_size == 0) {
+  vfs_stat_t file_info;
+  if (!name || !vfs_init() || !vfs_stat(name, &file_info) ||
+      file_info.type != VFS_NODE_FILE || file_info.size == 0) {
     return 0;
   }
+  file_size = file_info.size;
 
   viewer_clear_content();
   viewer_copy_name(name);
 
   if (file_size >= sizeof(header) &&
-      simplefs_read_file(name, header, (uint32_t)sizeof(header), &out_len)) {
+      vfs_read(name, header, (uint32_t)sizeof(header), &out_len)) {
     uint8_t is_png = 1;
     for (uint32_t i = 0; i < (uint32_t)sizeof(png_signature); i++) {
       if (header[i] != png_signature[i]) {
@@ -164,7 +166,7 @@ static int viewer_load_file(const char *name) {
           uint32_t image_width = 0;
           uint32_t image_height = 0;
           uint8_t *image_pixels = NULL;
-          int read_ok = simplefs_read_file(name, file_data, file_size, &bytes_read) &&
+          int read_ok = vfs_read(name, file_data, file_size, &bytes_read) &&
                         bytes_read == file_size;
           int decode_ok = read_ok &&
                           png_decode_rgba(file_data, file_size, &image_width,
@@ -201,7 +203,7 @@ static int viewer_load_file(const char *name) {
           uint32_t image_width = 0;
           uint32_t image_height = 0;
           uint8_t *image_pixels = NULL;
-          int read_ok = simplefs_read_file(name, file_data, file_size, &bytes_read) &&
+          int read_ok = vfs_read(name, file_data, file_size, &bytes_read) &&
                         bytes_read == file_size;
           int decode_ok = read_ok &&
                           jpeg_decode_rgba(file_data, file_size, &image_width,
@@ -226,7 +228,7 @@ static int viewer_load_file(const char *name) {
       }
     } else {
       uint32_t text_len = 0;
-      if (!simplefs_read_file(name, g_viewer_text,
+      if (!vfs_read(name, g_viewer_text,
                               (uint32_t)sizeof(g_viewer_text) - 1u,
                               &text_len)) {
         return 0;
@@ -244,7 +246,7 @@ static int viewer_load_file(const char *name) {
     }
   } else {
     uint32_t text_len = 0;
-    if (!simplefs_read_file(name, g_viewer_text,
+    if (!vfs_read(name, g_viewer_text,
                             (uint32_t)sizeof(g_viewer_text) - 1u, &text_len)) {
       return 0;
     }
@@ -459,20 +461,22 @@ static void launch_ring3_task(const char *filename) {
   g_ring3_elf_name = filename;
   g_ring3_task_started = 1;
 
-  if (!simplefs_init()) {
+  if (!vfs_init()) {
     shell_append("ring3: storage mount failed\n");
     g_ring3_task_started = 0;
     return;
   }
 
-  uint32_t elf_size = 0;
-  if (!simplefs_file_size(filename, &elf_size) || elf_size == 0) {
+  vfs_stat_t elf_info;
+  if (!vfs_stat(filename, &elf_info) ||
+      elf_info.type != VFS_NODE_FILE || elf_info.size == 0) {
     shell_append("ring3: executable not found: ");
     shell_append(filename);
     shell_append("\n");
     g_ring3_task_started = 0;
     return;
   }
+  uint32_t elf_size = elf_info.size;
 
   void *stack = kmalloc(8192);
   if (!stack) {
@@ -1187,14 +1191,19 @@ static void shell_run_line(void) {
     launch_ring3_task("doom.elf");
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
     shell_append("mounting fs...\n");
-    if (simplefs_init()) {
-      simplefs_list();
+    if (vfs_init()) {
+      char listing[2048];
+      uint32_t listing_len = vfs_list_to_buffer(listing, sizeof(listing));
+      if (listing_len)
+        shell_append(listing);
+      else
+        shell_append("(empty)\n");
     } else {
       shell_append("fs init failed\n");
     }
   } else if (g_shell_line_len == 8 && streq_n(g_shell_line, "explorer", 8)) {
     shell_append("opening explorer...\n");
-    if (simplefs_init()) {
+    if (vfs_init()) {
       file_manager_open();
       g_app_open[APP_EXPLORER] = 1;
       wm_raise(APP_EXPLORER);
@@ -1238,21 +1247,23 @@ static void shell_run_line(void) {
     shell_append("wall: loading new.png...\n");
     if (!g_bg) {
       shell_append("wall: no bg buffer\n");
-    } else if (!simplefs_init()) {
+    } else if (!vfs_init()) {
       shell_append("wall: fs init failed\n");
     } else {
-      uint32_t sz = 0;
-      if (!simplefs_file_size("new.png", &sz) || sz == 0) {
+      vfs_stat_t wallpaper_info;
+      if (!vfs_stat("new.png", &wallpaper_info) ||
+          wallpaper_info.type != VFS_NODE_FILE || wallpaper_info.size == 0) {
         shell_append("wall: new.png not found\n");
-      } else if (sz > (8u * 1024u * 1024u)) {
+      } else if (wallpaper_info.size > (8u * 1024u * 1024u)) {
         shell_append("wall: too big\n");
       } else {
+        uint32_t sz = wallpaper_info.size;
         void *png_buf = kmalloc(sz);
         if (!png_buf) {
           shell_append("wall: no mem\n");
         } else {
           uint32_t out_len = 0;
-          if (!simplefs_read_file("new.png", png_buf, sz, &out_len) || out_len != sz) {
+          if (!vfs_read("new.png", png_buf, sz, &out_len) || out_len != sz) {
             shell_append("wall: read failed\n");
           } else {
             ramfs_put_copy("new.png", png_buf, sz);
@@ -1924,7 +1935,7 @@ void desktop_tick(void) {
           serial_print("[CI] Shell opened from Start menu mouse click\n");
 #endif
           g_start_open=0;ui_changed=1;
-        }else if(ry>=50&&ry<72){if(simplefs_init()){file_manager_open();g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
+        }else if(ry>=50&&ry<72){if(vfs_init()){file_manager_open();g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");g_start_open=0;ui_changed=1;
         }else if(ry>=72&&ry<94){g_app_open[APP_NOTEPAD]=1;wm_raise(APP_NOTEPAD);g_start_open=0;ui_changed=1;
         }else if(ry>=94&&ry<116){g_viewer_open=1;g_app_open[APP_VIEWER]=1;wm_raise(APP_VIEWER);g_start_open=0;ui_changed=1;
         }else if(ry>=116&&ry<138){g_setup_open=1;g_app_open[APP_SETUP]=1;g_setup_step=0;wm_raise(APP_SETUP);g_start_open=0;ui_changed=1;
@@ -1934,7 +1945,7 @@ void desktop_tick(void) {
 
     // Desktop shortcuts launch their matching applications.
     if(!doom_window_is_maximized()&&!g_start_open){for(uint32_t i=0;i<4u;i++){int32_t iy=132+(int32_t)i*84;if(hit_test(p0.x,p0.y,15,iy-7,58,70)){
-      if(i==0u){if(simplefs_init()){file_manager_open();g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
+      if(i==0u){if(vfs_init()){file_manager_open();g_app_open[APP_EXPLORER]=1;wm_raise(APP_EXPLORER);}else shell_append("fs init failed\n> ");}
       else if(i==1u){
         g_show_shell=1;g_app_open[APP_SHELL]=1;wm_raise(APP_SHELL);
 #ifdef VEXOS_CI_INPUT_TEST
@@ -1967,7 +1978,7 @@ void desktop_tick(void) {
             g_app_open[APP_SHELL] = 1;
             wm_raise(APP_SHELL);
           } else if (i == 1) {
-            if (simplefs_init()) {
+            if (vfs_init()) {
               file_manager_open();
               g_app_open[APP_EXPLORER] = 1;
               wm_raise(APP_EXPLORER);
