@@ -6,6 +6,7 @@
 #include "hw_profile.h"
 #include "idt.h"
 #include "pmm.h"
+#include "process.h"
 #include "simplefs.h"
 #include "task.h"
 #include "vmm.h"
@@ -1002,7 +1003,7 @@ void kernel_main(BootInfo *bootInfo) {
   ci_framebuffer_syscall_self_test();
 #endif
 
-  Task_Init();
+  Process_Init();
 #ifdef VEXOS_CI_INPUT_TEST
   extern void Task_CI_StartRuntimeTest(void);
   extern int Task_CI_RuntimeTestPassed(void);
