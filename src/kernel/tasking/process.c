@@ -26,10 +26,12 @@ typedef struct {
   void *kernel_stack_base;
   uint64_t kernel_stack_top;
   uint8_t owns_kernel_stack;
+  uint8_t auto_reap;
 } Process;
 
 static Process processes[PROCESS_MAX];
 static ProcessId next_pid = 1;
+static ProcessId system_pid;
 static uint8_t process_manager_ready;
 
 static void copy_name(char dst[PROCESS_NAME_MAX], const char *src) {
@@ -76,6 +78,53 @@ static ProcessId current_parent_pid(void) {
   return current ? current->info.pid : 0;
 }
 
+static ProcessId allocate_pid(void) {
+  if (!next_pid)
+    return 0;
+
+  ProcessId pid = next_pid;
+  /* Never wrap into a PID that may still belong to a live process. */
+  next_pid = (next_pid == UINT64_MAX) ? 0 : next_pid + 1u;
+  return pid;
+}
+
+static void process_wake_parent(Process *process) {
+  if (!process)
+    return;
+  Process *parent = find_by_pid(process->info.parent_pid);
+  if (parent && parent->info.state == PROCESS_BLOCKED) {
+    parent->info.state = PROCESS_READY;
+    Task_MakeReady(parent->info.task_id);
+  }
+}
+
+static void process_reparent_children(Process *parent) {
+  if (!parent || !system_pid || parent->info.pid == system_pid)
+    return;
+
+  for (uint32_t i = 0; i < PROCESS_MAX; ++i) {
+    Process *child = &processes[i];
+    if (child->info.state == PROCESS_UNUSED ||
+        child->info.parent_pid != parent->info.pid)
+      continue;
+
+    /* The permanent system process adopts children of exiting parents.
+       Adopted zombies are reclaimed by Process_ReapOrphans in system context. */
+    child->info.parent_pid = system_pid;
+    child->auto_reap = 1;
+  }
+}
+
+static void process_mark_exited(Process *process, int32_t exit_code) {
+  if (!process || process->info.state == PROCESS_ZOMBIE)
+    return;
+
+  process->info.state = PROCESS_ZOMBIE;
+  process->info.exit_code = exit_code;
+  process_reparent_children(process);
+  process_wake_parent(process);
+}
+
 void Process_Init(void) {
   for (uint32_t i = 0; i < PROCESS_MAX; ++i) {
     processes[i].info.pid = 0;
@@ -89,9 +138,11 @@ void Process_Init(void) {
     processes[i].kernel_stack_base = NULL;
     processes[i].kernel_stack_top = 0;
     processes[i].owns_kernel_stack = 0;
+    processes[i].auto_reap = 0;
   }
 
   next_pid = 1;
+  system_pid = 0;
   process_manager_ready = 1;
 
   Process *system = allocate_record();
@@ -99,7 +150,12 @@ void Process_Init(void) {
     process_manager_ready = 0;
     return;
   }
-  system->info.pid = next_pid++;
+  system->info.pid = allocate_pid();
+  if (!system->info.pid) {
+    process_manager_ready = 0;
+    return;
+  }
+  system_pid = system->info.pid;
   system->info.parent_pid = 0;
   system->info.task_id = Task_GetCurrentId();
   system->info.state = PROCESS_RUNNING;
@@ -110,19 +166,32 @@ void Process_Init(void) {
 
 ProcessId Process_RegisterTask(const char *name, uint32_t task_id,
                                void *external_stack_base) {
+  uint64_t irq_flags = process_irq_save_disable();
   if (!process_manager_ready || task_id >= TASK_MAX ||
       task_id == Task_GetCurrentId() || find_by_task(task_id) ||
-      !external_stack_base || !Task_GetTaskKernelStackTop(task_id))
+      !external_stack_base || !Task_GetTaskKernelStackTop(task_id)) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
 
   Process *process = allocate_record();
-  if (!process)
+  if (!process) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
 
-  process->info.pid = next_pid++;
-  if (!next_pid)
-    next_pid = 1;
-  process->info.parent_pid = current_parent_pid();
+  ProcessId pid = allocate_pid();
+  if (!pid) {
+    process_irq_restore(irq_flags);
+    return 0;
+  }
+
+  ProcessId parent_pid = current_parent_pid();
+  if (!parent_pid)
+    parent_pid = system_pid;
+
+  process->info.pid = pid;
+  process->info.parent_pid = parent_pid;
   process->info.task_id = task_id;
   process->info.state = PROCESS_READY;
   process->info.exit_code = 0;
@@ -132,7 +201,9 @@ ProcessId Process_RegisterTask(const char *name, uint32_t task_id,
   process->kernel_stack_base = external_stack_base;
   process->kernel_stack_top = Task_GetTaskKernelStackTop(task_id);
   process->owns_kernel_stack = 0;
-  return process->info.pid;
+  process->auto_reap = 0;
+  process_irq_restore(irq_flags);
+  return pid;
 }
 
 ProcessId Process_CreateKernel(const char *name, void (*entry)(void)) {
@@ -279,21 +350,27 @@ ProcessId Process_GetCurrentId(void) {
 }
 
 uint32_t Process_GetCount(void) {
+  uint64_t irq_flags = process_irq_save_disable();
   uint32_t count = 0;
   for (uint32_t i = 0; i < PROCESS_MAX; ++i) {
     if (processes[i].info.state != PROCESS_UNUSED)
       ++count;
   }
+  process_irq_restore(irq_flags);
   return count;
 }
 
 int Process_GetInfo(ProcessId pid, ProcessInfo *out) {
   if (!out)
     return 0;
+  uint64_t irq_flags = process_irq_save_disable();
   Process *process = find_by_pid(pid);
-  if (!process)
+  if (!process) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
   *out = process->info;
+  process_irq_restore(irq_flags);
   return 1;
 }
 
@@ -310,25 +387,13 @@ void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task) {
 
 void Process_OnTaskExit(uint32_t task_id) {
   Process *process = find_by_task(task_id);
-  if (!process || process->info.state == PROCESS_ZOMBIE)
-    return;
-  process->info.state = PROCESS_ZOMBIE;
-  process->info.exit_code = -1;
+  process_mark_exited(process, -1);
 }
 
 __attribute__((noreturn)) void Process_ExitKernelCurrent(int32_t exit_code) {
   __asm__ volatile("cli" ::: "memory");
   Process *process = find_by_task(Task_GetCurrentId());
-  if (process) {
-    process->info.exit_code = exit_code;
-    process->info.state = PROCESS_ZOMBIE;
-
-    Process *parent = find_by_pid(process->info.parent_pid);
-    if (parent && parent->info.state == PROCESS_BLOCKED) {
-      parent->info.state = PROCESS_READY;
-      Task_MakeReady(parent->info.task_id);
-    }
-  }
+  process_mark_exited(process, exit_code);
   Task_ExitCurrent();
 }
 
@@ -336,26 +401,19 @@ uint64_t Process_ExitCurrent(uint64_t saved_rsp, int32_t exit_code) {
   __asm__ volatile("cli" ::: "memory");
   uint32_t task_id = Task_GetCurrentId();
   Process *process = find_by_task(task_id);
-  if (!process || !process->info.user_mode)
+  if (!process)
     return Task_Exit(saved_rsp);
 
   if (process->address_space) {
     AddressSpace *space = process->address_space;
     process->address_space = NULL;
-    Task_SetCurrentContext(NULL, process->kernel_stack_top, 1);
+    Task_SetCurrentContext(NULL, process->kernel_stack_top,
+                           process->info.user_mode);
     VMM_Activate();
     VMM_AddressSpaceDestroy(space);
   }
 
-  process->info.exit_code = exit_code;
-  process->info.state = PROCESS_ZOMBIE;
-
-  Process *parent = find_by_pid(process->info.parent_pid);
-  if (parent && parent->info.state == PROCESS_BLOCKED) {
-    parent->info.state = PROCESS_READY;
-    Task_MakeReady(parent->info.task_id);
-  }
-
+  process_mark_exited(process, exit_code);
   return Task_Exit(saved_rsp);
 }
 
@@ -383,8 +441,8 @@ int Process_Wait(ProcessId pid, int32_t *exit_code) {
     if (child->info.state == PROCESS_ZOMBIE) {
       uint32_t child_task_id = child->info.task_id;
       int32_t child_exit_code = child->info.exit_code;
-      /* Reap before restoring interrupts so another task cannot race this
-         parent and release the same zombie between observation and cleanup. */
+      /* Keep the child record stable until its task slot and owned resources
+         are released. Process_ReapTask preserves this disabled-IRQ state. */
       int reaped = Process_ReapTask(child_task_id);
       process_irq_restore(irq_flags);
       if (!reaped)
@@ -410,17 +468,22 @@ int Process_Wait(ProcessId pid, int32_t *exit_code) {
 }
 
 int Process_ReapTask(uint32_t task_id) {
-  Process *process = find_by_task(task_id);
-  if (!process || process->info.state != PROCESS_ZOMBIE ||
-      task_id == Task_GetCurrentId())
-    return 0;
-
-  /* A zombie is never scheduled again. Keep the reaper atomic so another
-     waiter cannot observe a half-released task/process record. */
+  /* Validate under the same IRQ lock as task-slot removal. Only a process's
+     parent (or the system process for adopted orphans) may reap the child. */
   uint64_t irq_flags = process_irq_save_disable();
+  Process *process = find_by_task(task_id);
+  ProcessId caller_pid = current_parent_pid();
+  if (!process || process->info.state != PROCESS_ZOMBIE ||
+      task_id == Task_GetCurrentId() || !caller_pid ||
+      process->info.parent_pid != caller_pid ||
+      (process->address_space &&
+       VMM_GetActiveAddressSpace() == process->address_space)) {
+    process_irq_restore(irq_flags);
+    return 0;
+  }
 
-  /* The task is already off-CPU. Clear its scheduler slot before
-     releasing the backing resources it referenced. */
+  /* The task is already off-CPU. Clear its scheduler slot before releasing
+     the backing resources it referenced. */
   if (!Task_Reap(task_id)) {
     process_irq_restore(irq_flags);
     return 0;
@@ -442,14 +505,45 @@ int Process_ReapTask(uint32_t task_id) {
   process->kernel_stack_base = NULL;
   process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
+  process->auto_reap = 0;
   process_irq_restore(irq_flags);
   return 1;
 }
 
+void Process_ReapOrphans(void) {
+  if (!system_pid || Process_GetCurrentId() != system_pid)
+    return;
+
+  for (uint32_t i = 0; i < PROCESS_MAX; ++i) {
+    uint32_t task_id = UINT32_MAX;
+    uint64_t irq_flags = process_irq_save_disable();
+    Process *process = &processes[i];
+    if (process->auto_reap &&
+        process->info.parent_pid == system_pid &&
+        process->info.state == PROCESS_ZOMBIE &&
+        process->info.task_id != Task_GetCurrentId())
+      task_id = process->info.task_id;
+    process_irq_restore(irq_flags);
+
+    if (task_id != UINT32_MAX)
+      (void)Process_ReapTask(task_id);
+  }
+}
+
 #ifdef VEXOS_CI_INPUT_TEST
-static void ci_kernel_return_entry(void) {
-  /* Deliberately return: Task's kernel-entry trampoline must convert this
-     into a normal process exit instead of returning through address zero. */
+static void ci_kernel_exit_entry(void) {
+  Process_ExitKernelCurrent(42);
+}
+
+static volatile ProcessId ci_orphan_child_pid;
+
+static void ci_orphan_leaf_entry(void) {
+  /* Returning through the trampoline should yield exit code zero. */
+}
+
+static void ci_orphan_parent_entry(void) {
+  ci_orphan_child_pid =
+      Process_CreateKernel("ci-orphan-leaf", ci_orphan_leaf_entry);
 }
 
 static void ci_discard_unstarted(Process *process) {
@@ -471,15 +565,8 @@ static void ci_discard_unstarted(Process *process) {
   process->kernel_stack_base = NULL;
   process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
-  process->info.pid = 0;
-  process->info.parent_pid = 0;
-  process->info.task_id = 0;
-  process->info.state = PROCESS_UNUSED;
-  process->info.exit_code = 0;
-  process->info.user_mode = 0;
-  process->info.name[0] = '\0';
-
-  if (space)
+  process->auto_reap = 0;
+  process->info.pid = 0;  if (space)
     VMM_AddressSpaceDestroy(space);
 }
 
@@ -490,6 +577,12 @@ int Process_CI_SelfTest(void) {
   const uint32_t initial_count = Process_GetCount();
 
   if (!parent_pid || !process_manager_ready)
+    return 0;
+
+  int32_t ignored_exit_code = 0;
+  if (Process_Wait(0, &ignored_exit_code) != -1 ||
+      Process_Wait(parent_pid, &ignored_exit_code) != -1 ||
+      Process_Wait(0xFFFFFFFFFFFFFFFEULL, &ignored_exit_code) != -1)
     return 0;
 
   AddressSpace *space = VMM_AddressSpaceCreate();
@@ -564,7 +657,7 @@ int Process_CI_SelfTest(void) {
   if (!user_ok || Process_GetCount() != initial_count)
     return 0;
 
-  ProcessId kernel_pid = Process_CreateKernel("ci-kernel", ci_kernel_return_entry);
+  ProcessId kernel_pid = Process_CreateKernel("ci-kernel", ci_kernel_exit_entry);
   Process *kernel = find_by_pid(kernel_pid);
   int kernel_ok = kernel_pid && kernel &&
       Process_GetInfo(kernel_pid, &info) &&
@@ -579,13 +672,38 @@ int Process_CI_SelfTest(void) {
        child exits, return its exit code, and reap the zombie automatically. */
     int32_t wait_exit_code = -999;
     kernel_ok = Process_Wait(kernel_pid, &wait_exit_code) == 0 &&
-        wait_exit_code == 0 &&
-        !find_by_pid(kernel_pid);
+        wait_exit_code == 42 &&
+        !find_by_pid(kernel_pid) &&
+        Process_Wait(kernel_pid, NULL) == -1;
   } else if (kernel) {
     ci_discard_unstarted(kernel);
   }
 
-  return kernel_ok && Process_GetCount() == initial_count &&
+  if (!kernel_ok || Process_GetCount() != initial_count ||
+      Process_GetCurrentId() != parent_pid)
+    return 0;
+
+  /* Exit a parent while its child is still ready. The child must be adopted
+     by the system process and automatically reaped after it exits. */
+  ci_orphan_child_pid = 0;
+  ProcessId orphan_parent_pid =
+      Process_CreateKernel("ci-orphan-parent", ci_orphan_parent_entry);
+  int32_t orphan_parent_exit = -999;
+  if (!orphan_parent_pid ||
+      Process_Wait(orphan_parent_pid, &orphan_parent_exit) != 0 ||
+      orphan_parent_exit != 0 || !ci_orphan_child_pid)
+    return 0;
+
+  Process *orphan = find_by_pid(ci_orphan_child_pid);
+  int orphan_ok = orphan &&
+      orphan->info.parent_pid == parent_pid &&
+      orphan->info.state == PROCESS_ZOMBIE &&
+      orphan->auto_reap;
+  Process_ReapOrphans();
+
+  return orphan_ok && !find_by_pid(ci_orphan_child_pid) &&
+         Process_GetCount() == initial_count &&
+         Process_GetCurrentId() == parent_pid;  return kernel_ok && Process_GetCount() == initial_count &&
          Process_GetCurrentId() == parent_pid;
 }
 #endif
