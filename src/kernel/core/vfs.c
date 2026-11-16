@@ -44,6 +44,8 @@ struct vfs_node {
 static struct vfs_node g_nodes[VFS_NODE_CACHE_MAX];
 static volatile uint32_t g_node_lock;
 static volatile uint32_t g_backend_lock;
+/* Serialize namespace mutations across validation and backend commit. */
+static volatile uint32_t g_namespace_lock;
 static volatile uint32_t g_mount_lock;
 
 static void vfs_lock(volatile uint32_t *lock) {
@@ -503,17 +505,28 @@ int vfs_write(const char *path, const void *data, uint32_t len) {
         !g_root_mount.ops || !g_root_mount.ops->write)
         return 0;
     char name[VFS_PATH_MAX];
-    if (!vfs_resolve(path, name, sizeof(name)) ||
-        vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
-        vfs_has_descendant(name))
+    if (!vfs_resolve(path, name, sizeof(name)))
         return 0;
 
-    struct vfs_node *reservation = vfs_node_reserve_path(name);
-    if (!reservation)
+    /* Keep parent/type checks, reservation, and backend update atomic with
+       respect to other namespace mutations. Otherwise two tasks could race
+       to create both "node" and "node/child". */
+    vfs_lock(&g_namespace_lock);
+    if (vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
+        vfs_has_descendant(name)) {
+        vfs_unlock(&g_namespace_lock);
         return 0;
+    }
+
+    struct vfs_node *reservation = vfs_node_reserve_path(name);
+    if (!reservation) {
+        vfs_unlock(&g_namespace_lock);
+        return 0;
+    }
     static const uint8_t empty = 0;
     int result = vfs_backend_write(name, data ? data : &empty, len);
     vfs_node_release_reservation(reservation);
+    vfs_unlock(&g_namespace_lock);
     return result;
 }
 
@@ -521,18 +534,26 @@ int vfs_create(const char *path) {
     if (!vfs_init() || !g_root_mount.ops || !g_root_mount.ops->write)
         return 0;
     char name[VFS_PATH_MAX];
-    vfs_stat_t info;
-    if (!vfs_resolve(path, name, sizeof(name)) ||
-        vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
-        vfs_backend_stat(name, &info) || vfs_has_descendant(name))
+    if (!vfs_resolve(path, name, sizeof(name)))
         return 0;
 
-    struct vfs_node *reservation = vfs_node_reserve_path(name);
-    if (!reservation)
+    vfs_lock(&g_namespace_lock);
+    vfs_stat_t info;
+    if (vfs_string_equal(name, "/") || vfs_path_parent_is_file(name) ||
+        vfs_backend_stat(name, &info) || vfs_has_descendant(name)) {
+        vfs_unlock(&g_namespace_lock);
         return 0;
+    }
+
+    struct vfs_node *reservation = vfs_node_reserve_path(name);
+    if (!reservation) {
+        vfs_unlock(&g_namespace_lock);
+        return 0;
+    }
     static const uint8_t empty = 0;
     int result = vfs_backend_write(name, &empty, 0);
     vfs_node_release_reservation(reservation);
+    vfs_unlock(&g_namespace_lock);
     return result;
 }
 
@@ -540,20 +561,25 @@ int vfs_unlink(const char *path) {
     if (!vfs_init() || !g_root_mount.ops || !g_root_mount.ops->unlink)
         return 0;
     char name[VFS_PATH_MAX];
-    vfs_stat_t info;
     if (!vfs_resolve(path, name, sizeof(name)) ||
         vfs_string_equal(name, "/"))
         return 0;
 
+    vfs_lock(&g_namespace_lock);
     struct vfs_node *reservation = vfs_node_reserve_path(name);
-    if (!reservation)
+    if (!reservation) {
+        vfs_unlock(&g_namespace_lock);
         return 0;
+    }
+    vfs_stat_t info;
     if (!vfs_backend_stat(name, &info) || info.type != VFS_NODE_FILE) {
         vfs_node_release_reservation(reservation);
+        vfs_unlock(&g_namespace_lock);
         return 0;
     }
     int result = vfs_backend_unlink(name);
     vfs_node_release_reservation(reservation);
+    vfs_unlock(&g_namespace_lock);
     return result;
 }
 
