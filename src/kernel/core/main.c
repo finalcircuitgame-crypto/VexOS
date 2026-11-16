@@ -579,7 +579,15 @@ static void ci_syscall_self_test(void) {
   syscall_handler((uint64_t)(uintptr_t)&frame);
   int test_fd = (int)frame.rax;
   if (test_fd < 3)
-    ci_memory_test_fail("syscall open valid SimpleFS file");
+    ci_memory_test_fail("syscall open valid VFS file");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 3;
+  frame.rdi = (uint64_t)(uintptr_t)user_name;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  int test_fd2 = (int)frame.rax;
+  if (test_fd2 < 3 || test_fd2 == test_fd)
+    ci_memory_test_fail("VFS independent second open");
 
   frame = (struct InterruptFrame){0};
   frame.rax = 4;
@@ -594,6 +602,46 @@ static void ci_syscall_self_test(void) {
     if ((uint8_t)user_read[i] != expected)
       ci_memory_test_fail("syscall multi-sector file content mismatch");
   }
+
+  /* Two independent opens of one file must maintain independent offsets. */
+  frame = (struct InterruptFrame){0};
+  frame.rax = 6;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = 0;
+  frame.rdx = 0;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("VFS seek first independent handle");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd;
+  frame.rsi = (uint64_t)(uintptr_t)(user_read + 10u);
+  frame.rdx = 1;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 1)
+    ci_memory_test_fail("VFS first independent handle read");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 4;
+  frame.rdi = (uint64_t)test_fd2;
+  frame.rsi = (uint64_t)(uintptr_t)(user_read + 11u);
+  frame.rdx = 2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 2 ||
+      (uint8_t)user_read[10] != 11u ||
+      (uint8_t)user_read[11] != 11u ||
+      (uint8_t)user_read[12] != 48u)
+    ci_memory_test_fail("VFS independent open-file offsets");
+
+  frame = (struct InterruptFrame){0};
+  frame.rax = 5;
+  frame.rdi = (uint64_t)test_fd2;
+  syscall_handler((uint64_t)(uintptr_t)&frame);
+  if (frame.rax != 0)
+    ci_memory_test_fail("VFS close second independent handle");
+
+  serial_print("[CI] VFS independent open-file handles and descriptor offsets passed\\n");
 
   frame = (struct InterruptFrame){0};
   frame.rax = 6;
