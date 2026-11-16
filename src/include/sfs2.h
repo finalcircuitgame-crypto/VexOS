@@ -80,7 +80,8 @@ int sfs2_stat_path(sfs2_volume_t *volume, const char *path,
 int sfs2_read_file_at(sfs2_volume_t *volume, const char *path,
                       uint64_t offset, void *out, uint32_t length,
                       uint32_t *out_read);
-/* Journaled nested-file mutation. Missing parent directories are created;\n   writes are limited to 16 MiB per file and one contiguous extent. */
+/* Journaled nested-file mutation. Missing parent directories are created;
+   writes are limited to 16 MiB per file and one contiguous extent. */
 int sfs2_write_file(sfs2_volume_t *volume, const char *path,
                     const void *data, uint32_t length);
 int sfs2_unlink_file(sfs2_volume_t *volume, const char *path);
