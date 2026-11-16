@@ -94,7 +94,7 @@ jobs:
           payload = bytes((i * 37 + 11) & 0xff for i in range(700))
           Path("dist/ci.txt").write_bytes(payload)
           PY
-          python3 tools/sfs2_image.py format dist/storage.img --force --sectors 131072 --inodes 256 dist/ci.txt
+          python3 tools/sfs2_image.py format dist/storage.img dist/ci.txt --force --sectors 131072 --inodes 256
           python3 tools/sfs2_image.py verify dist/storage.img
           test "$(stat -c %s dist/storage.img)" -eq $((131072 * 512))
 
