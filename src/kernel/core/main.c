@@ -63,13 +63,22 @@ static inline uint16_t pit_read_counter(void) {
 static int g_ConsoleReady = 0;
 
 void serial_print(const char *str) {
-  // Always print to COM1
+  /* The PIT can preempt a task between serial characters and let another
+     task interleave its message. COM1 output is short; serialize it on this
+     single-core kernel by preserving the caller's interrupt-enable state. */
+  uint64_t irq_flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(irq_flags) :: "memory");
+
+  // Always print to COM1 as one indivisible message.
   const char *p = str;
   while (*p) {
     outb(0x3F8, *p++);
   }
 
-  // Also print to framebuffer console once initialized
+  if (irq_flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+
+  // Also print to framebuffer console once initialized.
   if (g_ConsoleReady) {
     PrintString(str, 0xFFFFFF);
   }
