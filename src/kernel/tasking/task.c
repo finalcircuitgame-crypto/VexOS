@@ -18,6 +18,9 @@ static void (*kernel_task_entries[TASK_MAX])(void);
 #define TASK_IDLE_SLOT (TASK_MAX - 1u)
 static uint64_t idle_task_stack[512] __attribute__((aligned(16)));
 
+static void build_kernel_task_frame(uint64_t **stack_ptr,
+                                    void (*entry)(void));
+
 static uint64_t task_irq_save_disable(void) {
   uint64_t flags;
   __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
