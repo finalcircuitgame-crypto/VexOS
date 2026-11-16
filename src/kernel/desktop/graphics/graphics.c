@@ -1,8 +1,12 @@
 #include "graphics.h"
+#include "font_atlas.h"
 
 static BootInfo *g_boot_info;
 static uint32_t *g_backbuffer;
 static const uint8_t *g_font;
+static uint8_t g_font_family = GFX_FONT_INTER;
+static uint8_t g_font_scale = 1u;
+static uint8_t g_font_bold;
 static gfx_rect_t g_clip_stack[GFX_CLIP_STACK_MAX];
 static uint32_t g_clip_depth;
 
@@ -61,6 +65,9 @@ void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font) {
   g_boot_info = boot_info;
   g_backbuffer = backbuffer;
   g_font = font;
+  g_font_family = GFX_FONT_INTER;
+  g_font_scale = 1u;
+  g_font_bold = 0u;
   g_clip_depth = 0;
 }
 
@@ -356,33 +363,98 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
   }
 }
 
+void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold) {
+  if ((uint32_t)family >= VEXOS_FONT_FAMILY_COUNT)
+    family = GFX_FONT_INTER;
+  if (scale < 1u) scale = 1u;
+  if (scale > 3u) scale = 3u;
+  g_font_family = (uint8_t)family;
+  g_font_scale = scale;
+  g_font_bold = bold ? 1u : 0u;
+}
+
+gfx_font_family_t gfx_get_font_family(void) {
+  return (gfx_font_family_t)g_font_family;
+}
+
+uint8_t gfx_get_font_scale(void) { return g_font_scale; }
+uint8_t gfx_get_font_bold(void) { return g_font_bold; }
+
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground) {
-  if (!g_font || !g_boot_info)
+  if (!g_boot_info)
     return;
 
+  /* The new grayscale atlas is the normal path. Keep the original CGA font
+     as a defensive fallback for non-ASCII bytes or an unavailable atlas. */
+  if (character < VEXOS_FONT_GLYPH_COUNT) {
+    const uint8_t *glyph =
+        &vexos_font_atlas[g_font_family][g_font_bold][character][0];
+    uint32_t scale = g_font_scale;
+    uint32_t width = 8u * scale;
+    uint32_t height = 8u * scale;
+    gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
+    uint32_t clip_right = clip.x + clip.width;
+    uint32_t clip_bottom = clip.y + clip.height;
+    if (x >= clip_right || y >= clip_bottom ||
+        clip.x >= x + width || clip.y >= y + height)
+      return;
+
+    uint32_t gx_start = clip.x > x ? (clip.x - x) / scale : 0u;
+    uint32_t gy_start = clip.y > y ? (clip.y - y) / scale : 0u;
+    uint32_t gx_end = clip_right > x ? (clip_right - x + scale - 1u) / scale : 0u;
+    uint32_t gy_end = clip_bottom > y ? (clip_bottom - y + scale - 1u) / scale : 0u;
+    if (gx_end > 8u) gx_end = 8u;
+    if (gy_end > 8u) gy_end = 8u;
+
+    uint32_t *dst = gfx_target();
+    if (!dst)
+      return;
+    foreground &= 0x00FFFFFFu;
+    for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
+      for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
+        uint8_t alpha = glyph[gy * 8u + gx];
+        if (!alpha)
+          continue;
+        uint32_t px0 = x + gx * scale;
+        uint32_t py0 = y + gy * scale;
+        for (uint32_t sy = 0; sy < scale; ++sy) {
+          uint32_t py = py0 + sy;
+          if (py < clip.y || py >= clip_bottom)
+            continue;
+          uint32_t *row = &dst[py * g_boot_info->pitch];
+          for (uint32_t sx = 0; sx < scale; ++sx) {
+            uint32_t px = px0 + sx;
+            if (px >= clip.x && px < clip_right)
+              row[px] = gfx_blend_rgb(row[px], foreground, alpha);
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (!g_font)
+    return;
   gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
   uint32_t clip_right = clip.x + clip.width;
   uint32_t clip_bottom = clip.y + clip.height;
   if (x >= clip_right || y >= clip_bottom ||
       clip.x >= x + 8u || clip.y >= y + 8u)
     return;
-
   uint32_t gx_start = clip.x > x ? clip.x - x : 0u;
   uint32_t gy_start = clip.y > y ? clip.y - y : 0u;
   uint32_t gx_end = clip_right > x ? clip_right - x : 0u;
   uint32_t gy_end = clip_bottom > y ? clip_bottom - y : 0u;
   if (gx_end > 8u) gx_end = 8u;
   if (gy_end > 8u) gy_end = 8u;
-
   uint32_t *dst = gfx_target();
   if (!dst)
     return;
-  const uint8_t *glyph = &g_font[(uint32_t)character * 8u];
+  const uint8_t *legacy_glyph = &g_font[(uint32_t)character * 8u];
   foreground &= 0x00FFFFFFu;
-
   for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
-    uint8_t bits = glyph[gy];
+    uint8_t bits = legacy_glyph[gy];
     uint32_t *out = &dst[(y + gy) * g_boot_info->pitch];
     for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
       if (bits & (uint8_t)(1u << (7u - gx)))
@@ -394,11 +466,12 @@ void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
 void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
                      uint32_t foreground) {
   uint32_t cx = x;
+  uint32_t advance = 8u * g_font_scale;
   while (text && *text) {
     char ch = *text++;
-    if (ch == '\n') { y += 8u; cx = x; continue; }
-    if (ch == '\t') { cx += 32u; continue; }
+    if (ch == '\n') { y += advance; cx = x; continue; }
+    if (ch == '\t') { cx += advance * 4u; continue; }
     gfx_draw_glyph(cx, y, (uint8_t)ch, foreground);
-    cx += 8u;
+    cx += advance;
   }
 }
