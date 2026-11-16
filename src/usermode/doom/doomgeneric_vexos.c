@@ -35,6 +35,35 @@ static inline uint64_t vex_syscall3(uint64_t n, uint64_t a, uint64_t b,
     return r;
 }
 
+#ifdef VEXOS_CI_INPUT_TEST
+static void trace_arrow_event(uint8_t usage, int pressed) {
+    const char *message = 0;
+    uint64_t length = 0;
+#define TRACE_ARROW_CASE(code, label) \
+    case code: \
+        if (pressed) { \
+            message = "[CI] Doom backend received " label " down\\n"; \
+            length = sizeof("[CI] Doom backend received " label " down\\n") - 1u; \
+        } else { \
+            message = "[CI] Doom backend received " label " released\\n"; \
+            length = sizeof("[CI] Doom backend received " label " released\\n") - 1u; \
+        } \
+        break
+    switch (usage) {
+        TRACE_ARROW_CASE(0x4F, "RIGHT");
+        TRACE_ARROW_CASE(0x50, "LEFT");
+        TRACE_ARROW_CASE(0x51, "DOWN");
+        TRACE_ARROW_CASE(0x52, "UP");
+        default: break;
+    }
+#undef TRACE_ARROW_CASE
+    if (message)
+        (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+}
+#else
+#define trace_arrow_event(usage, pressed) ((void)0)
+#endif
+
 static int arrow_index_from_usage(uint8_t usage) {
     switch (usage) {
         case 0x4F: return 0; /* Right */
@@ -166,6 +195,8 @@ static int reconcile_arrow_state(int *pressed, unsigned char *key) {
                 *pressed = (actual & bit) != 0;
             if (key)
                 *key = arrow_key_from_index(i);
+            trace_arrow_event((uint8_t)(i == 0u ? 0x4Fu : i == 1u ? 0x50u : i == 2u ? 0x51u : 0x52u),
+                              (actual & bit) != 0);
             return 1;
         }
     }
@@ -199,6 +230,7 @@ int DG_GetKey(int *pressed, unsigned char *key) {
             else
                 arrow_state &= (uint8_t)~bit;
             arrow_state_valid = 1;
+            trace_arrow_event(usage, is_pressed);
         }
 
         if (pressed)
