@@ -368,16 +368,6 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   ep->tr_deq_hi = (uint32_t)((trdp >> 32) & 0xFFFFFFFFu);
 
   uint32_t interval = xhci_hid_context_interval(dev);
-  uint32_t interval_us = 125u * (1u << interval);
-  serial_print("[xHCI][HID] speed=");
-  xhci_print_u32_dec(dev->speed_code);
-  serial_print(" descriptor_bInterval=");
-  xhci_print_u32_dec(dev->intr_interval);
-  serial_print(" context_interval=");
-  xhci_print_u32_dec(interval);
-  serial_print(" service_period_us=");
-  xhci_print_u32_dec(interval_us);
-  serial_print("\n");
   ep->dword0 = (interval & 0xFFu) << 16;
   ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
 
