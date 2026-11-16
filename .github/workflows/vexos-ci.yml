@@ -445,6 +445,7 @@ jobs:
                       "[DOOMWIN] Ring 3 Doom window opened and focused",
                       "[WADDBG] LOCAL_OPEN",
                       "[DOOMWIN] First frame rendered by Ring 3 Doom",
+                      "[CI] RING3 VFS mutation/stat/directory syscalls passed",
                   )
                   deadline = time.time() + 30
                   serial = ""

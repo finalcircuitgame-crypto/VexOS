@@ -9,7 +9,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 
 ## Development roadmap
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan to reach a general-purpose operating system, including verified progress and remaining work. The VFS foundation now supports hierarchical paths over SFS1, implicit directory iteration, reference-counted open nodes, and create/unlink APIs. SFS1 still has a 31-byte path limit and append-only data allocation, so deletion does not reclaim disk sectors. See [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md) for architecture, limitations, and the next storage milestones.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan to reach a general-purpose operating system, including verified progress and remaining work. The VFS foundation now supports hierarchical paths over SFS1, implicit directory iteration, reference-counted open nodes, and create/unlink APIs. SFS1 still has a 31-byte path limit and append-only data allocation, so deletion does not reclaim disk sectors. See [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md) for architecture, limitations, and the next storage milestones. Ring-3 applications also have bounded create/write/unlink/stat and directory syscalls documented in [`docs/USER_SYSCALLS.md`](docs/USER_SYSCALLS.md).
 
 ## Prerequisites
 - GNU toolchain: gcc, ld, objcopy, make
