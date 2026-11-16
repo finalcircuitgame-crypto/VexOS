@@ -158,7 +158,7 @@ const ata_pio_device_t *ata_pio_get_storage_device(void) {
 
 int ata_pio_read28(const ata_pio_device_t *dev, uint32_t lba, uint8_t count,
                    void *out_buf) {
-  if (!dev || !dev->present || !in_buf || count == 0)
+  if (!dev || !dev->present || !out_buf || count == 0)
     return 0;
   if (lba & 0xF0000000u)
     return 0;
@@ -192,7 +192,7 @@ int ata_pio_read28(const ata_pio_device_t *dev, uint32_t lba, uint8_t count,
 
 int ata_pio_write28(const ata_pio_device_t *dev, uint32_t lba, uint8_t count,
                     const void *in_buf) {
-  if (!dev || !dev->present || count == 0)
+  if (!dev || !dev->present || !in_buf || count == 0)
     return 0;
   if (lba & 0xF0000000u)
     return 0;
