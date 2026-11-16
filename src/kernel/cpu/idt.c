@@ -7,6 +7,7 @@ __attribute__((aligned(0x10))) static struct IDTEntry idt[256];
 static struct IDTR idtr;
 
 extern void irq0_stub();
+extern void task_yield_stub();
 extern void syscall_stub();
 extern void isr0_stub();
 extern void isr1_stub();
@@ -51,6 +52,10 @@ void SetIDTGate(uint8_t vector, void *handler, uint8_t type_attr) {
   idt[vector].Offset1 = (uint16_t)(offset >> 16);
   idt[vector].Offset2 = (uint32_t)(offset >> 32);
   idt[vector].Reserved = 0;
+}
+
+uint64_t task_yield_handler(uint64_t rsp) {
+  return Task_Schedule(rsp);
 }
 
 uint64_t irq0_handler(uint64_t rsp) {
@@ -100,6 +105,7 @@ void SetupIDT() {
   SetIDTGate(31, isr31_stub, 0x8E);
 
   SetIDTGate(32, irq0_stub, 0x8E); // IRQ0 - Timer
+  SetIDTGate(0x81, task_yield_stub, 0x8E); // Kernel cooperative yield
 
   // Syscall gate (int 0x80), user-callable (DPL=3)
   SetIDTGate(0x80, syscall_stub, 0xEE);

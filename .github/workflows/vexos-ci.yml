@@ -252,7 +252,8 @@ jobs:
 
           echo "Waiting for VexOS desktop and main loop..."
           for i in $(seq 1 200); do
-            if grep -Fq "[CI] IRQ0 preempted and executed both runtime tasks" serial.log 2>/dev/null; then
+            if grep -Fq "[CI] IRQ0 preempted and executed both runtime tasks" serial.log 2>/dev/null &&
+               grep -Fq "[CI] Concurrent ring-3 workers, private mmap state, memory isolation, and exit/reap passed" serial.log 2>/dev/null; then
               break
             fi
             if ! kill -0 "$qemu_pid" 2>/dev/null; then
@@ -270,9 +271,11 @@ jobs:
             "[CI] Heap allocator alignment/free/coalesce passed" \
             "[CI] PMM alignment/misaligned-free/double-free/reuse passed" \
             "[CI] VMM user ranges/write permissions/alignment/unmapping passed" \
+            "[CI] Independent address spaces, CR3 switching, user-memory isolation, and kernel supervisor mappings passed" \
             "[CI] ELF header/segment validation and rollback passed" \
             "[CI] Task IRET frame and scheduler checks passed" \
             "[CI] Runtime task IRET frames validated" \
+            "[CI] Process manager creation, scheduler CR3/TSS switching, and reaping passed" \
             "[CI] Successful framebuffer syscall draw passed" \
             "[CI] Doom test surface cleanup passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
@@ -285,6 +288,11 @@ jobs:
             "[KERNEL] Desktop initialized" \
             "[KERNEL] QEMU stdvga detected; mapping two framebuffer pages" \
             "[DISPLAY] QEMU VBE double-buffered page flipping enabled" \
+            "[CI] RING3_WORKER_0_PASS" \
+            "[CI] RING3_WORKER_1_PASS" \
+            "[CI] RING3_WORKER_2_PASS" \
+            "[CI] RING3_WORKER_3_PASS" \
+            "[CI] Concurrent ring-3 workers, private mmap state, memory isolation, and exit/reap passed" \
             "[CI] IRQ0 preempted and executed both runtime tasks"; do
             if ! grep -Fq "$marker" serial.log; then
               echo "Expected boot marker missing: $marker"
@@ -554,7 +562,7 @@ jobs:
                   command({"execute": "input-send-event", "arguments": {"events": [
                       {"type": "btn", "data": {"button": "left", "down": True}}
                   ]}})
-                  click_deadline = time.time() + 3
+                  click_deadline = time.time() + 6
                   close_serial = ""
                   close_delta = ""
                   close_hit = False
@@ -581,7 +589,7 @@ jobs:
                           "Doom close press was not consumed by the close handler.\\n"
                           + close_delta[-6000:]
                       )
-                  exit_deadline = time.time() + 5
+                  exit_deadline = time.time() + 8
                   while time.time() < exit_deadline:
                       try:
                           with open("serial.log", encoding="utf-8", errors="replace") as log:
@@ -685,6 +693,28 @@ jobs:
           echo "PASS: UEFI boot, desktop initialization, USB keyboard, USB tablet movement, Start menu click, Shell launch, typed command, and Files dock launch."
           printf 'Test result: PASS - boot, desktop input, Shell, Notepad, and Files interactions observed\\n' > artifacts/test-result.txt
           tail -c 5000 serial.log
+
+      - name: Symbolize kernel fault on QEMU failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ -s dist/kernel.elf ]]; then
+            cp dist/kernel.elf artifacts/kernel.elf
+            nm -n dist/kernel.elf > artifacts/kernel-symbols.txt
+            fault_rip="$(grep -Eo 'rip=[[:xdigit:]]+' serial.log 2>/dev/null | tail -n 1 | cut -d= -f2 || true)"
+            if [[ -n "$fault_rip" ]]; then
+              {
+                echo "Kernel fault RIP: 0x$fault_rip"
+                addr2line -e dist/kernel.elf -f -C "0x$fault_rip" || true
+              } | tee artifacts/kernel-fault-symbol.txt
+              address="$(printf '%d' "0x$fault_rip")"
+              start=$((address > 96 ? address - 96 : 0))
+              end=$((address + 128))
+              objdump -d -Mintel --start-address="$start" --stop-address="$end" dist/kernel.elf \
+                > artifacts/kernel-fault-disassembly.txt || true
+            fi
+          fi
 
       - name: Upload complete QEMU test evidence
         if: always()

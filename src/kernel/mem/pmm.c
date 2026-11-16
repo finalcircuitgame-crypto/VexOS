@@ -8,6 +8,17 @@ static uint8_t *bitmap;
 static uint64_t max_pages;
 static uint64_t base_paddr;
 
+static uint64_t pmm_irq_save_disable(void) {
+    uint64_t flags;
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+    return flags;
+}
+
+static void pmm_irq_restore(uint64_t flags) {
+    if (flags & (1ull << 9))
+        __asm__ volatile("sti" ::: "memory");
+}
+
 static inline void outb(uint16_t port, uint8_t val) {
     __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -54,34 +65,48 @@ void PMM_FreePages(void *addr, uint64_t count) {
     if (value < base_paddr || ((value - base_paddr) & (PAGE_SIZE - 1ULL)))
         return;
 
+    uint64_t irq_flags = pmm_irq_save_disable();
     uint64_t start_page = (value - base_paddr) / PAGE_SIZE;
-    if (start_page >= max_pages) return;
+    if (start_page >= max_pages) {
+        pmm_irq_restore(irq_flags);
+        return;
+    }
     if (count > max_pages - start_page) count = max_pages - start_page;
+
+    for (uint64_t i = 0; i < count; i++) {
+        uint64_t page = start_page + i;
+        uint8_t mask = (uint8_t)(1u << (page % 8ULL));
+        /* Clearing an already-free bit is harmless and remains idempotent. */
+        if (bitmap[page / 8ULL] & mask)
+            bitmap[page / 8ULL] &= (uint8_t)~mask;
+    }
+    pmm_irq_restore(irq_flags);
 
     debug_print("[PMM] Freeing: start=");
     debug_hex(start_page);
     debug_print(" count=");
     debug_hex(count);
     debug_print("\n");
-
-    for (uint64_t i = 0; i < count; i++) {
-        uint64_t page = start_page + i;
-        bitmap[page / 8ULL] &= (uint8_t)~(1u << (page % 8ULL));
-    }
 }
 
 void *PMM_AllocatePage(void) {
     if (!bitmap || max_pages == 0) return NULL;
 
+    uint64_t irq_flags = pmm_irq_save_disable();
+    void *allocated = NULL;
     for (uint64_t i = 0; i < max_pages; i++) {
         uint8_t mask = (uint8_t)(1u << (i % 8ULL));
         if (!(bitmap[i / 8ULL] & mask)) {
             bitmap[i / 8ULL] |= mask;
-            return (void *)(uintptr_t)(base_paddr + i * PAGE_SIZE);
+            allocated = (void *)(uintptr_t)(base_paddr + i * PAGE_SIZE);
+            break;
         }
     }
-    debug_print("[PMM] Allocate: FAILED!\n");
-    return NULL;
+    pmm_irq_restore(irq_flags);
+
+    if (!allocated)
+        debug_print("[PMM] Allocate: FAILED!\n");
+    return allocated;
 }
 
 void PMM_FreePage(void *addr) {
@@ -92,7 +117,27 @@ void PMM_FreePage(void *addr) {
         return;
 
     uint64_t page = (value - base_paddr) / PAGE_SIZE;
-    if (page < max_pages) {
-        bitmap[page / 8ULL] &= (uint8_t)~(1u << (page % 8ULL));
+    if (page >= max_pages) return;
+
+    uint64_t irq_flags = pmm_irq_save_disable();
+    uint8_t mask = (uint8_t)(1u << (page % 8ULL));
+    if (bitmap[page / 8ULL] & mask)
+        bitmap[page / 8ULL] &= (uint8_t)~mask;
+    pmm_irq_restore(irq_flags);
+}
+
+/* CI and diagnostics helper: count currently free physical pages without
+   changing allocator state. The bitmap uses one bits for allocated pages. */
+uint64_t PMM_GetFreePageCount(void) {
+    if (!bitmap || max_pages == 0) return 0;
+
+    uint64_t irq_flags = pmm_irq_save_disable();
+    uint64_t free_pages = 0;
+    for (uint64_t page = 0; page < max_pages; ++page) {
+        uint8_t mask = (uint8_t)(1u << (page % 8ULL));
+        if (!(bitmap[page / 8ULL] & mask))
+            ++free_pages;
     }
+    pmm_irq_restore(irq_flags);
+    return free_pages;
 }

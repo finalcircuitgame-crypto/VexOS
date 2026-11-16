@@ -7,10 +7,11 @@
 #define PAGE_SIZE 4096
 
 typedef uint64_t page_table_entry;
-
 typedef struct {
     page_table_entry entries[512];
 } page_table;
+
+typedef struct AddressSpace AddressSpace;
 
 int VMM_Init(void);
 int VMM_MapPage(void *virtual_addr, void *physical_addr, uint64_t flags);
@@ -19,6 +20,24 @@ int VMM_SetPageWrite(void *virtual_addr, int writable);
 int VMM_IsUserRange(const void *address, uint64_t length, int write_access);
 void VMM_Activate(void);
 page_table *VMM_GetKernelPML4(void);
+AddressSpace *VMM_GetActiveAddressSpace(void);
+
+/* Each address space receives a private copy of the current kernel page-table
+   hierarchy. Kernel/supervisor leaf mappings are inherited and remain shared.
+   Mapping a PAGE_USER leaf transfers exclusive ownership of that physical
+   frame to the address space; callers must not alias it in another mapping.
+   AddressSpaceDestroy reclaims all owned PAGE_USER leaf frames. */
+AddressSpace *VMM_AddressSpaceCreate(void);
+void VMM_AddressSpaceDestroy(AddressSpace *space);
+int VMM_AddressSpaceMapPage(AddressSpace *space, void *virtual_addr,
+                            void *physical_addr, uint64_t flags);
+int VMM_AddressSpaceUnmapPage(AddressSpace *space, void *virtual_addr,
+                              int free_physical);
+int VMM_AddressSpaceSetPageWrite(AddressSpace *space, void *virtual_addr,
+                                 int writable);
+int VMM_AddressSpaceIsUserRange(AddressSpace *space, const void *address,
+                                uint64_t length, int write_access);
+void VMM_ActivateAddressSpace(AddressSpace *space);
 
 #define PAGE_PRESENT (1ULL << 0)
 #define PAGE_WRITE   (1ULL << 1)

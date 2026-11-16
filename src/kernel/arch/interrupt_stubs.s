@@ -1,9 +1,11 @@
 .extern irq0_handler
+.extern task_yield_handler
 .extern syscall_handler
 .extern exception_handler
 .extern irq0_bad_frame_handler
 .extern irq0_debug_frame_once
 .global irq0_stub
+.global task_yield_stub
 .global syscall_stub
 .global isr0_stub
 .global isr1_stub
@@ -129,6 +131,17 @@ irq0_stub:
     cli
     hlt
 1:
+    POP_GPRS
+    iretq
+
+/* Cooperative scheduler yield (int 0x81). Unlike IRQ0, this does not
+   advance the clock or send a PIC EOI. */
+task_yield_stub:
+    PUSH_GPRS
+    mov %rsp, %rdi
+    andq $-16, %rsp
+    call task_yield_handler
+    mov %rax, %rsp
     POP_GPRS
     iretq
 

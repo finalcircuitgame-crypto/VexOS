@@ -70,3 +70,7 @@ void TSS_Init(uint64_t ist1) {
 void TSS_Load(uint64_t rsp0) {
     g_tss.rsp0 = rsp0;
 }
+
+uint64_t TSS_GetRSP0(void) {
+    return g_tss.rsp0;
+}

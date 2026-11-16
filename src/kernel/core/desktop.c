@@ -4,6 +4,7 @@
 #include "../../include/hw_profile.h"
 #include "../../include/usermode.h"
 #include "../../include/task.h"
+#include "../../include/process.h"
 #include "../../include/simplefs.h"
 #include "../../include/ramfs.h"
 #include "../../include/png.h"
@@ -287,6 +288,20 @@ static uint8_t g_ci_mouse_move_seen;
 static uint8_t g_ci_start_click_seen;
 #endif
 
+/* Task creation and process registration must be atomic with respect
+   to the PIT scheduler. A newly READY task must never run before its
+   process metadata (including its private CR3 and RSP0) is published. */
+static uint64_t desktop_irq_save_disable(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+  return flags;
+}
+
+static void desktop_irq_restore(uint64_t flags) {
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
 static uint8_t g_ring3_task_started;
 static volatile uint8_t g_doom_window_dirty;
 static uint8_t g_doom_click_handled;
@@ -298,6 +313,7 @@ static uint8_t g_doom_render_trace_done;
 static uint8_t g_doom_close_pointer_reported;
 static void *g_ring3_task_stack;
 static void *g_deferred_ring3_task_stack;
+static int32_t g_ring3_task_id = -1;
 static const char *g_ring3_elf_name = "doom.elf";
 
 int desktop_doom_app_ready(void) {
@@ -424,12 +440,15 @@ static void draw_app_icon(uint32_t x, uint32_t y, uint32_t size,
 static void ring3_task_entry(void) {
   usermode_launch(g_ring3_elf_name);
 
+  // A loader failure must not be preempted between publishing deferred
+  // cleanup and marking this launcher task as a zombie.
+  __asm__ volatile("cli" ::: "memory");
+
   // On success usermode_launch transfers to ring 3 and never returns. A
   // return means the loader rejected the image or failed before the switch.
   shell_append("ring3: loader returned; see serial log\n");
-  for (;;) {
-    __asm__ volatile("sti; hlt");
-  }
+  desktop_user_app_exited(1);
+  Process_ExitKernelCurrent(-1);
 }
 
 static void launch_ring3_task(const char *filename) {
@@ -463,8 +482,29 @@ static void launch_ring3_task(const char *filename) {
   }
 
   void *stack_top = (void *)((uint8_t *)stack + 8192);
+  uint64_t irq_flags = desktop_irq_save_disable();
+  int32_t task_id = Task_Create(ring3_task_entry, stack_top);
+  if (task_id < 0) {
+    desktop_irq_restore(irq_flags);
+    kfree(stack);
+    g_ring3_task_started = 0;
+    shell_append("ring3: scheduler has no free task slot\\n");
+    return;
+  }
+
+  if (!Process_RegisterTask("Doom", (uint32_t)task_id, stack)) {
+    Task_Discard((uint32_t)task_id);
+    desktop_irq_restore(irq_flags);
+    kfree(stack);
+    g_ring3_task_started = 0;
+    shell_append("ring3: process table is full\\n");
+    return;
+  }
+
+  /* Publish the task's owning stack and ID before re-enabling timer IRQs. */
   g_ring3_task_stack = stack;
-  Task_Create(ring3_task_entry, stack_top);
+  g_ring3_task_id = task_id;
+  desktop_irq_restore(irq_flags);
 }
 
 static void draw_window_chrome(const desktop_window_t *win,
@@ -1696,7 +1736,15 @@ void desktop_tick(void) {
   if (g_deferred_ring3_task_stack) {
     kfree(g_deferred_ring3_task_stack);
     g_deferred_ring3_task_stack = NULL;
+    if (g_ring3_task_id >= 0) {
+      Process_ReapTask((uint32_t)g_ring3_task_id);
+      g_ring3_task_id = -1;
+    }
   }
+
+  /* Adopted children are reaped only from the system process after the
+     scheduler has switched away from their execution stacks. */
+  Process_ReapOrphans();
 
   if (!g_bi)
     return;
