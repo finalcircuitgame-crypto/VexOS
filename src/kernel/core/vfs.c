@@ -213,6 +213,75 @@ int vfs_write(const char *path, const void *data, uint32_t len) {
     return g_root_mount.ops->write(name, data ? data : &empty, len);
 }
 
+int vfs_open(vfs_file_t *file, const char *path) {
+    if (!file || !vfs_init())
+        return 0;
+
+    char name[VFS_PATH_MAX];
+    vfs_stat_t info;
+    if (!vfs_resolve(path, name, sizeof(name)) ||
+        !g_root_mount.ops->stat(name, &info) ||
+        info.type != VFS_NODE_FILE)
+        return 0;
+
+    for (uint32_t i = 0; i < VFS_PATH_MAX; ++i)
+        file->path[i] = name[i];
+    file->size = info.size;
+    file->offset = 0;
+    file->is_open = 1;
+    return 1;
+}
+
+int32_t vfs_file_read(vfs_file_t *file, void *out, uint32_t count) {
+    if (!file || !file->is_open || (!out && count != 0))
+        return -1;
+    if (count == 0 || file->offset >= file->size)
+        return 0;
+
+    uint32_t available = file->size - file->offset;
+    uint32_t wanted = count < available ? count : available;
+    uint32_t actual = 0;
+    if (!vfs_read_at(file->path, file->offset, out, wanted, &actual) ||
+        actual > wanted)
+        return -1;
+    file->offset += actual;
+    return (int32_t)actual;
+}
+
+int64_t vfs_file_seek(vfs_file_t *file, int64_t offset, int whence) {
+    if (!file || !file->is_open)
+        return -1;
+
+    int64_t base;
+    if (whence == 0)
+        base = 0;
+    else if (whence == 1)
+        base = file->offset;
+    else if (whence == 2)
+        base = file->size;
+    else
+        return -1;
+
+    if ((offset > 0 && base > INT64_MAX - offset) ||
+        (offset < 0 && base < INT64_MIN - offset))
+        return -1;
+    int64_t target = base + offset;
+    if (target < 0 || target > (int64_t)file->size)
+        return -1;
+    file->offset = (uint32_t)target;
+    return target;
+}
+
+int vfs_close(vfs_file_t *file) {
+    if (!file || !file->is_open)
+        return 0;
+    file->path[0] = '\\0';
+    file->size = 0;
+    file->offset = 0;
+    file->is_open = 0;
+    return 1;
+}
+
 uint32_t vfs_file_count(void) {
     return vfs_init() && g_root_mount.ops && g_root_mount.ops->count
                ? g_root_mount.ops->count() : 0;
