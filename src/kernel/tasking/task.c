@@ -273,6 +273,9 @@ void Task_Yield(void) {
 }
 
 void Task_ExitCurrent(void) {
+  /* Keep the transition to ZOMBIE and the software reschedule indivisible
+     from the PIT scheduler's point of view. */
+  __asm__ volatile("cli" ::: "memory");
   if (current_task >= task_count)
     for (;;) __asm__ volatile("cli; hlt");
 
