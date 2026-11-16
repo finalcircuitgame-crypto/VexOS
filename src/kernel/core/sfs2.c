@@ -573,16 +573,41 @@ static int sfs2_test_read(uint64_t lba, void *sector) {
     return 1;
 }
 
-static void sfs2_test_store_inode(uint32_t index,
-                                  const sfs2_inode_t *inode) {
+static int sfs2_test_write(uint64_t lba, const void *sector) {
+    if (!sector || lba >= 16u)
+        return 0;
+    const uint8_t *src = (const uint8_t *)sector;
+    for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
+        g_sfs2_test_disk[lba][i] = src[i];
+    return 1;
+}
+
+static void sfs2_test_store_inode_at(uint32_t table_lba, uint32_t index,
+                                     const sfs2_inode_t *inode) {
     uint32_t offset = index * (uint32_t)sizeof(*inode);
     const uint8_t *src = (const uint8_t *)inode;
     for (uint32_t i = 0; i < sizeof(*inode); ++i) {
         uint32_t absolute = offset + i;
-        g_sfs2_test_disk[2u + absolute / SFS2_SECTOR_SIZE]
+        g_sfs2_test_disk[table_lba + absolute / SFS2_SECTOR_SIZE]
                         [absolute % SFS2_SECTOR_SIZE] = src[i];
     }
 }
+
+static void sfs2_test_store_inode(uint32_t index,
+                                  const sfs2_inode_t *inode) {
+    sfs2_test_store_inode_at(2u, index, inode);
+}
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t state;
+    uint32_t record_count;
+    uint32_t checksum;
+    uint64_t sequence;
+    uint64_t targets[SFS2_JOURNAL_MAX_RECORDS];
+    uint32_t data_checksums[SFS2_JOURNAL_MAX_RECORDS];
+    uint8_t reserved[392];
+} sfs2_test_journal_header_t;
 
 static void sfs2_test_finish_inode(sfs2_inode_t *inode) {
     inode->checksum = sfs2_checksum(inode, sizeof(*inode),
@@ -678,6 +703,77 @@ int sfs2_ci_mount_read_test(void) {
     g_sfs2_test_disk[2][sizeof(sfs2_inode_t) + 12u] ^= 0x80u;
     g_sfs2_test_disk[1][0] = 0u;
     if (sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
+        return 0;
+
+    /* A committed redo record must be replayed before metadata is mounted. */
+    sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
+    sfs2_zero(&sb, sizeof(sb));
+    sb.magic = SFS2_MAGIC;
+    sb.version = SFS2_VERSION;
+    sb.header_size = sizeof(sb);
+    sb.sector_size = SFS2_SECTOR_SIZE;
+    sb.volume_sectors = 16u;
+    sb.generation = 2u;
+    sb.journal_lba = 1u;
+    sb.journal_sectors = 9u;
+    sb.bitmap_lba = 10u;
+    sb.bitmap_sectors = 1u;
+    sb.inode_table_lba = 11u;
+    sb.inode_table_sectors = 1u;
+    sb.inode_capacity = 4u;
+    sb.data_lba = 12u;
+    sb.root_inode = 1u;
+    sb.checksum = sfs2_checksum(&sb, sizeof(sb),
+        (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    sb_src = (const uint8_t *)&sb;
+    for (uint32_t i = 0; i < sizeof(sb); ++i)
+        g_sfs2_test_disk[0][i] = sb_src[i];
+
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(11u, 0u, &inode);
+
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 2u;
+    inode.parent_id = 1u;
+    inode.type = SFS2_INODE_FILE;
+    inode.name[0] = 'j'; inode.name[1] = 'o'; inode.name[2] = 'u';
+    inode.name[3] = 'r'; inode.name[4] = 'n'; inode.name[5] = 'a';
+    inode.name[6] = 'l';
+    inode.size_bytes = 1u;
+    inode.data_lba = 12u;
+    inode.data_sectors = 1u;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(11u, 1u, &inode);
+    g_sfs2_test_disk[10][0] = 0x01u;
+    g_sfs2_test_disk[12][0] = 'J';
+
+    uint8_t *journal_data = g_sfs2_test_disk[2];
+    journal_data[0] = 0xA5u;
+    sfs2_test_journal_header_t journal;
+    sfs2_zero(&journal, sizeof(journal));
+    journal.magic = SFS2_JOURNAL_MAGIC;
+    journal.state = SFS2_JOURNAL_COMMITTED;
+    journal.record_count = 1u;
+    journal.sequence = 7u;
+    journal.targets[0] = 15u;
+    journal.data_checksums[0] = sfs2_checksum(
+        journal_data, SFS2_SECTOR_SIZE, SFS2_SECTOR_SIZE - 4u);
+    journal.checksum = sfs2_checksum(&journal, sizeof(journal),
+        (uint32_t)offsetof(sfs2_test_journal_header_t, checksum));
+    const uint8_t *journal_src = (const uint8_t *)&journal;
+    for (uint32_t i = 0; i < sizeof(journal); ++i)
+        g_sfs2_test_disk[1][i] = journal_src[i];
+
+    sfs2_zero(&volume, sizeof(volume));
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 16u))
+        return 0;
+    if (g_sfs2_test_disk[15][0] != 0xA5u ||
+        !sfs2_sector_is_zero(g_sfs2_test_disk[1]))
+        return 0;
+    if (!sfs2_stat_path(&volume, "/journal", &info))
         return 0;
     return 1;
 }
