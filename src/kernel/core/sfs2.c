@@ -1418,6 +1418,60 @@ int sfs2_ci_mount_read_test(void) {
     if (!sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
 
+    /* Legacy journal images retain their original eight-record header
+       layout and remain writable after an interrupted metadata commit. */
+    g_sfs2_large_mode = 0;
+    sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
+    sfs2_zero(&sb, sizeof(sb));
+    sb.magic = SFS2_MAGIC;
+    sb.version = SFS2_VERSION;
+    sb.header_size = sizeof(sb);
+    sb.sector_size = SFS2_SECTOR_SIZE;
+    sb.volume_sectors = 64u;
+    sb.generation = 1u;
+    sb.journal_lba = 1u;
+    sb.journal_sectors = 9u;
+    sb.bitmap_lba = 10u;
+    sb.bitmap_sectors = 1u;
+    sb.inode_table_lba = 11u;
+    sb.inode_table_sectors = 2u;
+    sb.inode_capacity = 8u;
+    sb.data_lba = 13u;
+    sb.root_inode = 1u;
+    sb.checksum = sfs2_checksum(&sb, sizeof(sb),
+        (uint32_t)offsetof(sfs2_superblock_t, checksum));
+    sb_src = (const uint8_t *)&sb;
+    for (uint32_t i = 0; i < sizeof(sb); ++i)
+        g_sfs2_test_disk[0][i] = sb_src[i];
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 1u;
+    inode.type = SFS2_INODE_DIRECTORY;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(11u, 0u, &inode);
+    sfs2_zero(&inode, sizeof(inode));
+    inode.inode_id = 2u;
+    inode.parent_id = 1u;
+    inode.type = SFS2_INODE_FILE;
+    inode.name[0] = 'o'; inode.name[1] = 'l'; inode.name[2] = 'd';
+    inode.size_bytes = 1u;
+    inode.data_lba = 13u;
+    inode.data_sectors = 1u;
+    sfs2_test_finish_inode(&inode);
+    sfs2_test_store_inode_at(11u, 1u, &inode);
+    g_sfs2_test_disk[10][0] = 0x01u;
+    g_sfs2_test_disk[13][0] = 'O';
+    sfs2_zero(&volume, sizeof(volume));
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u))
+        return 0;
+    g_sfs2_test_fail_write_lba = 10u;
+    if (sfs2_write_file(&volume, "/old", "N", 1u))
+        return 0;
+    g_sfs2_test_fail_write_lba = UINT64_MAX;
+    if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 64u) ||
+        !sfs2_read_file_at(&volume, "/old", 0u, &one, 1u, &read_count) ||
+        read_count != 1u || one != 'N')
+        return 0;
+
     /* Exercise a kernel write larger than the former 2 MiB ceiling. */
     g_sfs2_large_mode = 0;
     sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
