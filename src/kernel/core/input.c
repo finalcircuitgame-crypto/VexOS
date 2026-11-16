@@ -4,7 +4,7 @@
 extern void serial_print(const char *str);
 
 static void input_log_arrow(uint8_t usage, int pressed) {
-  const char *key = NULL;
+  const char *key = 0;
   switch (usage) {
   case 0x4F: key = "RIGHT"; break;
   case 0x50: key = "LEFT"; break;
