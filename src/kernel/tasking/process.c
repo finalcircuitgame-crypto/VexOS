@@ -170,6 +170,7 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
   int32_t task_id = Task_CreateUser(space, entry, user_stack_top,
                                     (uint8_t *)kernel_stack + PAGE_SIZE);
   if (task_id < 0) {
+    VMM_AddressSpaceUnmapPage(space, kernel_stack, 0);
     PMM_FreePage(kernel_stack);
     return 0;
   }
@@ -177,6 +178,7 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
   ProcessId pid = Process_RegisterTask(name, (uint32_t)task_id, kernel_stack);
   if (!pid) {
     Task_Discard((uint32_t)task_id);
+    VMM_AddressSpaceUnmapPage(space, kernel_stack, 0);
     PMM_FreePage(kernel_stack);
     return 0;
   }
@@ -341,14 +343,16 @@ int Process_ReapTask(uint32_t task_id) {
       task_id == Task_GetCurrentId())
     return 0;
 
+  /* The task is already off-CPU. Clear its scheduler slot before
+     releasing the backing resources it referenced. */
+  if (!Task_Reap(task_id))
+    return 0;
   if (process->address_space) {
     VMM_AddressSpaceDestroy(process->address_space);
     process->address_space = NULL;
   }
   if (process->owns_kernel_stack && process->kernel_stack_base)
     PMM_FreePage(process->kernel_stack_base);
-  if (!Task_Reap(task_id))
-    return 0;
 
   process->info.pid = 0;
   process->info.parent_pid = 0;
