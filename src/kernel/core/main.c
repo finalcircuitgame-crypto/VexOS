@@ -356,6 +356,7 @@ static void ci_address_space_self_test(void) {
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
+extern int simplefs_ci_validate_metadata_self_test(void);
 
 
 #ifdef VEXOS_CI_INPUT_TEST
