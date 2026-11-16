@@ -48,11 +48,9 @@ void syscall_process_cleanup(void) {
         g_files[fd].used = 0;
     }
 
-    while (g_user_mmap_page_count > 0) {
-        uint64_t va = g_user_mmap_pages[--g_user_mmap_page_count];
-        VMM_UnmapPage((void *)(uintptr_t)va, 1);
-    }
-
+    /* Process address-space teardown owns and frees all PAGE_USER mappings,
+       including mmap allocations. This routine only resets descriptor metadata. */
+    g_user_mmap_page_count = 0;
     g_next_mmap = USER_MMAP_BASE;
 }
 

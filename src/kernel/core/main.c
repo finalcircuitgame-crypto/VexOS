@@ -6,6 +6,7 @@
 #include "hw_profile.h"
 #include "idt.h"
 #include "pmm.h"
+#include "process.h"
 #include "simplefs.h"
 #include "task.h"
 #include "vmm.h"
@@ -285,6 +286,58 @@ static void ci_memory_self_test(void) {
     ci_memory_test_fail("VMM range crossing user limit accepted");
   serial_print("[CI] VMM user ranges/write permissions/alignment/unmapping passed\n");
 }
+#ifdef VEXOS_CI_INPUT_TEST
+static void ci_address_space_self_test(void) {
+  const uintptr_t test_va = 0x0000600000000000ull;
+  const uint64_t value_a = 0x5645584F53504131ull;
+  const uint64_t value_b = 0x5645584F53504232ull;
+  AddressSpace *space_a = VMM_AddressSpaceCreate();
+  AddressSpace *space_b = VMM_AddressSpaceCreate();
+  if (!space_a || !space_b)
+    ci_memory_test_fail("address-space creation/independent page-table clone");
+
+  void *page_a = PMM_AllocatePage();
+  void *page_b = PMM_AllocatePage();
+  if (!page_a || !page_b)
+    ci_memory_test_fail("address-space backing-page allocation");
+  for (uint32_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); ++i) {
+    ((uint64_t *)page_a)[i] = 0;
+    ((uint64_t *)page_b)[i] = 0;
+  }
+
+  if (!VMM_AddressSpaceMapPage(space_a, (void *)test_va, page_a,
+                               PAGE_USER | PAGE_WRITE | PAGE_PRESENT) ||
+      !VMM_AddressSpaceMapPage(space_b, (void *)test_va, page_b,
+                               PAGE_USER | PAGE_WRITE | PAGE_PRESENT))
+    ci_memory_test_fail("same virtual address mapping in separate spaces");
+
+  if (!VMM_AddressSpaceIsUserRange(space_a, (void *)test_va, PAGE_SIZE, 1) ||
+      !VMM_AddressSpaceIsUserRange(space_b, (void *)test_va, PAGE_SIZE, 1))
+    ci_memory_test_fail("address-space user range validation");
+  if (VMM_AddressSpaceIsUserRange(space_a, (void *)0x1000u, 1, 0) ||
+      VMM_AddressSpaceIsUserRange(space_b, (void *)0x1000u, 1, 0))
+    ci_memory_test_fail("kernel identity mapping became user-accessible");
+
+  VMM_ActivateAddressSpace(space_a);
+  *(volatile uint64_t *)test_va = value_a;
+  VMM_ActivateAddressSpace(space_b);
+  if (*(volatile uint64_t *)test_va != 0)
+    ci_memory_test_fail("address spaces unexpectedly share user memory");
+  *(volatile uint64_t *)test_va = value_b;
+  VMM_ActivateAddressSpace(space_a);
+  if (*(volatile uint64_t *)test_va != value_a)
+    ci_memory_test_fail("address-space A memory changed after switching to B");
+  VMM_ActivateAddressSpace(space_b);
+  if (*(volatile uint64_t *)test_va != value_b)
+    ci_memory_test_fail("address-space B memory was not preserved");
+
+  VMM_Activate();
+  VMM_AddressSpaceDestroy(space_a);
+  VMM_AddressSpaceDestroy(space_b);
+  serial_print("[CI] Independent address spaces, CR3 switching, user-memory isolation, and kernel supervisor mappings passed\n");
+}
+#endif
+
 extern uint64_t syscall_handler(uint64_t rsp);
 extern int usermode_ci_self_test(void);
 extern int Task_CI_SelfTest(void);
@@ -904,6 +957,7 @@ void kernel_main(BootInfo *bootInfo) {
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
 #ifdef VEXOS_CI_INPUT_TEST
   ci_memory_self_test();
+  ci_address_space_self_test();
   if (!usermode_ci_self_test())
     ci_memory_test_fail("ELF validation/rollback self-test");
   serial_print("[CI] ELF header/segment validation and rollback passed\n");
@@ -949,7 +1003,7 @@ void kernel_main(BootInfo *bootInfo) {
   ci_framebuffer_syscall_self_test();
 #endif
 
-  Task_Init();
+  Process_Init();
 #ifdef VEXOS_CI_INPUT_TEST
   extern void Task_CI_StartRuntimeTest(void);
   extern int Task_CI_RuntimeTestPassed(void);

@@ -29,19 +29,23 @@ static uint32_t g_user_mapped_page_count;
 static void *g_user_kernel_stack;
 static void *g_deferred_kernel_stack;
 static uint8_t g_user_process_active;
+static AddressSpace *g_user_address_space;
 
 void usermode_cleanup_current(void) {
     if (!g_user_process_active)
         return;
 
-    while (g_user_mapped_page_count > 0) {
-        uint64_t va = g_user_mapped_pages[--g_user_mapped_page_count];
-        VMM_UnmapPage((void *)(uintptr_t)va, 1);
+    Process_AttachCurrentAddressSpace(NULL);
+    Process_SetCurrentKernelStack(0);
+    VMM_Activate();
+    if (g_user_address_space) {
+        VMM_AddressSpaceDestroy(g_user_address_space);
+        g_user_address_space = NULL;
     }
-
     if (g_user_mapped_pages)
         kfree(g_user_mapped_pages);
     g_user_mapped_pages = NULL;
+    g_user_mapped_page_count = 0;
 
     /* Do not free the active ring-transition stack while the exception or
        syscall handler is still running on it. Reap it from the kernel task. */
@@ -146,6 +150,14 @@ static void rollback_user_pages(uint64_t *mapped, uint32_t count) {
     while (count > 0) {
         count--;
         VMM_UnmapPage((void *)(uintptr_t)mapped[count], 1);
+    }
+}
+
+static void rollback_user_pages_in_space(AddressSpace *space,
+                                         uint64_t *mapped, uint32_t count) {
+    while (count > 0) {
+        count--;
+        VMM_AddressSpaceUnmapPage(space, (void *)(uintptr_t)mapped[count], 1);
     }
 }
 
@@ -377,6 +389,16 @@ void usermode_launch(const char *filename) {
         return;
     }
     uint32_t mapped_count = 0;
+    AddressSpace *space = VMM_AddressSpaceCreate();
+    if (!space) {
+        kfree(mapped_pages);
+        kfree(elf_data);
+        serial_print("[USERMODE] failed to create isolated address space\n");
+        return;
+    }
+    /* The kernel continues running on the inherited mappings while the new
+       root is active, allowing the loader to populate the user virtual image. */
+    VMM_ActivateAddressSpace(space);
 
     // Load each PT_LOAD segment. Pages are initially cleared so that BSS is
     // zero-filled before the initialized portion is copied into place.
@@ -394,9 +416,11 @@ void usermode_launch(const char *filename) {
         uint64_t load_flags = page_flags | PAGE_WRITE;
         for (uint64_t va = start; va < end; va += PAGE_SIZE) {
             void *pa = PMM_AllocatePage();
-            if (!pa || !VMM_MapPage((void *)(uintptr_t)va, pa, load_flags)) {
+            if (!pa || !VMM_AddressSpaceMapPage(space, (void *)(uintptr_t)va, pa, load_flags)) {
                 if (pa) PMM_FreePage(pa);
-                rollback_user_pages(mapped_pages, mapped_count);
+                rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
                 kfree(mapped_pages);
                 kfree(elf_data);
                 serial_print("[USERMODE] unable to map ELF segment pages\n");
@@ -413,8 +437,10 @@ void usermode_launch(const char *filename) {
         // read-only data segments remain supervisor-writable only temporarily.
         if (!(ph->p_flags & PF_W)) {
             for (uint64_t va = start; va < end; va += PAGE_SIZE) {
-                if (!VMM_SetPageWrite((void *)(uintptr_t)va, 0)) {
-                    rollback_user_pages(mapped_pages, mapped_count);
+                if (!VMM_AddressSpaceSetPageWrite(space, (void *)(uintptr_t)va, 0)) {
+                    rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
                     kfree(mapped_pages);
                     kfree(elf_data);
                     serial_print("[USERMODE] unable to apply ELF segment permissions\n");
@@ -431,16 +457,20 @@ void usermode_launch(const char *filename) {
         uint64_t va = stack_bottom + (uint64_t)i * PAGE_SIZE;
         void *pa = PMM_AllocatePage();
         if (!pa) {
-            rollback_user_pages(mapped_pages, mapped_count);
+            rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
             kfree(mapped_pages);
             kfree(elf_data);
             serial_print("[USERMODE] out of physical pages while allocating user stack\n");
             return;
         }
-        if (!VMM_MapPage((void *)(uintptr_t)va, pa,
+        if (!VMM_AddressSpaceMapPage(space, (void *)(uintptr_t)va, pa,
                          PAGE_USER | PAGE_WRITE | PAGE_PRESENT)) {
             PMM_FreePage(pa);
-            rollback_user_pages(mapped_pages, mapped_count);
+            rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
             kfree(mapped_pages);
             kfree(elf_data);
             serial_print("[USERMODE] VMM rejected user stack mapping\n");
@@ -452,16 +482,20 @@ void usermode_launch(const char *filename) {
 
     void *kernel_stack = PMM_AllocatePage();
     if (!kernel_stack) {
-        rollback_user_pages(mapped_pages, mapped_count);
+        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         kfree(elf_data);
         serial_print("[USERMODE] no kernel transition stack available\n");
         return;
     }
 
-    if (!VMM_MapPage(kernel_stack, kernel_stack, PAGE_WRITE | PAGE_PRESENT)) {
+    if (!VMM_AddressSpaceMapPage(space, kernel_stack, kernel_stack, PAGE_WRITE | PAGE_PRESENT)) {
         PMM_FreePage(kernel_stack);
-        rollback_user_pages(mapped_pages, mapped_count);
+        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
+                VMM_Activate();
+                VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         kfree(elf_data);
         serial_print("[USERMODE] unable to map kernel transition stack\n");
@@ -473,13 +507,19 @@ void usermode_launch(const char *filename) {
 
     /* Retain the page list until the process exits or faults, so its user
        mappings can be reclaimed without touching the kernel transition stack. */
+    g_user_address_space = space;
     g_user_mapped_pages = mapped_pages;
     g_user_mapped_page_count = mapped_count;
     g_user_kernel_stack = kernel_stack;
     g_user_process_active = 1;
 
+    /* Bind the ring-3 execution context to the currently scheduled process.
+       IRQ0 will restore this CR3 and TSS.RSP0 whenever the process resumes. */
+    Process_AttachCurrentAddressSpace(space);
+    Process_SetCurrentKernelStack((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     TSS_Load((uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE);
     serial_print("[USERMODE] entering ring3\n");
+    VMM_ActivateAddressSpace(space);
 
     // A C function entered without CALL must see the ABI's 16-byte
     // stack alignment (RSP % 16 == 8) and a harmless fake return slot.
