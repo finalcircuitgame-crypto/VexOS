@@ -34,7 +34,7 @@ def main() -> int:
         return 1
 
     # P_PlayerThink is the final function in this upstream source file.
-    end = source.rstrip().rfind("\\n}")
+    end = source.rstrip().rfind("\n}")
     if end < 0:
         print("patch_doom_player_state: could not locate final function brace", file=sys.stderr)
         return 1
