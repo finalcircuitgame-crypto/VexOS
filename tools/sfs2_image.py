@@ -122,11 +122,11 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
     cursor = data_lba
     bitmap = bytearray(bitmap_sectors * SECTOR)
     for i, (name, data) in enumerate(prepared, start=1):
-        needed = max(1, ceildiv(len(data), SECTOR))
+        needed = ceildiv(len(data), SECTOR)
         if cursor + needed > volume_sectors:
             raise ValueError(f"not enough free sectors for {name.decode('utf-8')!r}")
         inode_records[i] = INODE.pack(i + 1, 1, 1, 0, 0, name.ljust(NAME_MAX, b"\0"),
-                                      len(data), cursor, needed, 1, 0, bytes(8))
+                                      len(data), cursor if needed else 0, needed, 1, 0, bytes(8))
         for bit in range(cursor - data_lba, cursor + needed - data_lba):
             bitmap[bit >> 3] |= 1 << (bit & 7)
         cursor += needed
