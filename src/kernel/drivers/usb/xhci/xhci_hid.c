@@ -255,6 +255,40 @@ static void xhci_intr_ring_push(xhci_device_state_t *dev, const xhci_trb_t *trb)
   xhci_dma_write_barrier();
 }
 
+
+/*
+ * Convert USB endpoint descriptor bInterval into the xHCI Endpoint Context
+ * Interval exponent. xHCI expresses periodic intervals as 125 us * 2^N.
+ *
+ * Low/full-speed interrupt bInterval is in 1 ms frames (1..255), so convert
+ * 8 * bInterval microframes and round down to the nearest power of two.
+ * High/SuperSpeed periodic bInterval is already an exponent (1..16), so
+ * the xHCI field receives bInterval - 1.
+ */
+static uint32_t xhci_hid_context_interval(const xhci_device_state_t *dev) {
+  uint32_t b_interval = dev->intr_interval;
+  if (b_interval == 0)
+    b_interval = 1;
+
+  if (dev->speed_code == 1u || dev->speed_code == 2u) {
+    uint32_t microframes = b_interval * 8u;
+    uint32_t interval = 0;
+
+    while (interval < 10u && (1u << (interval + 1u)) <= microframes)
+      interval++;
+
+    if (interval < 3u)
+      interval = 3u;
+    if (interval > 10u)
+      interval = 10u;
+    return interval;
+  }
+
+  if (b_interval > 16u)
+    b_interval = 16u;
+  return b_interval - 1u;
+}
+
 int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   if (dev->intr_epaddr == 0 || dev->intr_mps == 0) {
     serial_print("[xHCI] No interrupt IN endpoint found; skipping HID polling\n");
@@ -333,7 +367,17 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   ep->tr_deq_lo = (uint32_t)(trdp & 0xFFFFFFFFu);
   ep->tr_deq_hi = (uint32_t)((trdp >> 32) & 0xFFFFFFFFu);
 
-  uint32_t interval = dev->intr_interval;
+  uint32_t interval = xhci_hid_context_interval(dev);
+  uint32_t interval_us = 125u * (1u << interval);
+  serial_print("[xHCI][HID] speed=");
+  xhci_print_u32_dec(dev->speed_code);
+  serial_print(" descriptor_bInterval=");
+  xhci_print_u32_dec(dev->intr_interval);
+  serial_print(" context_interval=");
+  xhci_print_u32_dec(interval);
+  serial_print(" service_period_us=");
+  xhci_print_u32_dec(interval_us);
+  serial_print("\\n");
   ep->dword0 = (interval & 0xFFu) << 16;
   ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
 
