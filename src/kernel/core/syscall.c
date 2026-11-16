@@ -239,6 +239,8 @@ uint64_t syscall_handler(uint64_t rsp) {
         syscall_process_cleanup();
         desktop_user_app_exited(0);
         serial_print("[USERMODE] exiting ring3\n");
+        if (Process_IsCurrentUser())
+            return Process_ExitCurrent(rsp, 0);
         return Task_Exit(rsp);
     case 1:
         frame->rax = (uint64_t)(int64_t)sys_write_user(
