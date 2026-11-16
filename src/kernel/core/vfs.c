@@ -98,7 +98,7 @@ int vfs_is_mounted(void) {
 }
 
 int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
-    if (!path || !out || out_cap == 0 || !g_root_mount.mounted)
+    if (!path || !out || out_cap == 0 || !vfs_init())
         return 0;
 
     uint32_t len = path_length(path);
@@ -162,7 +162,7 @@ static int vfs_resolve(const char *path, char *name, uint32_t cap) {
 }
 
 int vfs_stat(const char *path, vfs_stat_t *out_stat) {
-    if (!out_stat || !g_root_mount.mounted || !g_root_mount.ops)
+    if (!out_stat || !vfs_init() || !g_root_mount.ops)
         return 0;
     if (path && path[0] == '/' && path[1] == '\0') {
         out_stat->type = VFS_NODE_DIRECTORY;
@@ -179,7 +179,7 @@ int vfs_read_at(const char *path, uint32_t offset, void *out,
                 uint32_t max_len, uint32_t *out_len) {
     if (out_len)
         *out_len = 0;
-    if ((!out && max_len != 0) || !g_root_mount.ops ||
+    if ((!out && max_len != 0) || !vfs_init() || !g_root_mount.ops
         !g_root_mount.ops->read_at)
         return 0;
     char name[VFS_PATH_MAX];
@@ -202,7 +202,7 @@ int vfs_read(const char *path, void *out, uint32_t max_len,
 }
 
 int vfs_write(const char *path, const void *data, uint32_t len) {
-    if ((!data && len != 0) || !g_root_mount.ops ||
+    if ((!data && len != 0) || !vfs_init() || !g_root_mount.ops
         !g_root_mount.ops->write)
         return 0;
     char name[VFS_PATH_MAX];
