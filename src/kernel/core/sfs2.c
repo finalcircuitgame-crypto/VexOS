@@ -237,7 +237,26 @@ static int sfs2_validate_namespace(sfs2_volume_t *volume) {
                 return 0;
         }
     }
-    return root_count == 1u;
+    if (root_count != 1u)
+        return 0;
+
+    /* Every live inode must reach the single root without a parent cycle. */
+    for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+        uint32_t current = volume->inodes[i].inode_id;
+        if (current == 0 || current == volume->superblock.root_inode)
+            continue;
+        uint32_t hops = 0;
+        while (current != volume->superblock.root_inode) {
+            uint32_t current_index = 0;
+            if (++hops > volume->superblock.inode_capacity ||
+                !sfs2_find_inode_id(volume, current, &current_index))
+                return 0;
+            current = volume->inodes[current_index].parent_id;
+            if (current == 0)
+                return 0;
+        }
+    }
+    return 1;
 }
 
 int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
