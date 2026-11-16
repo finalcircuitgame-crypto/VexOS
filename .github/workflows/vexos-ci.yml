@@ -2,7 +2,7 @@ name: VexOS CI
 
 on:
   push:
-    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework]
+    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework, feature/sfs2-foundation]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,6 +11,14 @@ permissions:
   contents: read
 
 jobs:
+  sfs2-host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Test SFS2 host image tools
+        run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
+
   build-and-boot:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
