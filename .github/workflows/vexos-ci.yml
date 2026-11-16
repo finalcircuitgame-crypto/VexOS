@@ -477,6 +477,8 @@ jobs:
                           f"[CI] USB arrow {label} released",
                           f"[CI] Doom backend received {label} down",
                           f"[CI] Doom backend received {label} released",
+                          f"[CI] Doom ticcmd synced {label} down",
+                          f"[CI] Doom ticcmd synced {label} released",
                       )
                       deadline = time.time() + 4
                       serial = ""
