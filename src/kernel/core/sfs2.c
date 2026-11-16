@@ -713,6 +713,7 @@ int sfs2_unlink_file(sfs2_volume_t *volume, const char *path) {
     if (previous.data_sectors > SFS2_MAX_FILE_SECTORS)
         return 0;
 
+    /* Remove the file and release its extent in one journal transaction. */
     g_sfs2_transaction.count = 0;
     if (previous.data_sectors) {
         uint64_t old_bit = previous.data_lba -
@@ -730,6 +731,48 @@ int sfs2_unlink_file(sfs2_volume_t *volume, const char *path) {
         return 0;
     volume->superblock = updated_sb;
     volume->inodes[index] = empty;
+
+    /*
+     * Directories are implicit in the VFS namespace. SFS2 stores directory
+     * inodes to represent nested paths, so unlink must reclaim now-empty
+     * ancestors as well. Commit each directory removal separately: each
+     * transaction touches only its inode-table sector(s) and the superblock,
+     * keeping cleanup within even the smallest supported journal.
+     */
+    uint32_t directory_id = parent_id;
+    while (directory_id != volume->superblock.root_inode) {
+        uint32_t directory_index = 0;
+        if (!sfs2_find_inode_id(volume, directory_id, &directory_index))
+            break;
+
+        sfs2_inode_t *directory = &volume->inodes[directory_index];
+        if (directory->type != SFS2_INODE_DIRECTORY)
+            break;
+
+        int has_children = 0;
+        for (uint32_t i = 0; i < volume->superblock.inode_capacity; ++i) {
+            if (volume->inodes[i].inode_id &&
+                volume->inodes[i].parent_id == directory_id) {
+                has_children = 1;
+                break;
+            }
+        }
+        if (has_children)
+            break;
+
+        uint32_t next_parent_id = directory->parent_id;
+        g_sfs2_transaction.count = 0;
+        if (!sfs2_tx_store_inode(volume, directory_index, &empty))
+            break;
+        updated_sb = volume->superblock;
+        if (!sfs2_tx_store_superblock(volume, &updated_sb) ||
+            !sfs2_tx_commit(volume))
+            break;
+
+        volume->superblock = updated_sb;
+        volume->inodes[directory_index] = empty;
+        directory_id = next_parent_id;
+    }
     return 1;
 }
 
