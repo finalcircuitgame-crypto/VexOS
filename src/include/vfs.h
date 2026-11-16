@@ -15,6 +15,14 @@ typedef struct {
     uint32_t size;
 } vfs_stat_t;
 
+/* Per-open handle. Independent opens have independent offsets. */
+typedef struct {
+    char path[VFS_PATH_MAX];
+    uint32_t size;
+    uint32_t offset;
+    uint8_t is_open;
+} vfs_file_t;
+
 /* Mount the existing persistent filesystem at /. Safe to call repeatedly. */
 int vfs_init(void);
 int vfs_is_mounted(void);
@@ -29,6 +37,11 @@ int vfs_read_at(const char *path, uint32_t offset, void *out,
 int vfs_read(const char *path, void *out, uint32_t max_len,
              uint32_t *out_len);
 int vfs_write(const char *path, const void *data, uint32_t len);
+
+int vfs_open(vfs_file_t *file, const char *path);
+int32_t vfs_file_read(vfs_file_t *file, void *out, uint32_t count);
+int64_t vfs_file_seek(vfs_file_t *file, int64_t offset, int whence);
+int vfs_close(vfs_file_t *file);
 uint32_t vfs_file_count(void);
 int vfs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap);
 uint32_t vfs_list_to_buffer(char *out, uint32_t out_cap);
