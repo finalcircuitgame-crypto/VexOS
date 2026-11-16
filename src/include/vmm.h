@@ -23,8 +23,10 @@ page_table *VMM_GetKernelPML4(void);
 AddressSpace *VMM_GetActiveAddressSpace(void);
 
 /* Each address space receives a private copy of the current kernel page-table
-   hierarchy. Kernel leaf mappings are inherited; user leaf frames are owned
-   and reclaimed by AddressSpaceDestroy. */
+   hierarchy. Kernel/supervisor leaf mappings are inherited and remain shared.
+   Mapping a PAGE_USER leaf transfers exclusive ownership of that physical
+   frame to the address space; callers must not alias it in another mapping.
+   AddressSpaceDestroy reclaims all owned PAGE_USER leaf frames. */
 AddressSpace *VMM_AddressSpaceCreate(void);
 void VMM_AddressSpaceDestroy(AddressSpace *space);
 int VMM_AddressSpaceMapPage(AddressSpace *space, void *virtual_addr,
