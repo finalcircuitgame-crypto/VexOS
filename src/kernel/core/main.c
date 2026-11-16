@@ -1008,7 +1008,7 @@ void kernel_main(BootInfo *bootInfo) {
 #ifdef VEXOS_CI_INPUT_TEST
   if (!Process_CI_SelfTest())
     ci_memory_test_fail("process manager lifecycle self-test");
-  serial_print("[CI] Process manager kernel/user creation and reaping passed\\n");
+  serial_print("[CI] Process manager kernel/user creation and reaping passed\n");
   extern void Task_CI_StartRuntimeTest(void);
   extern int Task_CI_RuntimeTestPassed(void);
   extern uint64_t Task_CI_RuntimeBadFrameCS(void);
