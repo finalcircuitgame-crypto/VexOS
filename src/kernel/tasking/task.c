@@ -79,12 +79,16 @@ static void build_kernel_task_frame(uint64_t **stack_ptr,
                                     void (*entry)(void)) {
   uint64_t *stack = *stack_ptr;
 
-  /* A same-CPL IRETQ pops only RIP, CS, and RFLAGS. Leave the actual
-     fake C return address immediately below that frame; do not add the
-     RSP/SS words used by a privilege-changing ring-3 transition. */
-  *(--stack) = 0;
-  *(--stack) = 0x202;
-  *(--stack) = 0x08;
+  /* In 64-bit long mode IRETQ always restores all five slots, even
+     for a same-CPL return: RIP, CS, RFLAGS, RSP, SS. The saved RSP points
+     at the fake C return address placed at the top of this task's stack. */
+  *(--stack) = 0;  // Fake C return address at stack_top - 8.
+  uint64_t initial_rsp = (uint64_t)(uintptr_t)stack;
+
+  *(--stack) = 0x10; // Kernel SS.
+  *(--stack) = initial_rsp;
+  *(--stack) = 0x202; // RFLAGS.
+  *(--stack) = 0x08;  // Kernel CS.
   *(--stack) = (uint64_t)(uintptr_t)entry;
 
   /* Match PUSH_GPRS in interrupt_stubs.s: RAX..R15 are pushed in order. */
@@ -333,7 +337,8 @@ int Task_CI_SelfTest(void) {
   }
   if (frame[15] != (uint64_t)(uintptr_t)task_entry_trampoline ||
       frame[16] != 0x08u || frame[17] != 0x202u ||
-      frame[18] != 0)
+      frame[18] != (uint64_t)(uintptr_t)&test_stack[63] ||
+      frame[19] != 0x10u)
     return 0;
 
   if (Task_Schedule(0x2222u) != 0x1111u)
@@ -381,10 +386,12 @@ void Task_CI_StartRuntimeTest(void) {
     ci_runtime_setup_ok =
         frame_a[15] == (uint64_t)(uintptr_t)task_entry_trampoline &&
         frame_a[16] == 0x08u && frame_a[17] == 0x202u &&
-        frame_a[18] == 0 &&
+        frame_a[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_a + 4096u - sizeof(uint64_t)) &&
+        frame_a[19] == 0x10u &&
         frame_b[15] == (uint64_t)(uintptr_t)task_entry_trampoline &&
         frame_b[16] == 0x08u && frame_b[17] == 0x202u &&
-        frame_b[18] == 0;
+        frame_b[18] == (uint64_t)(uintptr_t)((uint8_t *)stack_b + 4096u - sizeof(uint64_t)) &&
+        frame_b[19] == 0x10u;
   }
 
   extern void serial_print(const char *str);
