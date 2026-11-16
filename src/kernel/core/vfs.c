@@ -72,7 +72,7 @@ static uint32_t vfs_string_length(const char *s) {
     uint32_t n = 0;
     if (!s)
         return 0;
-    while (s[n] && n < VFS_PATH_MAX)
+    while (n < VFS_PATH_MAX && s[n])
         ++n;
     return n;
 }
