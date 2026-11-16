@@ -52,8 +52,6 @@ void usermode_cleanup_current(void) {
 
     /* Switch away from the process CR3 before releasing its private tables.
        Keep the transition stack allocated until the scheduler has left it. */
-    Process_AttachCurrentAddressSpace(NULL);
-    Process_SetCurrentKernelStack(0);
     Process_DetachCurrentAddressSpace();
     VMM_Activate();
 
@@ -529,10 +527,10 @@ void usermode_launch(const char *filename) {
     }
 
     if (!VMM_AddressSpaceMapPage(space, kernel_stack, kernel_stack, PAGE_WRITE | PAGE_PRESENT)) {
-        PMM_FreePage(kernel_stack);
-        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
         Process_AttachCurrentAddressSpace(NULL);
         VMM_Activate();
+        PMM_FreePage(kernel_stack);
+        rollback_user_pages_in_space(space, mapped_pages, mapped_count);
         VMM_AddressSpaceDestroy(space);
         kfree(mapped_pages);
         kfree(elf_data);
