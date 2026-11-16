@@ -6,6 +6,19 @@
 
 #define PROCESS_MAX TASK_MAX
 
+/* The scheduler runs on the PIT IRQ on this uniprocessor build. Keep a new
+   task from running until its process record is completely published. */
+static uint64_t process_irq_save_disable(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+  return flags;
+}
+
+static void process_irq_restore(uint64_t flags) {
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
 typedef struct {
   ProcessInfo info;
   AddressSpace *address_space;
@@ -131,8 +144,10 @@ ProcessId Process_CreateKernel(const char *name, void (*entry)(void)) {
   for (uint32_t i = 0; i < PAGE_SIZE / sizeof(uint64_t); ++i)
     words[i] = 0;
 
+  uint64_t irq_flags = process_irq_save_disable();
   int32_t task_id = Task_Create(entry, (uint8_t *)stack + PAGE_SIZE);
   if (task_id < 0) {
+    process_irq_restore(irq_flags);
     PMM_FreePage(stack);
     return 0;
   }
@@ -140,12 +155,14 @@ ProcessId Process_CreateKernel(const char *name, void (*entry)(void)) {
   ProcessId pid = Process_RegisterTask(name, (uint32_t)task_id, stack);
   if (!pid) {
     Task_Discard((uint32_t)task_id);
+    process_irq_restore(irq_flags);
     PMM_FreePage(stack);
     return 0;
   }
   Process *process = find_by_pid(pid);
   process->kernel_stack_top = (uint64_t)(uintptr_t)stack + PAGE_SIZE;
   process->owns_kernel_stack = 1;
+  process_irq_restore(irq_flags);
   return pid;
 }
 
@@ -167,9 +184,11 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
     return 0;
   }
 
+  uint64_t irq_flags = process_irq_save_disable();
   int32_t task_id = Task_CreateUser(space, entry, user_stack_top,
                                     (uint8_t *)kernel_stack + PAGE_SIZE);
   if (task_id < 0) {
+    process_irq_restore(irq_flags);
     VMM_AddressSpaceUnmapPage(space, kernel_stack, 0);
     PMM_FreePage(kernel_stack);
     return 0;
@@ -178,6 +197,7 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
   ProcessId pid = Process_RegisterTask(name, (uint32_t)task_id, kernel_stack);
   if (!pid) {
     Task_Discard((uint32_t)task_id);
+    process_irq_restore(irq_flags);
     VMM_AddressSpaceUnmapPage(space, kernel_stack, 0);
     PMM_FreePage(kernel_stack);
     return 0;
@@ -188,6 +208,7 @@ ProcessId Process_CreateUser(const char *name, AddressSpace *space,
   process->kernel_stack_top = (uint64_t)(uintptr_t)kernel_stack + PAGE_SIZE;
   process->owns_kernel_stack = 1;
   process->info.user_mode = 1;
+  process_irq_restore(irq_flags);
   return pid;
 }
 
