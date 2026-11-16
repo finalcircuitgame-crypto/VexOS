@@ -467,6 +467,9 @@ static void ci_syscall_self_test(void) {
   if (!sfs2_ci_metadata_self_test())
     ci_memory_test_fail("SFS2 superblock, inode, and bitmap metadata");
   serial_print("[CI] SFS2 superblock, inode, and bitmap metadata passed\\n");
+  if (!sfs2_ci_mount_read_test())
+    ci_memory_test_fail("SFS2 read-only mount, namespace, and file reads");
+  serial_print("[CI] SFS2 read-only mount, namespace, and file reads passed\\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
