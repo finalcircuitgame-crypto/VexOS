@@ -1192,17 +1192,27 @@ static void shell_run_line(void) {
   } else if (g_shell_line_len == 2 && streq_n(g_shell_line, "fs", 2)) {
     shell_append("mounting fs...\n");
     if (vfs_init()) {
-      uint32_t file_count = vfs_file_count();
-      if (file_count == 0) {
-        shell_append("(empty)\n");
+      vfs_dir_t root_dir = {0};
+      if (!vfs_dir_open(&root_dir, "/")) {
+        shell_append("root directory unavailable\n");
       } else {
-        for (uint32_t i = 0; i < file_count; ++i) {
-          char entry[VFS_PATH_MAX];
-          if (vfs_file_name_at(i, entry, sizeof(entry))) {
-            shell_append(entry);
-            shell_append("\n");
-          }
+        uint32_t entries = 0;
+        int result = 0;
+        char entry[VFS_NAME_MAX];
+        vfs_stat_t info;
+        while ((result = vfs_dir_read(&root_dir, entry, sizeof(entry),
+                                      &info)) > 0) {
+          shell_append(entry);
+          if (info.type == VFS_NODE_DIRECTORY)
+            shell_append("/");
+          shell_append("\n");
+          ++entries;
         }
+        if (result < 0)
+          shell_append("directory read error\n");
+        else if (entries == 0)
+          shell_append("(empty)\n");
+        vfs_dir_close(&root_dir);
       }
     } else {
       shell_append("fs init failed\n");
