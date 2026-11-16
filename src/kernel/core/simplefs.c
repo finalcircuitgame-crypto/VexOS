@@ -437,27 +437,6 @@ static int sfs_load_superblock(void) {
   return 1;
 }
 
-static int sfs_format(void) {
-  mem_zero(&g_sb, (uint32_t)sizeof(g_sb));
-  mem_zero(&g_table[0], (uint32_t)sizeof(g_table));
-
-  g_sb.magic = SFS_MAGIC;
-  g_sb.version = SFS_VERSION;
-  g_sb.table_lba = 1;
-  g_sb.table_sectors = 8; // 8 * 512 = 4096 bytes table storage
-  g_sb.data_lba = g_sb.table_lba + g_sb.table_sectors;
-  g_sb.next_free_lba = g_sb.data_lba;
-  g_sb.file_count = 0;
-
-  if (!sfs_store_superblock())
-    return 0;
-  if (!sfs_store_table())
-    return 0;
-
-  serial_print("[SFS] formatted\n");
-  return 1;
-}
-
 int simplefs_init(void) {
   /* Mounting is a one-time operation. Re-running ATA IDENTIFY after the
      AHCI controller and runtime interrupts are active can stall the desktop;
@@ -504,20 +483,26 @@ int simplefs_init(void) {
     return 0;
   }
 
+  uint64_t table_end =
+      (uint64_t)g_sb.table_lba + (uint64_t)g_sb.table_sectors;
   if (g_sb.magic != SFS_MAGIC || g_sb.version != SFS_VERSION ||
-      g_sb.table_sectors == 0 || g_sb.table_sectors > 64) {
-    serial_print("[SFS] superblock invalid; formatting\n");
-    if (!sfs_format())
-      return 0;
-  } else {
-    if (!sfs_load_table()) {
-      serial_print("[SFS] load table failed; formatting\n");
-      if (!sfs_format())
-        return 0;
-    }
-    serial_print("[SFS] mounted\n");
+      g_sb.table_lba == 0 || g_sb.table_sectors != 8u ||
+      table_end > 0xFFFFFFFFull ||
+      g_sb.data_lba < table_end ||
+      g_sb.next_free_lba < g_sb.data_lba ||
+      g_sb.file_count > SFS_MAX_FILES) {
+    serial_print("[SFS] unrecognized or invalid SFS1 volume; refusing to format\\n");
+    g_kind = STORAGE_FS_NONE;
+    return 0;
   }
 
+  if (!sfs_load_table()) {
+    serial_print("[SFS] file table unreadable; refusing destructive recovery\\n");
+    g_kind = STORAGE_FS_NONE;
+    return 0;
+  }
+
+  serial_print("[SFS] mounted\\n");
   g_mounted = 1;
   return 1;
 }
