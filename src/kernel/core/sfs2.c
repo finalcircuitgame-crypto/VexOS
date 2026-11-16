@@ -501,7 +501,7 @@ int sfs2_ci_mount_read_test(void) {
     g_sfs2_test_disk[3][2] = 'x'; g_sfs2_test_disk[3][3] = 'o';
     g_sfs2_test_disk[3][4] = 's';
 
-    sfs2_volume_t volume;
+    static sfs2_volume_t volume;
     sfs2_zero(&volume, sizeof(volume));
     if (!sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
         return 0;
