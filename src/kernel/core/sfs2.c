@@ -1000,14 +1000,33 @@ int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
 
 
 #ifdef VEXOS_CI_INPUT_TEST
-static uint8_t g_sfs2_test_disk[8192u][SFS2_SECTOR_SIZE];
-static uint8_t g_sfs2_large_payload[3u * 1024u * 1024u + 37u];
+static uint8_t g_sfs2_test_disk[64u][SFS2_SECTOR_SIZE];
+static uint8_t g_sfs2_large_payload[2u * 1024u * 1024u + 37u];
+static uint8_t g_sfs2_large_written[8192u];
+static uint8_t g_sfs2_large_mode;
+static uint64_t g_sfs2_large_data_lba;
 static uint64_t g_sfs2_test_fail_write_lba = UINT64_MAX;
 static uint32_t g_sfs2_test_write_calls;
 static uint32_t g_sfs2_test_fail_write_call;
 
 static int sfs2_test_read(uint64_t lba, void *sector) {
-    if (!sector || lba >= 8192u)
+    if (!sector)
+        return 0;
+    if (g_sfs2_large_mode && lba >= g_sfs2_large_data_lba &&
+        lba - g_sfs2_large_data_lba < 8192u) {
+        uint64_t index = lba - g_sfs2_large_data_lba;
+        if (!g_sfs2_large_written[index])
+            return 0;
+        uint8_t *out = (uint8_t *)sector;
+        uint64_t base = index * SFS2_SECTOR_SIZE;
+        for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i) {
+            uint64_t at = base + i;
+            out[i] = at < sizeof(g_sfs2_large_payload)
+                ? g_sfs2_large_payload[at] : 0u;
+        }
+        return 1;
+    }
+    if (lba >= 64u)
         return 0;
     const uint8_t *src = g_sfs2_test_disk[lba];
     uint8_t *dst = (uint8_t *)sector;
@@ -1017,7 +1036,24 @@ static int sfs2_test_read(uint64_t lba, void *sector) {
 }
 
 static int sfs2_test_write(uint64_t lba, const void *sector) {
-    if (!sector || lba >= 64u || lba == g_sfs2_test_fail_write_lba)
+    if (!sector)
+        return 0;
+    if (g_sfs2_large_mode && lba >= g_sfs2_large_data_lba &&
+        lba - g_sfs2_large_data_lba < 8192u) {
+        uint64_t index = lba - g_sfs2_large_data_lba;
+        const uint8_t *input = (const uint8_t *)sector;
+        uint64_t base = index * SFS2_SECTOR_SIZE;
+        for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i) {
+            uint64_t at = base + i;
+            uint8_t expected = at < sizeof(g_sfs2_large_payload)
+                ? g_sfs2_large_payload[at] : 0u;
+            if (input[i] != expected)
+                return 0;
+        }
+        g_sfs2_large_written[index] = 1u;
+        return 1;
+    }
+    if (lba >= 64u || lba == g_sfs2_test_fail_write_lba)
         return 0;
     ++g_sfs2_test_write_calls;
     if (g_sfs2_test_fail_write_call &&
@@ -1319,6 +1355,7 @@ int sfs2_ci_mount_read_test(void) {
         return 0;
 
     /* Exercise a kernel write larger than the former 2 MiB ceiling. */
+    g_sfs2_large_mode = 0;
     sfs2_zero(g_sfs2_test_disk, sizeof(g_sfs2_test_disk));
     sfs2_zero(&sb, sizeof(sb));
     sb.magic = SFS2_MAGIC;
@@ -1348,6 +1385,9 @@ int sfs2_ci_mount_read_test(void) {
     sfs2_test_store_inode_at(36u, 0u, &inode);
     for (uint32_t i = 0; i < sizeof(g_sfs2_large_payload); ++i)
         g_sfs2_large_payload[i] = (uint8_t)((i * 17u + 3u) & 0xFFu);
+    sfs2_zero(g_sfs2_large_written, sizeof(g_sfs2_large_written));
+    g_sfs2_large_data_lba = sb.data_lba;
+    g_sfs2_large_mode = 1u;
     sfs2_zero(&volume, sizeof(volume));
     if (!sfs2_mount(&volume, sfs2_test_read, sfs2_test_write, 8192u) ||
         !sfs2_write_file(&volume, "/large.bin", g_sfs2_large_payload,
