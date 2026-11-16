@@ -255,7 +255,7 @@ def verify_image(image: Path):
         if len(bitmap) != bitmap_n * SECTOR or len(table) != inode_n * SECTOR:
             raise ValueError("truncated metadata")
 
-        live = []
+        entries = []
         seen_ids = set()
         seen_names = set()
         extents = []
@@ -277,41 +277,70 @@ def verify_image(image: Path):
                 if (kind != 2 or parent != 0 or
                         name_raw != bytes(NAME_MAX) or length or start or sectors):
                     raise ValueError("invalid root inode")
+                entries.append((inode_id, parent, kind, "", start, length))
                 continue
 
-            if parent != 1 or kind != 1:
-                raise ValueError("host verifier currently expects root-level regular files")
-            name_bytes = name_raw.split(b"\0", 1)[0]
-            if not name_bytes or len(name_bytes) >= NAME_MAX or b"/" in name_bytes or name_bytes in (b".", b".."):
+            if parent == 0 or kind not in (1, 2):
+                raise ValueError(f"invalid parent or inode type for inode {inode_id}")
+            name_bytes = name_raw.split(b"\\0", 1)[0]
+            if (not name_bytes or len(name_bytes) >= NAME_MAX or
+                    b"/" in name_bytes or name_bytes in (b".", b"..")):
                 raise ValueError(f"invalid filename in inode {inode_id}")
             try:
                 name = name_bytes.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError(f"filename in inode {inode_id} is not UTF-8") from exc
-            if name in seen_names:
-                raise ValueError(f"duplicate filename: {name!r}")
-            seen_names.add(name)
+            sibling = (parent, name)
+            if sibling in seen_names:
+                raise ValueError(f"duplicate sibling name: {name!r}")
+            seen_names.add(sibling)
 
-            need = ceildiv(length, SECTOR)
-            if length == 0:
-                if start != 0 or sectors != 0:
-                    raise ValueError(f"invalid empty-file extent for inode {inode_id}")
+            if kind == 2:
+                if length or start or sectors:
+                    raise ValueError(f"directory inode {inode_id} has a data extent")
             else:
-                end_lba = start + sectors
-                if (sectors < need or start < data_lba or end_lba < start or
-                        end_lba > volume):
-                    raise ValueError(f"invalid extent for inode {inode_id}")
-                for old_start, old_end, old_id in extents:
-                    if start < old_end and old_start < end_lba:
-                        raise ValueError(f"overlapping extents for inodes {old_id} and {inode_id}")
-                extents.append((start, end_lba, inode_id))
-                for bit in range(start - data_lba, end_lba - data_lba):
-                    if not (bitmap[bit >> 3] & (1 << (bit & 7))):
-                        raise ValueError(f"bitmap misses allocation for inode {inode_id}")
-            live.append((name, start, length))
+                need = ceildiv(length, SECTOR)
+                if length == 0:
+                    if start != 0 or sectors != 0:
+                        raise ValueError(f"invalid empty-file extent for inode {inode_id}")
+                else:
+                    end_lba = start + sectors
+                    if (sectors < need or start < data_lba or end_lba < start or
+                            end_lba > volume):
+                        raise ValueError(f"invalid extent for inode {inode_id}")
+                    for old_start, old_end, old_id in extents:
+                        if start < old_end and old_start < end_lba:
+                            raise ValueError(
+                                f"overlapping extents for inodes {old_id} and {inode_id}")
+                    extents.append((start, end_lba, inode_id))
+                    for bit in range(start - data_lba, end_lba - data_lba):
+                        if not (bitmap[bit >> 3] & (1 << (bit & 7))):
+                            raise ValueError(f"bitmap misses allocation for inode {inode_id}")
+            entries.append((inode_id, parent, kind, name, start, length))
 
         if root_count != 1:
             raise ValueError("image must contain exactly one root inode")
+        by_id = {entry[0]: entry for entry in entries}
+        live = []
+        for entry in entries:
+            inode_id, parent, kind, name, start, length = entry
+            if inode_id == 1:
+                continue
+            parts = []
+            visited = set()
+            current = entry
+            while current[0] != 1:
+                current_id, current_parent, _current_kind, current_name, _s, _l = current
+                if current_id in visited:
+                    raise ValueError(f"parent cycle involving inode {current_id}")
+                visited.add(current_id)
+                parts.append(current_name)
+                parent_entry = by_id.get(current_parent)
+                if parent_entry is None or parent_entry[2] != 2:
+                    raise ValueError(f"missing or non-directory parent for inode {current_id}")
+                current = parent_entry
+            if kind == 1:
+                live.append(("/".join(reversed(parts)), start, length))
     return {"sectors": volume, "files": live, "data_lba": data_lba}
 
 def cmd_format(args):
