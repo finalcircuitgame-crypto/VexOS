@@ -1,4 +1,5 @@
 #include "../../include/interrupts.h"
+#include "../../include/process.h"
 #include "../../include/heap.h"
 #include "../../include/simplefs.h"
 #include "../../include/vmm.h"
