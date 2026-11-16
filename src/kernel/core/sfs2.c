@@ -99,8 +99,8 @@ int sfs2_validate_inode(const sfs2_inode_t *inode,
     if (inode->size_bytes == 0)
         return inode->data_sectors == 0 && inode->data_lba == 0;
 
-    uint64_t required = (inode->size_bytes + SFS2_SECTOR_SIZE - 1u) /
-                        SFS2_SECTOR_SIZE;
+    uint64_t required = inode->size_bytes / SFS2_SECTOR_SIZE +
+                        ((inode->size_bytes % SFS2_SECTOR_SIZE) != 0u);
     uint64_t end = inode->data_lba + inode->data_sectors;
     if (inode->data_lba < data_lba || inode->data_sectors < required ||
         end < inode->data_lba || end > volume_sectors)
@@ -158,6 +158,20 @@ int sfs2_ci_metadata_self_test(void) {
         return 0;
     sb.data_lba = 1;
     if (sfs2_validate_superblock(&sb, 4096))
+        return 0;
+
+    sfs2_inode_t root;
+    sfs2_zero(&root, sizeof(root));
+    root.inode_id = 1u;
+    root.type = SFS2_INODE_DIRECTORY;
+    root.checksum = sfs2_checksum(&root, sizeof(root),
+                                  (uint32_t)offsetof(sfs2_inode_t, checksum));
+    if (!sfs2_validate_inode(&root, 50u, 4096u))
+        return 0;
+    root.parent_id = 1u;
+    root.checksum = sfs2_checksum(&root, sizeof(root),
+                                  (uint32_t)offsetof(sfs2_inode_t, checksum));
+    if (sfs2_validate_inode(&root, 50u, 4096u))
         return 0;
 
     uint8_t bitmap[2] = {0xF0u, 0x00u};
