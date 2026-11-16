@@ -730,12 +730,11 @@ static int vfs_child_seen_before(const vfs_dir_t *dir, uint32_t index,
                                  const char *child) {
     for (uint32_t i = 0; i < index; ++i) {
         char previous[VFS_NAME_MAX];
-        int previous_is_dir = 0;
         char entry[VFS_PATH_MAX];
         if (!vfs_backend_name_at(i, entry, sizeof(entry)))
             continue;
         int result = vfs_child_from_entry(dir->path, entry, previous,
-                                          sizeof(previous), &previous_is_dir);
+                                          sizeof(previous), NULL);
         if (result == 1 && vfs_string_equal(previous, child))
             return 1;
     }
