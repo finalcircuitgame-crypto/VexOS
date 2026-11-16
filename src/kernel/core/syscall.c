@@ -31,28 +31,49 @@ typedef struct {
     uint32_t cursor;
 } open_file_t;
 
-static open_file_t g_files[MAX_OPEN_FILES];
-static uint64_t g_next_mmap = USER_MMAP_BASE;
-static uint64_t g_user_mmap_pages[USER_MMAP_TRACKED_PAGES];
-static uint32_t g_user_mmap_page_count;
+typedef struct {
+    open_file_t files[MAX_OPEN_FILES];
+    uint64_t next_mmap;
+    uint32_t mmap_page_count;
+    uint8_t initialized;
+} syscall_process_state_t;
+
+static syscall_process_state_t g_process_states[TASK_MAX];
+
+static syscall_process_state_t *syscall_current_state(void) {
+    uint32_t task_id = Task_GetCurrentId();
+    if (task_id >= TASK_MAX)
+        return NULL;
+
+    syscall_process_state_t *state = &g_process_states[task_id];
+    if (!state->initialized) {
+        state->next_mmap = USER_MMAP_BASE;
+        state->mmap_page_count = 0;
+        state->initialized = 1;
+    }
+    return state;
+}
 
 static int16_t clamp_mouse_axis(int32_t v) {
     if(v>32767)return 32767;if(v<-32768)return -32768;return (int16_t)v;
 }
 
-/* Release all resources owned by the current ring-3 process. */
+/* Release only the descriptors and mmap accounting belonging to this task.
+   User frames themselves are reclaimed by its AddressSpace teardown. */
 void syscall_process_cleanup(void) {
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state)
+        return;
+
     for (int fd = 3; fd < MAX_OPEN_FILES; ++fd) {
-        g_files[fd].name[0] = '\0';
-        g_files[fd].size = 0;
-        g_files[fd].cursor = 0;
-        g_files[fd].used = 0;
+        state->files[fd].name[0] = '\0';
+        state->files[fd].size = 0;
+        state->files[fd].cursor = 0;
+        state->files[fd].used = 0;
     }
 
-    /* Process address-space teardown owns and frees all PAGE_USER mappings,
-       including mmap allocations. This routine only resets descriptor metadata. */
-    g_user_mmap_page_count = 0;
-    g_next_mmap = USER_MMAP_BASE;
+    state->mmap_page_count = 0;
+    state->next_mmap = USER_MMAP_BASE;
 }
 
 static int copy_user_string(char *dst, uint32_t dst_cap, const char *src) {
@@ -85,12 +106,14 @@ static int sys_write_user(const char *s, uint64_t n) {
 }
 
 static int sys_open(const char *filename) {
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state) return -1;
     char name_buf[USER_FILENAME_MAX];
     if (!copy_user_string(name_buf, sizeof(name_buf), filename)) return -1;
 
     int fd = -1;
     for (int i = 3; i < MAX_OPEN_FILES; i++) {
-        if (!g_files[i].used) {
+        if (!state->files[i].used) {
             fd = i;
             break;
         }
@@ -120,18 +143,19 @@ static int sys_open(const char *filename) {
     }
 
     // Keep descriptors lightweight: stream large assets on demand.
-    g_files[fd].used = 1;
+    state->files[fd].used = 1;
     for (uint32_t i = 0; i < USER_FILENAME_MAX; ++i)
-        g_files[fd].name[i] = name_buf[i];
-    g_files[fd].size = size;
-    g_files[fd].cursor = 0;
+        state->files[fd].name[i] = name_buf[i];
+    state->files[fd].size = size;
+    state->files[fd].cursor = 0;
     return fd;
 }
 
 static int sys_read(int fd, void *buf, uint32_t count) {
-    if (fd < 3 || fd >= MAX_OPEN_FILES || !g_files[fd].used) return -1;
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
 
-    open_file_t *file = &g_files[fd];
+    open_file_t *file = &state->files[fd];
     if (file->cursor >= file->size || count == 0) return 0;
 
     uint32_t available = file->size - file->cursor;
@@ -150,9 +174,10 @@ static int sys_read(int fd, void *buf, uint32_t count) {
 }
 
 static int sys_seek(int fd, int offset, int whence) {
-    if (fd < 3 || fd >= MAX_OPEN_FILES || !g_files[fd].used) return -1;
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
 
-    open_file_t *file = &g_files[fd];
+    open_file_t *file = &state->files[fd];
     int64_t base;
     if (whence == 0) base = 0;
     else if (whence == 1) base = file->cursor;
@@ -167,26 +192,28 @@ static int sys_seek(int fd, int offset, int whence) {
 }
 
 static int sys_close(int fd) {
-    if (fd < 3 || fd >= MAX_OPEN_FILES || !g_files[fd].used) return -1;
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES || !state->files[fd].used) return -1;
 
-    g_files[fd].name[0] = '\0';
-    g_files[fd].size = 0;
-    g_files[fd].cursor = 0;
-    g_files[fd].used = 0;
+    state->files[fd].name[0] = '\0';
+    state->files[fd].size = 0;
+    state->files[fd].cursor = 0;
+    state->files[fd].used = 0;
     return 0;
 }
 
 static void *sys_mmap(void *requested_addr, uint32_t length) {
-    if (length == 0 || length > USER_MMAP_MAX) return (void *)-1;
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state || length == 0 || length > USER_MMAP_MAX) return (void *)-1;
 
     uint64_t pages = ((uint64_t)length + PAGE_SIZE - 1u) / PAGE_SIZE;
     uint64_t bytes = pages * PAGE_SIZE;
-    if (pages > USER_MMAP_TRACKED_PAGES - g_user_mmap_page_count)
+    if (pages > USER_MMAP_TRACKED_PAGES - state->mmap_page_count)
         return (void *)-1;
     uint64_t vaddr = (uint64_t)(uintptr_t)requested_addr;
 
     if (vaddr == 0) {
-        vaddr = (g_next_mmap + PAGE_SIZE - 1u) & ~(uint64_t)(PAGE_SIZE - 1u);
+        vaddr = (state->next_mmap + PAGE_SIZE - 1u) & ~(uint64_t)(PAGE_SIZE - 1u);
     } else if (vaddr & (PAGE_SIZE - 1u)) {
         return (void *)-1;
     }
@@ -220,11 +247,10 @@ static void *sys_mmap(void *requested_addr, uint32_t length) {
         return (void *)-1;
     }
 
-    for (uint64_t i = 0; i < pages; ++i)
-        g_user_mmap_pages[g_user_mmap_page_count++] = vaddr + i * PAGE_SIZE;
+    state->mmap_page_count += (uint32_t)pages;
 
-    if (vaddr == g_next_mmap || vaddr >= g_next_mmap)
-        g_next_mmap = vaddr + bytes;
+    if (vaddr >= state->next_mmap)
+        state->next_mmap = vaddr + bytes;
     return (void *)(uintptr_t)vaddr;
 }
 
