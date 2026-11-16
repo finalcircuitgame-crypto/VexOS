@@ -22,7 +22,7 @@ static volatile uint64_t ci_runtime_count_a;
 static volatile uint64_t ci_runtime_count_b;
 #endif
 
-static void task_entry_trampoline(void) {
+static __attribute__((noreturn)) void task_entry_trampoline(void) {
   uint32_t task_id = current_task;
   void (*entry)(void) =
       task_id < TASK_MAX ? kernel_task_entries[task_id] : NULL;
@@ -220,6 +220,7 @@ int Task_Discard(uint32_t task_id) {
   tasks[task_id].kernel_stack_top = 0;
   tasks[task_id].address_space = NULL;
   tasks[task_id].user_mode = 0;
+  kernel_task_entries[task_id] = NULL;
   tasks[task_id].state = TASK_UNUSED;
   return 1;
 }
@@ -292,7 +293,7 @@ void Task_Yield(void) {
   __asm__ volatile("int $0x81" ::: "memory");
 }
 
-void Task_ExitCurrent(void) {
+__attribute__((noreturn)) void Task_ExitCurrent(void) {
   /* Keep the transition to ZOMBIE and the software reschedule indivisible
      from the PIT scheduler's point of view. */
   __asm__ volatile("cli" ::: "memory");
