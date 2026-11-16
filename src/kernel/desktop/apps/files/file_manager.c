@@ -2,7 +2,7 @@
 
 #include "../../graphics/graphics.h"
 #include "../../window_manager.h"
-#include "../../../../include/simplefs.h"
+#include "../../../../include/vfs.h"
 
 #define FILE_MANAGER_MAX_FILES 128u
 #define FILE_MANAGER_NAME_CAP 64u
@@ -195,7 +195,7 @@ static void fm_rebuild_visible(void) {
 }
 
 static void fm_refresh(void) {
-  g_order_count = simplefs_file_count();
+  g_order_count = vfs_file_count();
   if (g_order_count > FILE_MANAGER_MAX_FILES)
     g_order_count = FILE_MANAGER_MAX_FILES;
 
@@ -204,9 +204,13 @@ static void fm_refresh(void) {
     g_names[i][0] = 0;
     g_file_sizes[i] = 0;
     g_file_size_valid[i] = 0;
-    if (simplefs_file_name_at(i, g_names[i], FILE_MANAGER_NAME_CAP))
-      g_file_size_valid[i] =
-          (uint8_t)simplefs_file_size(g_names[i], &g_file_sizes[i]);
+    if (vfs_file_name_at(i, g_names[i], FILE_MANAGER_NAME_CAP)) {
+      vfs_stat_t info;
+      if (vfs_stat(g_names[i], &info)) {
+        g_file_sizes[i] = info.size;
+        g_file_size_valid[i] = (uint8_t)(info.type == VFS_NODE_FILE);
+      }
+    }
   }
 
   /* Small bounded insertion sort: the storage index remains the stable ID. */
