@@ -142,16 +142,31 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
 
 static int sfs2_read_inode_table(sfs2_volume_t *volume) {
     uint8_t sector[SFS2_SECTOR_SIZE];
-    uint32_t inode_index = 0;
-    uint32_t byte_offset = 0;
     uint8_t record[sizeof(sfs2_inode_t)];
     uint32_t record_bytes = 0;
-    uint64_t lba = volume->superblock.inode_table_lba;
-    for (uint32_t s = 0; s < volume->superblock.inode_table_sectors; ++s) {
-        if (!volume->read_sector(lba + s, sector))
+    uint32_t inode_index = 0;
+    uint64_t total_bytes =
+        (uint64_t)volume->superblock.inode_capacity * sizeof(sfs2_inode_t);
+    uint64_t loaded_bytes = 0;
+    uint64_t cached_sector = UINT64_MAX;
+
+    while (loaded_bytes < total_bytes) {
+        uint64_t sector_index = loaded_bytes / SFS2_SECTOR_SIZE;
+        if (sector_index >= volume->superblock.inode_table_sectors)
             return 0;
-        for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i, ++byte_offset) {
-            record[record_bytes++] = sector[i];
+        if (sector_index != cached_sector) {
+            if (!volume->read_sector(volume->superblock.inode_table_lba +
+                                     sector_index, sector))
+                return 0;
+            cached_sector = sector_index;
+        }
+        uint32_t within = (uint32_t)(loaded_bytes % SFS2_SECTOR_SIZE);
+        uint32_t chunk = SFS2_SECTOR_SIZE - within;
+        uint64_t remaining = total_bytes - loaded_bytes;
+        if (chunk > remaining)
+            chunk = (uint32_t)remaining;
+        for (uint32_t i = 0; i < chunk; ++i) {
+            record[record_bytes++] = sector[within + i];
             if (record_bytes == sizeof(sfs2_inode_t)) {
                 if (inode_index >= volume->superblock.inode_capacity)
                     return 0;
@@ -161,8 +176,9 @@ static int sfs2_read_inode_table(sfs2_volume_t *volume) {
                 record_bytes = 0;
             }
         }
+        loaded_bytes += chunk;
     }
-    return inode_index >= volume->superblock.inode_capacity &&
+    return inode_index == volume->superblock.inode_capacity &&
            record_bytes == 0;
 }
 
