@@ -4,7 +4,7 @@ This roadmap tracks the work required to turn VexOS from a bootable kernel and d
 
 ## 1. Process isolation
 
-**Status: Core implemented; hardening remains**
+**Status: Finished — core process-isolation milestone implemented and CI-validated**
 
 Implemented:
 - Process control blocks, monotonic PIDs, parent tracking, lifecycle states, exit codes, and process names.
@@ -13,14 +13,14 @@ Implemented:
 - Parent/child wait, exit, zombie reaping, and cleanup of descriptors and mmap bookkeeping.
 - Concurrent ring-3 stress coverage with four workers using the same virtual mapping address but independent private memory.
 
-Remaining:
-- Deliberate invalid-pointer and permission-violation tests.
-- User-process fault containment and reliable reporting of fault exit reasons.
-- Broader resource-leak and repeated create/exit stress tests.
+Post-completion hardening:
+- Add deliberate invalid-pointer and permission-violation tests.
+- Improve user-process fault containment and reporting of fault exit reasons.
+- Expand resource-leak and repeated create/exit stress tests.
 
 ## 2. Multitasking
 
-**Status: Core implemented; application-level validation remains**
+**Status: Finished — core preemptive multitasking milestone implemented and CI-validated**
 
 Implemented:
 - Timer-driven preemptive scheduling and context switching.
@@ -28,10 +28,10 @@ Implemented:
 - Atomic wait/block/wakeup paths against timer interrupts.
 - Concurrent execution of four ring-3 workers and parent wait/reap verification.
 
-Remaining:
-- Launch several independently ELF-loaded applications at once.
-- Validate fairness, starvation resistance, and long-running scheduler stability.
-- Add process signals/termination policy only when the basic application lifecycle is stable.
+Post-completion hardening and expansion:
+- Validate simultaneous execution of several independently ELF-loaded applications.
+- Expand fairness, starvation-resistance, and long-running scheduler-stability tests.
+- Consider process signals and additional termination policies as the application lifecycle grows.
 
 ## 3. Virtual File System (VFS)
 
