@@ -19,6 +19,7 @@ extern void xhci_poll_events(void);
 #define MAX_OPEN_FILES 16
 #define USER_FILENAME_MAX VFS_PATH_MAX
 #define USER_WRITE_MAX 4096u
+#define USER_FILE_WRITE_MAX (1024u * 1024u)
 #define USER_MMAP_MAX (16u * 1024u * 1024u)
 #define USER_MMAP_BASE 0x0000004000000000ULL
 #define USER_MMAP_TRACKED_PAGES 4096u
@@ -26,7 +27,9 @@ extern void xhci_poll_events(void);
 
 typedef struct {
     int used;
+    uint8_t is_directory;
     vfs_file_t file;
+    vfs_dir_t directory;
 } open_file_t;
 
 typedef struct {
@@ -64,9 +67,14 @@ void syscall_process_cleanup_task(uint32_t task_id) {
 
     syscall_process_state_t *state = &g_process_states[task_id];
     for (int fd = 0; fd < MAX_OPEN_FILES; ++fd) {
-        if (state->files[fd].used)
-            vfs_close(&state->files[fd].file);
+        if (state->files[fd].used) {
+            if (state->files[fd].is_directory)
+                vfs_dir_close(&state->files[fd].directory);
+            else
+                vfs_close(&state->files[fd].file);
+        }
         state->files[fd].used = 0;
+        state->files[fd].is_directory = 0;
     }
 
     state->mmap_page_count = 0;
@@ -122,12 +130,14 @@ static int sys_open(const char *filename) {
     }
     if (fd < 0) return -1;
 
+    state->files[fd].file = (vfs_file_t){0};
     if (!vfs_open(&state->files[fd].file, name_buf)) {
         serial_print("[USERMODE] VFS open failed: ");
         serial_print(name_buf);
         serial_print("\\n");
         return -1;
     }
+    state->files[fd].is_directory = 0;
     state->files[fd].used = 1;
     return fd;
 }
@@ -135,7 +145,7 @@ static int sys_open(const char *filename) {
 static int sys_read(int fd, void *buf, uint32_t count) {
     syscall_process_state_t *state = syscall_current_state();
     if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
-        !state->files[fd].used)
+        !state->files[fd].used || state->files[fd].is_directory)
         return -1;
 
     vfs_file_t *file = &state->files[fd].file;
@@ -157,7 +167,7 @@ static int sys_read(int fd, void *buf, uint32_t count) {
 static int sys_seek(int fd, int offset, int whence) {
     syscall_process_state_t *state = syscall_current_state();
     if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
-        !state->files[fd].used)
+        !state->files[fd].used || state->files[fd].is_directory)
         return -1;
     int64_t result = vfs_file_seek(&state->files[fd].file,
                                    (int64_t)offset, whence);
@@ -171,10 +181,120 @@ static int sys_close(int fd) {
     if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
         !state->files[fd].used)
         return -1;
-    if (!vfs_close(&state->files[fd].file))
+    int result = state->files[fd].is_directory
+        ? vfs_dir_close(&state->files[fd].directory)
+        : vfs_close(&state->files[fd].file);
+    if (!result)
         return -1;
     state->files[fd].used = 0;
+    state->files[fd].is_directory = 0;
     return 0;
+}
+
+static int sys_find_free_fd(syscall_process_state_t *state) {
+    if (!state)
+        return -1;
+    for (int fd = 3; fd < MAX_OPEN_FILES; ++fd) {
+        if (!state->files[fd].used)
+            return fd;
+    }
+    return -1;
+}
+
+static int sys_vfs_create(const char *user_path) {
+    char path[USER_FILENAME_MAX];
+    if (!copy_user_string(path, sizeof(path), user_path))
+        return -1;
+    return vfs_create(path) ? 0 : -1;
+}
+
+static int sys_vfs_unlink(const char *user_path) {
+    char path[USER_FILENAME_MAX];
+    if (!copy_user_string(path, sizeof(path), user_path))
+        return -1;
+    return vfs_unlink(path) ? 0 : -1;
+}
+
+static int sys_vfs_write(const char *user_path, const void *user_data,
+                         uint32_t length) {
+    char path[USER_FILENAME_MAX];
+    if (!copy_user_string(path, sizeof(path), user_path) ||
+        length > USER_FILE_WRITE_MAX)
+        return -1;
+    if (length == 0)
+        return vfs_write(path, NULL, 0) ? 0 : -1;
+    if (!VMM_IsUserRange(user_data, length, 0))
+        return -1;
+
+    void *kernel_copy = kmalloc(length);
+    if (!kernel_copy)
+        return -1;
+    const uint8_t *source = (const uint8_t *)user_data;
+    uint8_t *destination = (uint8_t *)kernel_copy;
+    for (uint32_t i = 0; i < length; ++i)
+        destination[i] = source[i];
+
+    int result = vfs_write(path, kernel_copy, length);
+    kfree(kernel_copy);
+    return result ? 0 : -1;
+}
+
+static int sys_vfs_stat(const char *user_path, uint64_t *out_size) {
+    char path[USER_FILENAME_MAX];
+    vfs_stat_t info;
+    if (!copy_user_string(path, sizeof(path), user_path) ||
+        !vfs_stat(path, &info))
+        return -1;
+    if (out_size)
+        *out_size = info.size;
+    return (int)info.type;
+}
+
+static int sys_vfs_opendir(const char *user_path) {
+    syscall_process_state_t *state = syscall_current_state();
+    char path[USER_FILENAME_MAX];
+    if (!state || !copy_user_string(path, sizeof(path), user_path))
+        return -1;
+    int fd = sys_find_free_fd(state);
+    if (fd < 0)
+        return -1;
+
+    state->files[fd].directory = (vfs_dir_t){0};
+    if (!vfs_dir_open(&state->files[fd].directory, path))
+        return -1;
+    state->files[fd].is_directory = 1;
+    state->files[fd].used = 1;
+    return fd;
+}
+
+static int sys_vfs_readdir(int fd, char *user_name, uint32_t capacity,
+                           uint64_t *out_size) {
+    syscall_process_state_t *state = syscall_current_state();
+    if (!state || fd < 3 || fd >= MAX_OPEN_FILES ||
+        !state->files[fd].used || !state->files[fd].is_directory ||
+        !user_name || capacity == 0 || capacity > VFS_NAME_MAX ||
+        !VMM_IsUserRange(user_name, capacity, 1))
+        return -1;
+
+    char name[VFS_NAME_MAX];
+    vfs_stat_t info;
+    int result = vfs_dir_read(&state->files[fd].directory, name,
+                              sizeof(name), &info);
+    if (result <= 0)
+        return result;
+    if (info.type != VFS_NODE_FILE && info.type != VFS_NODE_DIRECTORY)
+        return -1;
+
+    uint32_t length = 0;
+    while (length < VFS_NAME_MAX && name[length])
+        ++length;
+    if (length >= capacity)
+        return -1;
+    for (uint32_t i = 0; i <= length; ++i)
+        user_name[i] = name[i];
+    if (out_size)
+        *out_size = info.size;
+    return (int)info.type;
 }
 
 static void *sys_mmap(void *requested_addr, uint32_t length) {
@@ -328,6 +448,40 @@ uint64_t syscall_handler(uint64_t rsp) {
         if (Process_IsCurrentUser())
             return Process_ExitCurrent(rsp, (int32_t)frame->rdi);
         return Task_Exit(rsp);
+    case 16:
+        frame->rax = (uint64_t)(int64_t)sys_vfs_create(
+            (const char *)(uintptr_t)frame->rdi);
+        break;
+    case 17:
+        frame->rax = (uint64_t)(int64_t)sys_vfs_unlink(
+            (const char *)(uintptr_t)frame->rdi);
+        break;
+    case 18:
+        frame->rax = (uint64_t)(int64_t)sys_vfs_write(
+            (const char *)(uintptr_t)frame->rdi,
+            (const void *)(uintptr_t)frame->rsi,
+            (uint32_t)frame->rdx);
+        break;
+    case 19: {
+        uint64_t size = 0;
+        int type = sys_vfs_stat((const char *)(uintptr_t)frame->rdi, &size);
+        frame->rax = (uint64_t)(int64_t)type;
+        frame->rdx = size;
+        break;
+    }
+    case 20:
+        frame->rax = (uint64_t)(int64_t)sys_vfs_opendir(
+            (const char *)(uintptr_t)frame->rdi);
+        break;
+    case 21: {
+        uint64_t size = 0;
+        int type = sys_vfs_readdir(
+            (int)frame->rdi, (char *)(uintptr_t)frame->rsi,
+            (uint32_t)frame->rdx, &size);
+        frame->rax = (uint64_t)(int64_t)type;
+        frame->rdx = size;
+        break;
+    }
     case 9: {
         uint64_t w = frame->rsi;
         uint64_t h = frame->rdx;
