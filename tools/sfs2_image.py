@@ -99,18 +99,49 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
         raise ValueError("volume must contain at least 32 sectors")
     if not 2 <= inode_capacity <= INODE_MAX:
         raise ValueError(f"inode capacity must be 2..{INODE_MAX}")
-    if len(files) + 1 > inode_capacity:
-        raise ValueError("not enough inode slots for files and root")
-    seen = set()
+    seen_paths = {}
     prepared = []
+    nodes = [(1, 0, 2, b"", None)]
+    next_inode_id = 2
     for name, data in files:
-        encoded = name.encode("utf-8")
-        if not encoded or len(encoded) >= NAME_MAX or b"/" in encoded or name in (".", ".."):
-            raise ValueError(f"invalid SFS2 filename: {name!r}")
-        if name in seen:
-            raise ValueError(f"duplicate filename: {name!r}")
-        seen.add(name)
-        prepared.append((encoded, data))
+        parts = name.split("/")
+        if not name or len(name.encode("utf-8")) > 127:
+            raise ValueError(f"invalid SFS2 path: {name!r}")
+        parent_id = 1
+        prefix = []
+        for component in parts[:-1]:
+            encoded = component.encode("utf-8")
+            if (not encoded or len(encoded) >= NAME_MAX or
+                    component in (".", "..")):
+                raise ValueError(f"invalid SFS2 path component: {component!r}")
+            prefix.append(component)
+            key = "/".join(prefix)
+            existing = seen_paths.get(key)
+            if existing is not None:
+                if existing[1] != 2:
+                    raise ValueError(f"file cannot be a parent directory: {key!r}")
+                parent_id = existing[0]
+            else:
+                nodes.append((next_inode_id, parent_id, 2, encoded, None))
+                seen_paths[key] = (next_inode_id, 2)
+                parent_id = next_inode_id
+                next_inode_id += 1
+
+        component = parts[-1]
+        encoded = component.encode("utf-8")
+        if (not encoded or len(encoded) >= NAME_MAX or
+                component in (".", "..")):
+            raise ValueError(f"invalid SFS2 filename: {component!r}")
+        key = "/".join(parts)
+        if key in seen_paths:
+            raise ValueError(f"duplicate or conflicting SFS2 path: {key!r}")
+        nodes.append((next_inode_id, parent_id, 1, encoded, data))
+        seen_paths[key] = (next_inode_id, 1)
+        prepared.append((key, data))
+        next_inode_id += 1
+
+    if len(nodes) > inode_capacity:
+        raise ValueError("not enough inode slots for files, directories, and root")
 
     journal_lba = 1
     journal_sectors = JOURNAL_SECTORS
@@ -123,15 +154,22 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
         raise ValueError("volume is too small for requested metadata")
 
     inode_records = [None] * inode_capacity
-    inode_records[0] = INODE.pack(1, 0, 2, 0, 0, b"".ljust(NAME_MAX, b"\0"), 0, 0, 0, 1, 0, bytes(8))
+    inode_records[0] = INODE.pack(1, 0, 2, 0, 0, bytes(NAME_MAX),
+                                  0, 0, 0, 1, 0, bytes(8))
     cursor = data_lba
     bitmap = bytearray(bitmap_sectors * SECTOR)
-    for i, (name, data) in enumerate(prepared, start=1):
+    for slot, (inode_id, parent_id, kind, name, data) in enumerate(nodes[1:], start=1):
+        if kind == 2:
+            inode_records[slot] = INODE.pack(
+                inode_id, parent_id, 2, 0, 0, name.ljust(NAME_MAX, b"\\0"),
+                0, 0, 0, 1, 0, bytes(8))
+            continue
         needed = ceildiv(len(data), SECTOR)
         if cursor + needed > volume_sectors:
             raise ValueError(f"not enough free sectors for {name.decode('utf-8')!r}")
-        inode_records[i] = INODE.pack(i + 1, 1, 1, 0, 0, name.ljust(NAME_MAX, b"\0"),
-                                      len(data), cursor if needed else 0, needed, 1, 0, bytes(8))
+        inode_records[slot] = INODE.pack(
+            inode_id, parent_id, 1, 0, 0, name.ljust(NAME_MAX, b"\\0"),
+            len(data), cursor if needed else 0, needed, 1, 0, bytes(8))
         for bit in range(cursor - data_lba, cursor + needed - data_lba):
             bitmap[bit >> 3] |= 1 << (bit & 7)
         cursor += needed
