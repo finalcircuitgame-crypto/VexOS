@@ -331,9 +331,29 @@ static int sfs2_tx_commit(sfs2_volume_t *volume) {
             return 0;
         }
     }
-    header.checksum = sfs2_checksum(&header, sizeof(header),
-        (uint32_t)offsetof(sfs2_journal_header_t, checksum));
-    if (!volume->write_sector(volume->superblock.journal_lba, &header)) {
+    int header_written = 0;
+    if (sfs2_journal_record_capacity(&volume->superblock) <= 8u) {
+        sfs2_legacy_journal_header_t legacy;
+        sfs2_zero(&legacy, sizeof(legacy));
+        legacy.magic = header.magic;
+        legacy.state = header.state;
+        legacy.record_count = header.record_count;
+        legacy.sequence = header.sequence;
+        for (uint32_t i = 0; i < tx->count; ++i) {
+            legacy.targets[i] = header.targets[i];
+            legacy.data_checksums[i] = header.data_checksums[i];
+        }
+        legacy.checksum = sfs2_checksum(&legacy, sizeof(legacy),
+            (uint32_t)offsetof(sfs2_legacy_journal_header_t, checksum));
+        header_written = volume->write_sector(
+            volume->superblock.journal_lba, &legacy);
+    } else {
+        header.checksum = sfs2_checksum(&header, sizeof(header),
+            (uint32_t)offsetof(sfs2_journal_header_t, checksum));
+        header_written = volume->write_sector(
+            volume->superblock.journal_lba, &header);
+    }
+    if (!header_written) {
         volume->mounted = 0;
         return 0;
     }
