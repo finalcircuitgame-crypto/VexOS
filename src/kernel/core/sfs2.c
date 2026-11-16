@@ -558,13 +558,23 @@ int sfs2_ci_mount_read_test(void) {
         return 0;
     uint32_t cursor = 0;
     sfs2_inode_t listed;
-    if (sfs2_list_directory(&volume, "/", &cursor, &listed) != 1)
+    if (sfs2_list_directory(&volume, "/", &cursor, &listed) != 1 ||
+        listed.type != SFS2_INODE_DIRECTORY || listed.name[0] != 'e')
         return 0;
     if (sfs2_stat_path(&volume, "/missing", &info))
+        return 0;
+    char tail[3];
+    if (!sfs2_read_file_at(&volume, "/hello", 2u, tail, 3u, &bytes) ||
+        bytes != 3u || tail[0] != 'x' || tail[1] != 'o' || tail[2] != 's')
         return 0;
     /* A damaged inode checksum must prevent mounting. */
     g_sfs2_test_disk[2][sizeof(sfs2_inode_t) + 12u] ^= 0x80u;
     volume.mounted = 0;
+    if (sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
+        return 0;
+    /* A file extent whose bitmap bit is clear must also be rejected. */
+    g_sfs2_test_disk[2][sizeof(sfs2_inode_t) + 12u] ^= 0x80u;
+    g_sfs2_test_disk[1][0] = 0u;
     if (sfs2_mount(&volume, sfs2_test_read, NULL, 16u))
         return 0;
     return 1;
