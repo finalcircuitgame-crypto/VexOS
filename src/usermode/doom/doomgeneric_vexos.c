@@ -42,27 +42,27 @@ static void trace_arrow_event(uint8_t usage, int pressed) {
     uint32_t arrow_index = 4u;
     static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
     static const char *const state_messages[4][2] = {
-        {"[CI] Doom syscall arrow RIGHT state down\\n", "[CI] Doom syscall arrow RIGHT state released\\n"},
-        {"[CI] Doom syscall arrow LEFT state down\\n", "[CI] Doom syscall arrow LEFT state released\\n"},
-        {"[CI] Doom syscall arrow DOWN state down\\n", "[CI] Doom syscall arrow DOWN state released\\n"},
-        {"[CI] Doom syscall arrow UP state down\\n", "[CI] Doom syscall arrow UP state released\\n"}
+        {"[CI] Doom syscall arrow RIGHT state down\n", "[CI] Doom syscall arrow RIGHT state released\n"},
+        {"[CI] Doom syscall arrow LEFT state down\n", "[CI] Doom syscall arrow LEFT state released\n"},
+        {"[CI] Doom syscall arrow DOWN state down\n", "[CI] Doom syscall arrow DOWN state released\n"},
+        {"[CI] Doom syscall arrow UP state down\n", "[CI] Doom syscall arrow UP state released\n"}
     };
     static const uint8_t state_lengths[4][2] = {
-        {sizeof("[CI] Doom syscall arrow RIGHT state down\\n") - 1u, sizeof("[CI] Doom syscall arrow RIGHT state released\\n") - 1u},
-        {sizeof("[CI] Doom syscall arrow LEFT state down\\n") - 1u, sizeof("[CI] Doom syscall arrow LEFT state released\\n") - 1u},
-        {sizeof("[CI] Doom syscall arrow DOWN state down\\n") - 1u, sizeof("[CI] Doom syscall arrow DOWN state released\\n") - 1u},
-        {sizeof("[CI] Doom syscall arrow UP state down\\n") - 1u, sizeof("[CI] Doom syscall arrow UP state released\\n") - 1u}
+        {sizeof("[CI] Doom syscall arrow RIGHT state down\n") - 1u, sizeof("[CI] Doom syscall arrow RIGHT state released\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow LEFT state down\n") - 1u, sizeof("[CI] Doom syscall arrow LEFT state released\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow DOWN state down\n") - 1u, sizeof("[CI] Doom syscall arrow DOWN state released\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow UP state down\n") - 1u, sizeof("[CI] Doom syscall arrow UP state released\n") - 1u}
     };
-#define TRACE_ARROW_CASE(code, label, index) \\
-    case code: \\
-        arrow_index = index; \\
-        if (pressed) { \\
-            message = "[CI] Doom backend received " label " down\\n"; \\
-            length = sizeof("[CI] Doom backend received " label " down\\n") - 1u; \\
-        } else { \\
-            message = "[CI] Doom backend received " label " released\\n"; \\
-            length = sizeof("[CI] Doom backend received " label " released\\n") - 1u; \\
-        } \\
+#define TRACE_ARROW_CASE(code, label, index) \
+    case code: \
+        arrow_index = index; \
+        if (pressed) { \
+            message = "[CI] Doom backend received " label " down\n"; \
+            length = sizeof("[CI] Doom backend received " label " down\n") - 1u; \
+        } else { \
+            message = "[CI] Doom backend received " label " released\n"; \
+            length = sizeof("[CI] Doom backend received " label " released\n") - 1u; \
+        } \
         break
     switch (usage) {
         TRACE_ARROW_CASE(0x4F, "RIGHT", 0u);
@@ -86,8 +86,8 @@ static void trace_arrow_event(uint8_t usage, int pressed) {
             state_message = state_messages[arrow_index][state_index];
             state_length = state_lengths[arrow_index][state_index];
         } else {
-            state_message = "[CI] Doom syscall arrow state mismatch\\n";
-            state_length = sizeof("[CI] Doom syscall arrow state mismatch\\n") - 1u;
+            state_message = "[CI] Doom syscall arrow state mismatch\n";
+            state_length = sizeof("[CI] Doom syscall arrow state mismatch\n") - 1u;
         }
         (void)vex_syscall3(1u, (uint64_t)(uintptr_t)state_message,
                            state_length, 0);
