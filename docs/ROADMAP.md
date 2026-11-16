@@ -130,4 +130,4 @@ Milestones:
 
 ## Immediate next objective
 
-Implement reference-counted VFS node/open-file lifetime rules and hierarchical directories without changing the existing on-disk format. Do not start FAT32 until directory semantics, error handling, and concurrency tests are stable.
+Design a versioned storage format with a free-space map, durable directory metadata, and crash-safe metadata updates while keeping existing SFS1 volumes mountable. Before any installer or arbitrary physical-disk support, remove SimpleFS's implicit format-on-unrecognized-disk behavior and require explicit user confirmation for destructive formatting.
