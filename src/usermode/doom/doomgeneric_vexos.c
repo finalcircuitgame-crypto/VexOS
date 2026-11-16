@@ -39,80 +39,62 @@ static inline uint64_t vex_syscall3(uint64_t n, uint64_t a, uint64_t b,
 static void trace_arrow_event(uint8_t usage, int pressed) {
     const char *message = 0;
     uint64_t length = 0;
-#define TRACE_ARROW_CASE(code, label) \
-    case code: \
-        if (pressed) { \
-            message = "[CI] Doom backend received " label " down\n"; \
-            length = sizeof("[CI] Doom backend received " label " down\n") - 1u; \
-        } else { \
-            message = "[CI] Doom backend received " label " released\n"; \
-            length = sizeof("[CI] Doom backend received " label " released\n") - 1u; \
-        } \
+    uint32_t arrow_index = 4u;
+    static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
+    static const char *const state_messages[4][2] = {
+        {"[CI] Doom syscall arrow RIGHT state down\\n", "[CI] Doom syscall arrow RIGHT state released\\n"},
+        {"[CI] Doom syscall arrow LEFT state down\\n", "[CI] Doom syscall arrow LEFT state released\\n"},
+        {"[CI] Doom syscall arrow DOWN state down\\n", "[CI] Doom syscall arrow DOWN state released\\n"},
+        {"[CI] Doom syscall arrow UP state down\\n", "[CI] Doom syscall arrow UP state released\\n"}
+    };
+    static const uint8_t state_lengths[4][2] = {
+        {sizeof("[CI] Doom syscall arrow RIGHT state down\\n") - 1u, sizeof("[CI] Doom syscall arrow RIGHT state released\\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow LEFT state down\\n") - 1u, sizeof("[CI] Doom syscall arrow LEFT state released\\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow DOWN state down\\n") - 1u, sizeof("[CI] Doom syscall arrow DOWN state released\\n") - 1u},
+        {sizeof("[CI] Doom syscall arrow UP state down\\n") - 1u, sizeof("[CI] Doom syscall arrow UP state released\\n") - 1u}
+    };
+#define TRACE_ARROW_CASE(code, label, index) \\
+    case code: \\
+        arrow_index = index; \\
+        if (pressed) { \\
+            message = "[CI] Doom backend received " label " down\\n"; \\
+            length = sizeof("[CI] Doom backend received " label " down\\n") - 1u; \\
+        } else { \\
+            message = "[CI] Doom backend received " label " released\\n"; \\
+            length = sizeof("[CI] Doom backend received " label " released\\n") - 1u; \\
+        } \\
         break
     switch (usage) {
-        TRACE_ARROW_CASE(0x4F, "RIGHT");
-        TRACE_ARROW_CASE(0x50, "LEFT");
-        TRACE_ARROW_CASE(0x51, "DOWN");
-        TRACE_ARROW_CASE(0x52, "UP");
+        TRACE_ARROW_CASE(0x4F, "RIGHT", 0u);
+        TRACE_ARROW_CASE(0x50, "LEFT", 1u);
+        TRACE_ARROW_CASE(0x51, "DOWN", 2u);
+        TRACE_ARROW_CASE(0x52, "UP", 3u);
         default: break;
     }
 #undef TRACE_ARROW_CASE
+
     if (message)
         (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
+
+    if (arrow_index < 4u) {
+        uint32_t live_state = (uint32_t)(vex_syscall0(SYS_KEY_STATE) & 0x0Fu);
+        uint32_t expected = pressed ? bits[arrow_index] : 0u;
+        const char *state_message;
+        uint64_t state_length;
+        if ((live_state & bits[arrow_index]) == expected) {
+            uint32_t state_index = pressed ? 0u : 1u;
+            state_message = state_messages[arrow_index][state_index];
+            state_length = state_lengths[arrow_index][state_index];
+        } else {
+            state_message = "[CI] Doom syscall arrow state mismatch\\n";
+            state_length = sizeof("[CI] Doom syscall arrow state mismatch\\n") - 1u;
+        }
+        (void)vex_syscall3(1u, (uint64_t)(uintptr_t)state_message,
+                           state_length, 0);
+    }
 }
 #else
 #define trace_arrow_event(usage, pressed) ((void)0)
-#endif
-
-#ifdef VEXOS_CI_INPUT_TEST
-static uint8_t arrow_sync_state;
-static uint8_t arrow_sync_state_valid;
-
-static void trace_arrow_sync_state(uint8_t state) {
-    static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
-    static const char *const down_messages[4] = {
-        "[CI] Doom key state synced RIGHT down\n",
-        "[CI] Doom key state synced LEFT down\n",
-        "[CI] Doom key state synced DOWN down\n",
-        "[CI] Doom key state synced UP down\n"
-    };
-    static const char *const up_messages[4] = {
-        "[CI] Doom key state synced RIGHT released\n",
-        "[CI] Doom key state synced LEFT released\n",
-        "[CI] Doom key state synced DOWN released\n",
-        "[CI] Doom key state synced UP released\n"
-    };
-    static const uint8_t down_lengths[4] = {
-        sizeof("[CI] Doom key state synced RIGHT down\n") - 1u,
-        sizeof("[CI] Doom key state synced LEFT down\n") - 1u,
-        sizeof("[CI] Doom key state synced DOWN down\n") - 1u,
-        sizeof("[CI] Doom key state synced UP down\n") - 1u
-    };
-    static const uint8_t up_lengths[4] = {
-        sizeof("[CI] Doom key state synced RIGHT released\n") - 1u,
-        sizeof("[CI] Doom key state synced LEFT released\n") - 1u,
-        sizeof("[CI] Doom key state synced DOWN released\n") - 1u,
-        sizeof("[CI] Doom key state synced UP released\n") - 1u
-    };
-
-    if (!arrow_sync_state_valid) {
-        arrow_sync_state = state;
-        arrow_sync_state_valid = 1;
-        return;
-    }
-
-    uint8_t changed = (uint8_t)(arrow_sync_state ^ state);
-    arrow_sync_state = state;
-    for (uint32_t i = 0; i < 4u; ++i) {
-        if (!(changed & bits[i]))
-            continue;
-        const char *message = (state & bits[i]) ? down_messages[i] : up_messages[i];
-        uint64_t length = (state & bits[i]) ? down_lengths[i] : up_lengths[i];
-        (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
-    }
-}
-#else
-#define trace_arrow_sync_state(state) ((void)0)
 #endif
 
 /*
@@ -135,7 +117,6 @@ void VEXOS_DoomSyncArrowKeys(unsigned int *keys, int key_right, int key_left,
     if (key_up > 0 && key_up < 256)
         keys[key_up] = (state & 8u) ? 1u : 0u;
 
-    trace_arrow_sync_state(state);
 }
 
 static int arrow_index_from_usage(uint8_t usage) {
@@ -166,63 +147,8 @@ void DG_SetWindowTitle(const char *title) {
     (void)title;
 }
 
-/*
- * On-screen input monitor for manual held-key verification.
- * Green arrows mean the kernel currently sees that key held; slate arrows
- * mean it sees the key released. It is painted into the captured Doom frame
- * so an MP4 recording can show the exact transition without a second window.
- */
-static void draw_arrow_debug_overlay(uint32_t *pixels, uint32_t width,
-                                     uint32_t height) {
-    static const uint8_t arrow_rows[4][7] = {
-        {0x08u, 0x1Cu, 0x3Eu, 0x08u, 0x08u, 0x08u, 0x08u}, /* Up */
-        {0x08u, 0x08u, 0x08u, 0x08u, 0x3Eu, 0x1Cu, 0x08u}, /* Down */
-        {0x08u, 0x18u, 0x38u, 0x7Fu, 0x38u, 0x18u, 0x08u}, /* Left */
-        {0x08u, 0x0Cu, 0x0Eu, 0x7Fu, 0x0Eu, 0x0Cu, 0x08u}  /* Right */
-    };
-    static const uint8_t bits[4] = {8u, 4u, 2u, 1u};
-    static const uint32_t positions[4][2] = {
-        {8u, 8u}, {24u, 8u}, {8u, 24u}, {24u, 24u}
-    };
-    const uint32_t panel = 0x00101824u;
-    const uint32_t released = 0x00485868u;
-    const uint32_t pressed = 0x0028C76Fu;
-    const uint32_t white = 0x00FFFFFFu;
-
-    if (!pixels || width < 42u || height < 42u)
-        return;
-
-    uint8_t state = (uint8_t)(vex_syscall0(SYS_KEY_STATE) & 0x0Fu);
-
-    /* Opaque backing keeps the indicators readable over any Doom scene. */
-    for (uint32_t y = 5u; y < 43u; ++y) {
-        for (uint32_t x = 5u; x < 43u; ++x)
-            pixels[y * width + x] = panel;
-    }
-
-    for (uint32_t key = 0; key < 4u; ++key) {
-        uint32_t x0 = positions[key][0];
-        uint32_t y0 = positions[key][1];
-        uint32_t background = (state & bits[key]) ? pressed : released;
-
-        for (uint32_t y = 0; y < 14u; ++y) {
-            for (uint32_t x = 0; x < 14u; ++x)
-                pixels[(y0 + y) * width + x0 + x] = background;
-        }
-
-        for (uint32_t y = 0; y < 7u; ++y) {
-            for (uint32_t x = 0; x < 7u; ++x) {
-                if (arrow_rows[key][y] & (uint8_t)(1u << (6u - x)))
-                    pixels[(y0 + 3u + y) * width + x0 + 3u + x] = white;
-            }
-        }
-    }
-}
-
 void DG_DrawFrame(void) {
     if (DG_ScreenBuffer) {
-        draw_arrow_debug_overlay(DG_ScreenBuffer,
-                                 DOOMGENERIC_RESX, DOOMGENERIC_RESY);
         (void)vex_syscall3(SYS_DRAW,
                            (uint64_t)(uintptr_t)DG_ScreenBuffer,
                            DOOMGENERIC_RESX, DOOMGENERIC_RESY);
