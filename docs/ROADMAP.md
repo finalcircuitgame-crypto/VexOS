@@ -35,33 +35,37 @@ Remaining:
 
 ## 3. Virtual File System (VFS)
 
-**Status: VFS v1 integrated with syscalls and desktop consumers; filesystem-tree functionality remains**
+**Status: Hierarchical VFS and node lifetimes implemented over SFS1; storage-format limits remain**
 
-The existing SimpleFS persistent storage remains the first backend. VFS v1 provides a root mount, backend operation table, path normalization for root-level files, stat, read, ranged read, write, and file listing adapters. User-mode file descriptors own VFS handles with independent offsets. The desktop viewer, wallpaper loader, ELF launcher and ring-3 ELF loader, shell file listing, File Manager, and Notepad now use VFS rather than calling SimpleFS directly. The existing SimpleFS disk format is unchanged.
+The existing SimpleFS SFS1 volume remains the first backend. VFS now exposes normalized hierarchical paths, implicit directories, directory iteration, stat, read, ranged read, write, create, unlink, and per-open file handles. Slash-separated names are stored in SFS1's existing 32-byte name field, so the SFS1 structure and version remain unchanged. The full stored relative path is limited to 31 bytes. Directories are synthesized while they contain at least one descendant file; empty directories are not persisted.
 
-Milestones:
-Completed in VFS v1:
-- Audited the current SimpleFS interface and confirmed that SFS1 is a flat root-file store; the existing FAT32 path is a limited read-only root-file scanner.
-- Added a private backend-operations table and mounted the current SimpleFS API at `/`.
-- Added path normalization, root stat, read, ranged read, write, and flat-file listing adapters.
-- Added per-open VFS file handles with independent offsets, seek, close, and descriptor cleanup on process exit.
-- Routed user-mode open/read/seek/close syscalls through VFS; each process retains its own descriptor table.
-- Added CI checks for existing-file lookup, absolute/relative paths, traversal/nested-path rejection, write/read, ranged reads, and independent opens.
-- Routed desktop file viewing, wallpaper loading, ELF loading, shell listing, File Manager enumeration, and Notepad load/save through VFS.
-- Kept direct SimpleFS operations behind the VFS backend, apart from explicit storage-layer regression fixtures in the kernel test harness.
+The desktop viewer, wallpaper loader, ring-3 ELF loader, shell `fs` command, File Manager, Notepad, and user-mode read/open/seek/close syscalls use VFS rather than calling SimpleFS directly.
 
-Remaining milestones:
-1. Add explicit vnode/open-file objects and reference/lifetime rules for shared kernel consumers.
-2. Implement directory nodes and hierarchical paths; `/docs/readme.txt` is not supported by the current flat backend.
-3. Add explicit create/unlink APIs and comprehensive error/concurrency tests.
-4. Add FAT32 as a separate backend after the VFS contract stabilizes.
+Implemented:
+- Added a private backend-operation table and root mount over the existing SimpleFS backend.
+- Added path normalization with repeated-separator and `.` cleanup, while rejecting `..` traversal.
+- Added file/directory stat, ranged reads, immediate-child directory iteration, and synthetic directory lookup.
+- Added a bounded cache of 64 unique VFS node paths with reference counts; each open handle owns a node reference and an independent cursor.
+- Blocked replacement and unlink while any handle references the target file.
+- Added create-empty and unlink APIs. SFS1 unlink releases the file-table entry for reuse, but cannot reclaim old data sectors because SFS1 has no free-space map.
+- Added FAT32 ranged reads by following the file's cluster chain. FAT32 remains root-only, short-name, and read-only.
+- Updated File Manager for folder navigation and the shell `fs` command for root directory listing.
+- Added CI coverage for nested paths, implicit directories, directory enumeration, independent opens, create/unlink, and open-node lifetime rules.
+- Preserved the existing SFS1 disk layout and existing file names.
+
+Remaining:
+1. Design a versioned SFS2 or compatible metadata layer with a free-space map, persisted directory records (including empty directories), longer paths, and crash-safe metadata updates. Keep existing SFS1 volumes mountable and define a recovery/migration path before changing formats.
+2. Add FAT32 subdirectory traversal and long-filename handling; retain explicit read-only behavior until writes are designed and tested.
+3. Add ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process permissions.
+4. Stress-test concurrent open/read/create/unlink, cache exhaustion, interrupted storage I/O, and process-exit cleanup.
+5. Review SimpleFS's existing behavior that may format an unrecognized disk. Formatting must require an explicit installer workflow before supporting arbitrary physical disks.
 
 Acceptance criteria:
-- Existing persistent files remain readable and writable without changing their on-disk format.
-- Hierarchical paths such as `/docs/readme.txt` resolve consistently (future milestone; not supported by VFS v1).
-- Multiple processes can open the same file with independent offsets.
-- File descriptors are reclaimed on exit and cannot be used by unrelated processes.
-- CI exercises create, read, write, list, seek, close, and error cases.
+- Existing SFS1 files remain readable and writable without changing their disk structure.
+- Hierarchical paths resolve within the 31-byte SFS1 name limit; empty directories are not stored.
+- Independent opens retain independent offsets, and open handles prevent replacement or unlink.
+- Directory iteration returns immediate children and handles duplicate implicit directories.
+- CI covers create, read, write, list, seek, close, unlink, and error cases.
 
 ## 4. Hardware compatibility
 
@@ -126,4 +130,4 @@ Milestones:
 
 ## Immediate next objective
 
-Implement reference-counted VFS node/open-file lifetime rules and hierarchical directories without changing the existing on-disk format. Do not start FAT32 until directory semantics, error handling, and concurrency tests are stable.
+Design a versioned storage format with a free-space map, durable directory metadata, and crash-safe metadata updates while keeping existing SFS1 volumes mountable. Before any installer or arbitrary physical-disk support, remove SimpleFS's implicit format-on-unrecognized-disk behavior and require explicit user confirmation for destructive formatting.

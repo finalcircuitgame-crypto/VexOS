@@ -462,14 +462,33 @@ static void ci_syscall_self_test(void) {
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
-  /* VFS v1 keeps the existing flat SimpleFS disk format intact. */
+  /* VFS hierarchy maps slash-separated paths into SFS1's existing name field.
+     This preserves the on-disk structure while giving files implicit folders. */
   char normalized[VFS_PATH_MAX];
+  static const char normalized_nested[] = "docs/ci.txt";
   if (!vfs_normalize_path("./ci.txt", normalized, sizeof(normalized)) ||
       normalized[0] != 'c' || normalized[1] != 'i')
     ci_memory_test_fail("VFS relative path normalization");
+  if (!vfs_normalize_path(".", normalized, sizeof(normalized)) ||
+      normalized[0] != '/' || normalized[1] != '\0' ||
+      !vfs_normalize_path("/./", normalized, sizeof(normalized)) ||
+      normalized[0] != '/' || normalized[1] != '\0')
+    ci_memory_test_fail("VFS current-directory normalization");
+  if (!vfs_normalize_path("/docs//./ci.txt", normalized, sizeof(normalized)))
+    ci_memory_test_fail("VFS nested path normalization");
+  for (uint32_t i = 0; i < sizeof(normalized_nested); ++i) {
+    if (normalized[i] != normalized_nested[i])
+      ci_memory_test_fail("VFS normalized nested path content");
+  }
   if (vfs_normalize_path("../ci.txt", normalized, sizeof(normalized)) ||
-      vfs_normalize_path("/docs/ci.txt", normalized, sizeof(normalized)))
-    ci_memory_test_fail("VFS rejected unsafe or unsupported nested paths");
+      vfs_normalize_path("/docs/../ci.txt", normalized, sizeof(normalized)))
+    ci_memory_test_fail("VFS parent traversal rejection");
+  char unterminated_path[VFS_PATH_MAX];
+  for (uint32_t i = 0; i < sizeof(unterminated_path); ++i)
+    unterminated_path[i] = 'a';
+  if (vfs_normalize_path(unterminated_path, normalized, sizeof(normalized)))
+    ci_memory_test_fail("VFS bounded path length");
+
   vfs_stat_t vfs_info;
   if (!vfs_stat("/ci.txt", &vfs_info) ||
       vfs_info.type != VFS_NODE_FILE || vfs_info.size != 700u)
@@ -493,6 +512,94 @@ static void ci_syscall_self_test(void) {
       vfs_slice_len != 7u || vfs_slice[0] != 'V' ||
       vfs_slice[6] != 'a')
     ci_memory_test_fail("VFS ranged read");
+
+  static const char nested_payload[] = "VFS nested file survives";
+  if (!vfs_write("/docs/readme.txt", nested_payload, sizeof(nested_payload)))
+    ci_memory_test_fail("VFS nested file write");
+  vfs_stat_t directory_stat;
+  if (!vfs_stat("/docs", &directory_stat) ||
+      directory_stat.type != VFS_NODE_DIRECTORY ||
+      !vfs_stat("/docs/readme.txt", &vfs_info) ||
+      vfs_info.type != VFS_NODE_FILE ||
+      vfs_info.size != sizeof(nested_payload))
+    ci_memory_test_fail("VFS implicit directory stat");
+
+  vfs_dir_t root_dir = {0};
+  if (!vfs_dir_open(&root_dir, "/"))
+    ci_memory_test_fail("VFS root directory open");
+  char entry_name[VFS_NAME_MAX];
+  vfs_stat_t entry_stat;
+  int saw_docs = 0;
+  int dir_result = 0;
+  while ((dir_result = vfs_dir_read(&root_dir, entry_name,
+                                    sizeof(entry_name), &entry_stat)) > 0) {
+    if (entry_name[0] == 'd' && entry_name[1] == 'o' &&
+        entry_name[2] == 'c' && entry_name[3] == 's' &&
+        entry_name[4] == '\0' &&
+        entry_stat.type == VFS_NODE_DIRECTORY)
+      saw_docs = 1;
+  }
+  if (dir_result < 0 || !saw_docs || !vfs_dir_close(&root_dir))
+    ci_memory_test_fail("VFS root directory iteration");
+
+  vfs_dir_t docs_dir = {0};
+  if (!vfs_dir_open(&docs_dir, "/docs") ||
+      vfs_dir_read(&docs_dir, entry_name, sizeof(entry_name), &entry_stat) != 1 ||
+      entry_stat.type != VFS_NODE_FILE ||
+      entry_name[0] != 'r' || entry_name[1] != 'e' ||
+      entry_name[2] != 'a' || entry_name[3] != 'd' ||
+      entry_name[4] != 'm' || entry_name[5] != 'e' ||
+      entry_name[6] != '.' || entry_name[7] != 't' ||
+      entry_name[8] != 'x' || entry_name[9] != 't' ||
+      entry_name[10] != '\0' ||
+      vfs_dir_read(&docs_dir, entry_name, sizeof(entry_name), &entry_stat) != 0 ||
+      !vfs_dir_close(&docs_dir))
+    ci_memory_test_fail("VFS child directory enumeration");
+  vfs_dir_t retry_dir = {0};
+  if (!vfs_dir_open(&retry_dir, "/docs") ||
+      vfs_dir_read(&retry_dir, entry_name, 2u, &entry_stat) != -1 ||
+      vfs_dir_read(&retry_dir, entry_name, sizeof(entry_name), &entry_stat) != 1 ||
+      entry_name[0] != 'r' || entry_name[1] != 'e' ||
+      entry_name[2] != 'a' || entry_name[3] != 'd' ||
+      entry_name[4] != 'm' || entry_name[5] != 'e' ||
+      entry_name[6] != '.' || entry_name[7] != 't' ||
+      entry_name[8] != 'x' || entry_name[9] != 't' ||
+      entry_name[10] != '\0' || !vfs_dir_close(&retry_dir))
+    ci_memory_test_fail("VFS directory buffer retry");
+  serial_print("[CI] VFS directory buffer retry passed\\n");
+
+  serial_print("[CI] VFS hierarchical paths and directory iteration passed\\n");
+
+  vfs_file_t nested_file_a = {0};
+  vfs_file_t nested_file_b = {0};
+  if (!vfs_open(&nested_file_a, "/docs/readme.txt") ||
+      !vfs_open(&nested_file_b, "docs/readme.txt"))
+    ci_memory_test_fail("VFS reference-counted repeated open");
+  if (vfs_unlink("/docs/readme.txt") ||
+      vfs_write("/docs/readme.txt", nested_payload, sizeof(nested_payload)))
+    ci_memory_test_fail("VFS mutation rejected while file is open");
+  if (!vfs_close(&nested_file_b) || vfs_unlink("/docs/readme.txt"))
+    ci_memory_test_fail("VFS unlink blocked while one reference remains");
+  if (!vfs_close(&nested_file_a) || !vfs_unlink("/docs/readme.txt"))
+    ci_memory_test_fail("VFS close releases final node and permits unlink");
+  if (vfs_stat("/docs/readme.txt", &vfs_info) ||
+      vfs_stat("/docs", &directory_stat))
+    ci_memory_test_fail("VFS unlink removes final implicit directory");
+
+  if (!vfs_create("/docs/empty.txt") ||
+      !vfs_stat("/docs/empty.txt", &vfs_info) ||
+      vfs_info.type != VFS_NODE_FILE || vfs_info.size != 0u)
+    ci_memory_test_fail("VFS create empty file");
+  vfs_file_t empty_file = {0};
+  if (!vfs_open(&empty_file, "/docs/empty.txt") ||
+      vfs_unlink("/docs/empty.txt") || !vfs_close(&empty_file) ||
+      !vfs_unlink("/docs/empty.txt"))
+    ci_memory_test_fail("VFS unlink and open-file lifetime");
+  if (vfs_write("/ci.txt/child", "x", 2u))
+    ci_memory_test_fail("VFS rejects file as parent directory");
+  if (vfs_create("/"))
+    ci_memory_test_fail("VFS rejects creating root directory as file");
+  serial_print("[CI] VFS create/unlink and open-node reference rules passed\\n");
 
   serial_print("[CI] VFS root mount/path/stat/read/write/ranged-read passed\\n");
 

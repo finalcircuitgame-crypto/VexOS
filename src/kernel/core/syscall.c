@@ -141,10 +141,12 @@ static int sys_read(int fd, void *buf, uint32_t count) {
     vfs_file_t *file = &state->files[fd].file;
     if (!file->is_open)
         return -1;
-    if (count == 0 || file->offset >= file->size)
+    if (count == 0)
         return 0;
 
-    uint32_t available = file->size - file->offset;
+    uint32_t available = vfs_file_remaining(file);
+    if (available == 0)
+        return 0;
     uint32_t wanted = count < available ? count : available;
     if (!VMM_IsUserRange(buf, wanted, 1))
         return -1;

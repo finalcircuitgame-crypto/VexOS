@@ -279,6 +279,9 @@ jobs:
             "[CI] Successful framebuffer syscall draw passed" \
             "[CI] Doom test surface cleanup passed" \
             "[CI] VFS root mount/path/stat/read/write/ranged-read passed" \
+            "[CI] VFS hierarchical paths and directory iteration passed" \
+            "[CI] VFS directory buffer retry passed" \
+            "[CI] VFS create/unlink and open-node reference rules passed" \
             "[CI] VFS independent open-file handles and descriptor offsets passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
