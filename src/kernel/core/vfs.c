@@ -109,7 +109,14 @@ static int simplefs_backend_mount(void) {
 
 static int simplefs_backend_stat(const char *name, vfs_stat_t *out) {
     uint32_t size = 0;
-    if (!name || !out || !simplefs_file_size(name, &size))
+    if (!name || !out)
+        return 0;
+    if (simplefs_is_directory(name)) {
+        out->type = VFS_NODE_DIRECTORY;
+        out->size = 0;
+        return 1;
+    }
+    if (!simplefs_file_size(name, &size))
         return 0;
     out->type = VFS_NODE_FILE;
     out->size = size;
@@ -268,6 +275,7 @@ int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
     }
 
     uint32_t written = 0;
+    uint32_t path_limit = simplefs_path_limit();
     while (src < len) {
         uint32_t component_start = src;
         while (src < len && path[src] != '/')
@@ -284,8 +292,8 @@ int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
             return 0;
         } else {
             uint32_t separator = written ? 1u : 0u;
-            if (component_len == 0 || component_len > 31u ||
-                written + separator + component_len > 31u ||
+            if (component_len == 0 || component_len >= VFS_NAME_MAX ||
+                written + separator + component_len > path_limit ||
                 written + separator + component_len + 1u > out_cap) {
                 out[0] = '\0';
                 return 0;
@@ -354,7 +362,8 @@ static int vfs_path_parent_is_file(const char *name) {
             parent[j] = name[j];
         parent[i] = '\0';
         vfs_stat_t info;
-        if (vfs_backend_stat(parent, &info))
+        if (vfs_backend_stat(parent, &info) &&
+            info.type == VFS_NODE_FILE)
             return 1;
     }
     return 0;
@@ -722,14 +731,12 @@ static int vfs_child_seen_before(const vfs_dir_t *dir, uint32_t index,
                                  const char *child) {
     for (uint32_t i = 0; i < index; ++i) {
         char previous[VFS_NAME_MAX];
-        int previous_is_dir = 0;
         char entry[VFS_PATH_MAX];
         if (!vfs_backend_name_at(i, entry, sizeof(entry)))
             continue;
         int result = vfs_child_from_entry(dir->path, entry, previous,
-                                          sizeof(previous), &previous_is_dir);
-        if (result == 1 && previous_is_dir &&
-            vfs_string_equal(previous, child))
+                                          sizeof(previous), NULL);
+        if (result == 1 && vfs_string_equal(previous, child))
             return 1;
     }
     return 0;
@@ -786,9 +793,11 @@ int vfs_dir_read(vfs_dir_t *dir, char *out_name, uint32_t out_cap,
         full_path[pos] = '\0';
 
         vfs_stat_t exact_info;
-        int exact_file = vfs_backend_stat(full_path, &exact_info) &&
-                         exact_info.type == VFS_NODE_FILE;
-        if (is_directory) {
+        int exact_exists = vfs_backend_stat(full_path, &exact_info);
+        int exact_file = exact_exists && exact_info.type == VFS_NODE_FILE;
+        int exact_directory = exact_exists &&
+                              exact_info.type == VFS_NODE_DIRECTORY;
+        if (is_directory || exact_directory) {
             if (exact_file || vfs_child_seen_before(dir, index, child))
                 continue;
             out_stat->type = VFS_NODE_DIRECTORY;
