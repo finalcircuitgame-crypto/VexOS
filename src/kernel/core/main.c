@@ -7,6 +7,7 @@
 #include "idt.h"
 #include "pmm.h"
 #include "simplefs.h"
+#include "vfs.h"
 #include "task.h"
 #include "process.h"
 #include "vmm.h"
@@ -458,6 +459,40 @@ static void ci_syscall_self_test(void) {
   // CI prepares a small SFS1 image with ci.txt on the ATA primary slave.
   if (!simplefs_init())
     ci_memory_test_fail("SimpleFS fixture mount");
+  if (!vfs_init() || !vfs_is_mounted())
+    ci_memory_test_fail("VFS root mount over existing SimpleFS");
+
+  /* VFS v1 keeps the existing flat SimpleFS disk format intact. */
+  char normalized[VFS_PATH_MAX];
+  if (!vfs_normalize_path("./ci.txt", normalized, sizeof(normalized)) ||
+      normalized[0] != 'c' || normalized[1] != 'i')
+    ci_memory_test_fail("VFS relative path normalization");
+  if (vfs_normalize_path("../ci.txt", normalized, sizeof(normalized)) ||
+      vfs_normalize_path("/docs/ci.txt", normalized, sizeof(normalized)))
+    ci_memory_test_fail("VFS rejected unsafe or unsupported nested paths");
+  vfs_stat_t vfs_info;
+  if (!vfs_stat("/ci.txt", &vfs_info) ||
+      vfs_info.type != VFS_NODE_FILE || vfs_info.size != 700u)
+    ci_memory_test_fail("VFS stat on pre-existing SimpleFS file");
+
+  static const char vfs_payload[] = "VexOS VFS read/write regression";
+  char vfs_readback[sizeof(vfs_payload)];
+  uint32_t vfs_read_len = 0;
+  if (!vfs_write("/ci-vfs.txt", vfs_payload, sizeof(vfs_payload)) ||
+      !vfs_read("/ci-vfs.txt", vfs_readback, sizeof(vfs_readback),
+                &vfs_read_len) ||
+      vfs_read_len != sizeof(vfs_payload))
+    ci_memory_test_fail("VFS write and read through SimpleFS backend");
+  for (uint32_t i = 0; i < sizeof(vfs_payload); ++i) {
+    if (vfs_readback[i] != vfs_payload[i])
+      ci_memory_test_fail("VFS read/write content mismatch");
+  }
+  char vfs_slice[8];
+  uint32_t vfs_slice_len = 0;
+  if (!vfs_read_at("/ci-vfs.txt", 6u, vfs_slice, 7u, &vfs_slice_len) ||
+      vfs_slice_len != 7u || vfs_slice[0] != 'V' ||
+      vfs_slice[6] != 'S')
+    ci_memory_test_fail("VFS ranged read");
 
   // Unknown syscall numbers and invalid user pointers must fail safely.
   frame.rax = 0xFFFFFFFFu;
@@ -524,12 +559,14 @@ static void ci_syscall_self_test(void) {
   // Open/read/seek/close a real file through the syscall ABI.
   const uint32_t expected_file_len = 700u;
   uint32_t mounted_file_size = 0;
-  if (!simplefs_file_size("ci.txt", &mounted_file_size) ||
-      mounted_file_size != expected_file_len)
-    ci_memory_test_fail("SimpleFS fixture file metadata");
+  vfs_stat_t mounted_stat;
+  if (!vfs_stat("/ci.txt", &mounted_stat) ||
+      mounted_stat.type != VFS_NODE_FILE ||
+      (mounted_file_size = mounted_stat.size) != expected_file_len)
+    ci_memory_test_fail("VFS fixture file metadata");
 
   char *user_name = (char *)user_buf + 16u;
-  static const char file_name[] = "ci.txt";
+  static const char file_name[] = "/ci.txt";
   for (uint32_t i = 0; i < sizeof(file_name); i++)
     user_name[i] = file_name[i];
   char *user_read = (char *)user_buf + 128u;
