@@ -1,7 +1,7 @@
 #include "../../include/interrupts.h"
 #include "../../include/process.h"
 #include "../../include/heap.h"
-#include "../../include/simplefs.h"
+#include "../../include/vfs.h"
 #include "../../include/vmm.h"
 #include "../../include/pmm.h"
 #include "../../include/desktop.h"
@@ -17,7 +17,7 @@ extern int desktop_draw_frame(const uint32_t *src, uint32_t w, uint32_t h);
 extern void xhci_poll_events(void);
 
 #define MAX_OPEN_FILES 16
-#define USER_FILENAME_MAX 32u
+#define USER_FILENAME_MAX VFS_PATH_MAX
 #define USER_WRITE_MAX 4096u
 #define USER_MMAP_MAX (16u * 1024u * 1024u)
 #define USER_MMAP_BASE 0x0000004000000000ULL
@@ -125,27 +125,14 @@ static int sys_open(const char *filename) {
     }
     if (fd < 0) return -1;
 
-    // Doom's FILES_DIR is "." and its IWAD search therefore opens paths
-    // such as "./freedoom1.wad". SimpleFS stores flat filenames, so strip
-    // leading "./" components BEFORE querying the filesystem.
-    const char *normalized = name_buf;
-    while (normalized[0] == '.' && normalized[1] == '/')
-        normalized += 2;
-    if (normalized != name_buf) {
-        uint32_t i = 0;
-        do {
-            name_buf[i] = normalized[i];
-        } while (normalized[i++] != '\0');
-    }
-
-    uint32_t size = 0;
-    if (!simplefs_file_size(name_buf, &size)) {
-        serial_print("[USERMODE] file lookup failed: ");
+    vfs_stat_t stat;
+    if (!vfs_stat(name_buf, &stat) || stat.type != VFS_NODE_FILE) {
+        serial_print("[USERMODE] VFS lookup failed: ");
         serial_print(name_buf);
         serial_print("\n");
-        simplefs_list();
         return -1;
     }
+    uint32_t size = stat.size;
 
     // Keep descriptors lightweight: stream large assets on demand.
     state->files[fd].used = 1;
@@ -168,7 +155,7 @@ static int sys_read(int fd, void *buf, uint32_t count) {
     if (!VMM_IsUserRange(buf, to_read, 1)) return -1;
 
     uint32_t bytes_read = 0;
-    if (!simplefs_read_file_at(file->name, file->cursor, buf,
+    if (!vfs_read_at(file->name, file->cursor, buf,
                                to_read, &bytes_read))
         return -1;
     if (bytes_read > to_read)
