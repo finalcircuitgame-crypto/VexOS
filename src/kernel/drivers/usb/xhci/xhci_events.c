@@ -224,7 +224,7 @@ void xhci_poll_events() {
       xhci_print_u32_dec(cc);
       serial_print(" residual=");
       xhci_print_u32_dec(trb_len_remaining);
-      serial_print("\\n");
+      serial_print("\n");
     }
 
     if ((cc == 1 || cc == 13) && dev->intr_buf) {
@@ -343,7 +343,7 @@ void xhci_poll_events() {
             xhci_print_u32_dec(cc);
             serial_print(" len=");
             xhci_print_u32_dec(xfer_len);
-            serial_print("\\n");
+            serial_print("\n");
           }
       }
     }
