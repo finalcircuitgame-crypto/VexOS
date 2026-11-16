@@ -9,7 +9,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 
 ## Development roadmap
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan to reach a general-purpose operating system, including verified progress and remaining work. The next subsystem is the VFS; its integration plan is documented in [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md).
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan to reach a general-purpose operating system, including verified progress and remaining work. VFS v1 is integrated over SimpleFS with process-owned file handles, and desktop file consumers use the VFS API. See [`docs/VFS_DESIGN.md`](docs/VFS_DESIGN.md) for its architecture, limitations, and next milestones.
 
 ## Prerequisites
 - GNU toolchain: gcc, ld, objcopy, make

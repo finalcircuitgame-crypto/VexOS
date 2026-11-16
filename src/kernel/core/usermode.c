@@ -3,7 +3,7 @@
 #include "../../include/gdt.h"
 #include "../../include/pmm.h"
 #include "../../include/vmm.h"
-#include "../../include/simplefs.h"
+#include "../../include/vfs.h"
 #include "../../include/heap.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -322,16 +322,19 @@ void usermode_launch(const char *filename) {
         return;
     }
 
-    uint32_t elf_size = 0;
     if (!filename || !filename[0])
         filename = "doom.elf";
-    if (!simplefs_file_size(filename, &elf_size) || elf_size < sizeof(Elf64_Ehdr)) {
+    vfs_stat_t executable_info;
+    if (!vfs_init() || !vfs_stat(filename, &executable_info) ||
+        executable_info.type != VFS_NODE_FILE ||
+        executable_info.size < sizeof(Elf64_Ehdr)) {
         serial_print("[USERMODE] executable missing or too small: ");
         serial_print(filename);
         serial_print("\n");
         return;
     }
 
+    uint32_t elf_size = executable_info.size;
     void *elf_data = kmalloc(elf_size);
     if (!elf_data) {
         serial_print("[USERMODE] failed to allocate ELF buffer\n");
@@ -339,7 +342,7 @@ void usermode_launch(const char *filename) {
     }
 
     uint32_t out_len = 0;
-    if (!simplefs_read_file(filename, elf_data, elf_size, &out_len) ||
+    if (!vfs_read(filename, elf_data, elf_size, &out_len) ||
         out_len != elf_size) {
         serial_print("[USERMODE] failed to read complete doom.elf\n");
         kfree(elf_data);

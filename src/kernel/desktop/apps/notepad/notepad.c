@@ -1,6 +1,6 @@
 #include "notepad.h"
 #include "../../graphics/graphics.h"
-#include "../../../../include/simplefs.h"
+#include "../../../../include/vfs.h"
 
 #define NOTEPAD_TEXT_CAPACITY 4096u
 #define NOTEPAD_LINE_GUTTER 42u
@@ -78,13 +78,15 @@ static void notepad_load_saved_file(void) {
   g_text_length = 0;
   g_dirty = 0;
 
-  if (!simplefs_init() ||
-      !simplefs_file_size(g_filename, &file_size) ||
-      file_size >= NOTEPAD_TEXT_CAPACITY)
+  vfs_stat_t file_info;
+  if (!vfs_init() || !vfs_stat(g_filename, &file_info) ||
+      file_info.type != VFS_NODE_FILE ||
+      file_info.size >= NOTEPAD_TEXT_CAPACITY)
     return;
+  file_size = file_info.size;
 
   if (file_size &&
-      (!simplefs_read_file(g_filename, g_text, file_size, &bytes_read) ||
+      (!vfs_read(g_filename, g_text, file_size, &bytes_read) ||
        bytes_read != file_size)) {
     g_text[0] = 0;
     return;
@@ -183,9 +185,9 @@ notepad_click_result_t notepad_handle_click(int32_t x, int32_t y) {
   }
 
   if (notepad_hit(x, y, wx + ww - 86, wy + 5, 20, 20)) {
-    if (!simplefs_init())
+    if (!vfs_init())
       return NOTEPAD_CLICK_FS_FAILED;
-    if (!simplefs_write_file(g_filename, g_text, g_text_length))
+    if (!vfs_write(g_filename, g_text, g_text_length))
       return NOTEPAD_CLICK_SAVE_FAILED;
     g_dirty = 0;
     return NOTEPAD_CLICK_SAVE_OK;
