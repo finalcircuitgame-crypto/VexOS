@@ -21,6 +21,22 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(sfs2_journal_header_t) == SFS2_SECTOR_SIZE,
                "SFS2 journal header must occupy one sector");
 
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t state;
+    uint32_t record_count;
+    uint32_t checksum;
+    uint64_t sequence;
+    uint64_t targets[8];
+    uint32_t data_checksums[8];
+    uint8_t reserved[392];
+} sfs2_legacy_journal_header_t;
+
+_Static_assert(sizeof(sfs2_legacy_journal_header_t) == SFS2_SECTOR_SIZE,
+               "legacy SFS2 journal header must occupy one sector");
+
+static void sfs2_zero(void *ptr, uint32_t length);
+
 static uint32_t sfs2_journal_record_capacity(
         const sfs2_superblock_t *sb) {
     if (!sb || sb->journal_sectors <= SFS2_JOURNAL_HEADER_SECTORS)
@@ -56,15 +72,35 @@ static int sfs2_replay_journal(const sfs2_superblock_t *sb,
         return 1;
 
     sfs2_journal_header_t header;
-    const uint8_t *src = header_sector;
-    uint8_t *dst = (uint8_t *)&header;
-    for (uint32_t i = 0; i < sizeof(header); ++i)
-        dst[i] = src[i];
-
-    if (header.magic != SFS2_JOURNAL_MAGIC ||
-        header.checksum != sfs2_checksum(&header, sizeof(header),
-            (uint32_t)offsetof(sfs2_journal_header_t, checksum)))
-        return 0;
+    sfs2_zero(&header, sizeof(header));
+    if (sfs2_journal_record_capacity(sb) <= 8u) {
+        sfs2_legacy_journal_header_t legacy;
+        const uint8_t *src = header_sector;
+        uint8_t *dst = (uint8_t *)&legacy;
+        for (uint32_t i = 0; i < sizeof(legacy); ++i)
+            dst[i] = src[i];
+        if (legacy.magic != SFS2_JOURNAL_MAGIC ||
+            legacy.checksum != sfs2_checksum(&legacy, sizeof(legacy),
+                (uint32_t)offsetof(sfs2_legacy_journal_header_t, checksum)))
+            return 0;
+        header.magic = legacy.magic;
+        header.state = legacy.state;
+        header.record_count = legacy.record_count;
+        header.sequence = legacy.sequence;
+        for (uint32_t i = 0; i < 8u; ++i) {
+            header.targets[i] = legacy.targets[i];
+            header.data_checksums[i] = legacy.data_checksums[i];
+        }
+    } else {
+        const uint8_t *src = header_sector;
+        uint8_t *dst = (uint8_t *)&header;
+        for (uint32_t i = 0; i < sizeof(header); ++i)
+            dst[i] = src[i];
+        if (header.magic != SFS2_JOURNAL_MAGIC ||
+            header.checksum != sfs2_checksum(&header, sizeof(header),
+                (uint32_t)offsetof(sfs2_journal_header_t, checksum)))
+            return 0;
+    }
     if (header.state == 0u)
         return header.record_count == 0u;
     if (header.state != SFS2_JOURNAL_COMMITTED ||
