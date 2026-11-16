@@ -59,6 +59,8 @@ typedef struct {
   uint32_t root_cluster;
   uint32_t fat_start_lba;
   uint32_t data_start_lba;
+  uint32_t total_sectors;
+  uint32_t cluster_count;
 } fat32_info_t;
 
 typedef struct {
@@ -103,23 +105,26 @@ static int fat_read_sector(uint32_t lba, void *buf) {
 }
 
 static uint32_t fat_cluster_to_lba(uint32_t cluster) {
-  if (cluster < 2u)
-    cluster = 2u;
-  return g_fat.data_start_lba + (cluster - 2u) * (uint32_t)g_fat.sectors_per_cluster;
+  if (cluster < 2u || cluster >= g_fat.cluster_count + 2u)
+    return 0;
+  return g_fat.data_start_lba +
+         (cluster - 2u) * (uint32_t)g_fat.sectors_per_cluster;
 }
 
 static int fat_get_fat_entry(uint32_t cluster, uint32_t *out_next) {
-  if (!out_next)
+  if (!out_next || cluster < 2u ||
+      cluster >= g_fat.cluster_count + 2u)
     return 0;
   uint32_t fat_off = cluster * 4u;
-  uint32_t sec = g_fat.fat_start_lba + (fat_off / FAT_SECTOR_SIZE);
+  uint32_t fat_sector_index = fat_off / FAT_SECTOR_SIZE;
+  if (fat_sector_index >= g_fat.fat_size_sectors)
+    return 0;
+  uint32_t sec = g_fat.fat_start_lba + fat_sector_index;
   uint32_t off = fat_off % FAT_SECTOR_SIZE;
   uint8_t buf[FAT_SECTOR_SIZE];
   if (!fat_read_sector(sec, buf))
     return 0;
-  uint32_t v = rd32(&buf[off]);
-  v &= 0x0FFFFFFFu;
-  *out_next = v;
+  *out_next = rd32(&buf[off]) & 0x0FFFFFFFu;
   return 1;
 }
 
@@ -197,16 +202,27 @@ static int fat_mount_and_scan_root(void) {
   g_fat.sectors_per_cluster = b[13];
   g_fat.reserved_sector_count = rd16(&b[14]);
   g_fat.num_fats = b[16];
+  g_fat.total_sectors = rd32(&b[32]);
   g_fat.fat_size_sectors = rd32(&b[36]);
   g_fat.root_cluster = rd32(&b[44]);
-  if (g_fat.bytes_per_sector != 512 || g_fat.sectors_per_cluster == 0 ||
-      g_fat.num_fats == 0 || g_fat.fat_size_sectors == 0 || g_fat.root_cluster < 2u) {
+  if (g_fat.bytes_per_sector != FAT_SECTOR_SIZE ||
+      g_fat.sectors_per_cluster == 0 ||
+      g_fat.num_fats == 0 || g_fat.fat_size_sectors == 0 ||
+      g_fat.total_sectors == 0 || g_fat.root_cluster < 2u) {
     return 0;
   }
 
   g_fat.fat_start_lba = (uint32_t)g_fat.reserved_sector_count;
   g_fat.data_start_lba = g_fat.fat_start_lba +
                          (uint32_t)g_fat.num_fats * g_fat.fat_size_sectors;
+  if (g_fat.data_start_lba >= g_fat.total_sectors)
+    return 0;
+  g_fat.cluster_count =
+      (g_fat.total_sectors - g_fat.data_start_lba) /
+      (uint32_t)g_fat.sectors_per_cluster;
+  if (g_fat.cluster_count == 0 ||
+      g_fat.root_cluster >= g_fat.cluster_count + 2u)
+    return 0;
 
   g_fat_file_count = 0;
   for (uint32_t i = 0; i < FAT_MAX_FILES; i++) {
@@ -851,16 +867,16 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
     if (cluster_bytes == 0)
       return 0;
     uint32_t cluster = g_fat_files[idx].first_cluster;
-    if (cluster < 2u)
+    if (cluster < 2u || cluster >= g_fat.cluster_count + 2u)
       return 0;
 
     uint32_t clusters_to_skip = offset / cluster_bytes;
     uint32_t within_cluster = offset % cluster_bytes;
-    uint32_t budget_clusters = 4096u;
+    uint32_t budget_clusters = g_fat.cluster_count;
     while (clusters_to_skip > 0) {
       uint32_t next = 0;
       if (!budget_clusters-- || !fat_get_fat_entry(cluster, &next) ||
-          next < 2u || next >= 0x0FFFFFF8u)
+          next < 2u || next >= g_fat.cluster_count + 2u)
         return 0;
       cluster = next;
       --clusters_to_skip;
@@ -886,7 +902,7 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
       if (copied < wanted) {
         uint32_t next = 0;
         if (!fat_get_fat_entry(cluster, &next) ||
-            next < 2u || next >= 0x0FFFFFF8u)
+            next < 2u || next >= g_fat.cluster_count + 2u)
           return 0;
         cluster = next;
       }
