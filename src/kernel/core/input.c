@@ -1,33 +1,4 @@
 #include "../../include/input.h"
-#include "../../include/interrupts.h"
-
-extern void serial_print(const char *str);
-
-static void input_log_arrow(uint8_t usage, int pressed) {
-  const char *key = 0;
-  switch (usage) {
-  case 0x4F: key = "RIGHT"; break;
-  case 0x50: key = "LEFT"; break;
-  case 0x51: key = "DOWN"; break;
-  case 0x52: key = "UP"; break;
-  default: return;
-  }
-
-  char digits[21];
-  uint32_t count = 0;
-  uint64_t tick = Timer_Ticks();
-  do {
-    digits[count++] = (char)('0' + (tick % 10u));
-    tick /= 10u;
-  } while (tick && count < sizeof(digits));
-
-  serial_print("[USB][HID] tick=");
-  while (count)
-    serial_print((char[]){digits[--count], 0});
-  serial_print(" key=");
-  serial_print(key);
-  serial_print(pressed ? " state=DOWN\n" : " state=UP\n");
-}
 
 static input_pointer_state_t g_ptr;
 static uint32_t g_w;
@@ -173,7 +144,6 @@ void input_kbd_push_event(uint8_t usage, int pressed) {
      Doom can reconcile arrow-key state after draining queued events, so a
      dropped key-up can never leave movement stuck indefinitely. */
   g_kbd_down[usage] = pressed ? 1u : 0u;
-  input_log_arrow(usage, pressed);
   input_ci_trace_arrow(usage, pressed);
 
   uint32_t next = (g_kbd_event_w + 1u) & KBD_EVENT_MASK;
