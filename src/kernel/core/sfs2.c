@@ -483,10 +483,11 @@ int sfs2_write_file(sfs2_volume_t *volume, const char *path,
         (!data && length) ||
         !sfs2_root_filename(path, &name, &name_length))
         return 0;
-    uint32_t sectors = (length + SFS2_SECTOR_SIZE - 1u) /
-                       SFS2_SECTOR_SIZE;
-    if (sectors > SFS2_MAX_FILE_SECTORS)
+    uint64_t sectors64 = ((uint64_t)length + SFS2_SECTOR_SIZE - 1u) /
+                         SFS2_SECTOR_SIZE;
+    if (sectors64 > SFS2_MAX_FILE_SECTORS)
         return 0;
+    uint32_t sectors = (uint32_t)sectors64;
 
     uint32_t index = 0;
     int exists = sfs2_find_root_file(volume, name, name_length, &index);
@@ -1136,6 +1137,26 @@ int sfs2_ci_mount_read_test(void) {
         !sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
     if (!sfs2_stat_path(&volume, "/journal", &info))
+        return 0;
+
+    /* Exercise journaled create, replace, readback, and unlink operations. */
+    if (!sfs2_write_file(&volume, "/new", "N", 1u))
+        return 0;
+    char one = 0;
+    uint32_t read_count = 0;
+    if (!sfs2_read_file_at(&volume, "/new", 0u, &one, 1u, &read_count) ||
+        read_count != 1u || one != 'N')
+        return 0;
+    if (!sfs2_write_file(&volume, "/journal", "R", 1u))
+        return 0;
+    one = 0;
+    if (!sfs2_read_file_at(&volume, "/journal", 0u, &one, 1u, &read_count) ||
+        read_count != 1u || one != 'R')
+        return 0;
+    if (!sfs2_unlink_file(&volume, "/new") ||
+        sfs2_stat_path(&volume, "/new", &info))
+        return 0;
+    if (!sfs2_sector_is_zero(g_sfs2_test_disk[1]))
         return 0;
     return 1;
 }
