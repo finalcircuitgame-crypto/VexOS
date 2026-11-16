@@ -678,8 +678,6 @@ static int vfs_child_seen_before(const vfs_dir_t *dir, uint32_t index,
     for (uint32_t i = 0; i < index; ++i) {
         char previous[VFS_NAME_MAX];
         int previous_is_dir = 0;
-        if (!vfs_backend_name_at(i, (char[VFS_PATH_MAX]){0}, VFS_PATH_MAX))
-            continue;
         char entry[VFS_PATH_MAX];
         if (!vfs_backend_name_at(i, entry, sizeof(entry)))
             continue;
