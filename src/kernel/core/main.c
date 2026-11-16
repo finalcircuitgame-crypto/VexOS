@@ -597,6 +597,18 @@ static void ci_syscall_self_test(void) {
       vfs_stat("/docs", &directory_stat))
     ci_memory_test_fail("VFS unlink removes final implicit directory");
 
+  /* SFS2 stores parent directory inodes; unlink must prune an empty chain. */
+  if (!vfs_write("/prune/a/b/leaf.txt", nested_payload,
+                 sizeof(nested_payload)) ||
+      !vfs_stat("/prune", &directory_stat) ||
+      !vfs_stat("/prune/a", &directory_stat) ||
+      !vfs_stat("/prune/a/b", &directory_stat) ||
+      !vfs_unlink("/prune/a/b/leaf.txt") ||
+      vfs_stat("/prune", &directory_stat) ||
+      vfs_stat("/prune/a", &directory_stat) ||
+      vfs_stat("/prune/a/b", &directory_stat))
+    ci_memory_test_fail("VFS unlink recursively prunes empty SFS2 directories");
+
   if (!vfs_create("/docs/empty.txt") ||
       !vfs_stat("/docs/empty.txt", &vfs_info) ||
       vfs_info.type != VFS_NODE_FILE || vfs_info.size != 0u)
