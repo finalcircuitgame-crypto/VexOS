@@ -47,4 +47,8 @@ int Process_ReapTask(uint32_t task_id);
 void Process_OnTaskSwitch(uint32_t previous_task, uint32_t next_task);
 void Process_OnTaskExit(uint32_t task_id);
 
+#ifdef VEXOS_CI_INPUT_TEST
+int Process_CI_SelfTest(void);
+#endif
+
 #endif
