@@ -232,7 +232,7 @@ def verify_image(image: Path):
             raise ValueError("superblock checksum or geometry mismatch")
         if not 1 <= cap <= INODE_MAX or bitmap_n == 0 or inode_n == 0:
             raise ValueError("invalid SFS2 metadata capacity or region size")
-        if (journal_lba < 1 or journal_n < JOURNAL_SECTORS or
+        if (journal_lba < 1 or journal_n < 2 or
                 journal_lba + journal_n > bitmap_lba):
             raise ValueError("invalid SFS2 journal region")
         f.seek(journal_lba * SECTOR)
