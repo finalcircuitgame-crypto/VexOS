@@ -794,17 +794,28 @@ int simplefs_read_file(const char *name, void *out, uint32_t maxlen,
 /* Read a bounded file range without allocating the entire file in the kernel. */
 int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
                           uint32_t maxlen, uint32_t *out_len) {
-  if (out_len) *out_len = 0;
-  if (!g_storage_ready || !name || (!out && maxlen != 0) ||
-      g_kind != STORAGE_FS_SFS)
+  if (out_len)
+    *out_len = 0;
+  if (!g_storage_ready || !name || (!out && maxlen != 0))
     return 0;
+  if (maxlen == 0)
+    return 1;
 
+  uint32_t file_size = 0;
   uint32_t idx = 0;
-  if (!sfs_find(name, &idx))
+  if (g_kind == STORAGE_FS_SFS) {
+    if (!sfs_find(name, &idx))
+      return 0;
+    file_size = g_table[idx].size_bytes;
+  } else if (g_kind == STORAGE_FS_FAT32) {
+    if (!fat_find(name, &idx))
+      return 0;
+    file_size = g_fat_files[idx].size_bytes;
+  } else {
     return 0;
+  }
 
-  uint32_t file_size = g_table[idx].size_bytes;
-  if (offset >= file_size || maxlen == 0)
+  if (offset >= file_size)
     return 1;
 
   uint32_t remaining = file_size - offset;
@@ -813,21 +824,74 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
   uint8_t sector[SFS_SECTOR_SIZE];
   uint8_t *dst = (uint8_t *)out;
 
-  while (copied < wanted) {
-    uint32_t absolute = offset + copied;
-    uint32_t sector_index = absolute / SFS_SECTOR_SIZE;
-    uint32_t sector_offset = absolute % SFS_SECTOR_SIZE;
-    if (!sfs_read_sector(g_table[idx].start_lba + sector_index, sector))
+  if (g_kind == STORAGE_FS_SFS) {
+    while (copied < wanted) {
+      uint32_t absolute = offset + copied;
+      uint32_t sector_index = absolute / SFS_SECTOR_SIZE;
+      uint32_t sector_offset = absolute % SFS_SECTOR_SIZE;
+      if (!sfs_read_sector(g_table[idx].start_lba + sector_index, sector))
+        return 0;
+      uint32_t chunk = SFS_SECTOR_SIZE - sector_offset;
+      if (chunk > wanted - copied)
+        chunk = wanted - copied;
+      for (uint32_t i = 0; i < chunk; ++i)
+        dst[copied + i] = sector[sector_offset + i];
+      copied += chunk;
+    }
+  } else {
+    /* FAT32 stores file data in a cluster chain. Skip whole clusters first,
+       then copy sector slices while following the chain with a hard budget. */
+    uint32_t cluster_bytes =
+        (uint32_t)g_fat.sectors_per_cluster * FAT_SECTOR_SIZE;
+    if (cluster_bytes == 0)
       return 0;
-    uint32_t chunk = SFS_SECTOR_SIZE - sector_offset;
-    if (chunk > wanted - copied)
-      chunk = wanted - copied;
-    for (uint32_t i = 0; i < chunk; ++i)
-      dst[copied + i] = sector[sector_offset + i];
-    copied += chunk;
+    uint32_t cluster = g_fat_files[idx].first_cluster;
+    if (cluster < 2u)
+      return 0;
+
+    uint32_t clusters_to_skip = offset / cluster_bytes;
+    uint32_t within_cluster = offset % cluster_bytes;
+    uint32_t budget_clusters = 4096u;
+    while (clusters_to_skip > 0) {
+      uint32_t next = 0;
+      if (!budget_clusters-- || !fat_get_fat_entry(cluster, &next) ||
+          next < 2u || next >= 0x0FFFFFF8u)
+        return 0;
+      cluster = next;
+      --clusters_to_skip;
+    }
+
+    while (copied < wanted && budget_clusters--) {
+      uint32_t first_sector = within_cluster / FAT_SECTOR_SIZE;
+      uint32_t sector_offset = within_cluster % FAT_SECTOR_SIZE;
+      uint32_t cluster_lba = fat_cluster_to_lba(cluster);
+      for (uint32_t s = first_sector;
+           s < (uint32_t)g_fat.sectors_per_cluster && copied < wanted; ++s) {
+        if (!fat_read_sector(cluster_lba + s, sector))
+          return 0;
+        uint32_t chunk = FAT_SECTOR_SIZE - sector_offset;
+        if (chunk > wanted - copied)
+          chunk = wanted - copied;
+        for (uint32_t i = 0; i < chunk; ++i)
+          dst[copied + i] = sector[sector_offset + i];
+        copied += chunk;
+        sector_offset = 0;
+      }
+      within_cluster = 0;
+      if (copied < wanted) {
+        uint32_t next = 0;
+        if (!fat_get_fat_entry(cluster, &next) ||
+            next < 2u || next >= 0x0FFFFFF8u)
+          return 0;
+        cluster = next;
+      }
+    }
+    if (copied != wanted)
+      return 0;
   }
 
-  if (out_len) *out_len = copied;
+  if (out_len)
+    *out_len = copied;
   return 1;
 }
 
