@@ -676,7 +676,7 @@ int simplefs_init(void) {
   if (sfs2_mount(&g_sfs2, sfs2_storage_read, NULL,
                  storage_sector_limit())) {
     g_kind = STORAGE_FS_SFS2;
-    serial_print("[SFS2] mounted read-only\\n");
+    serial_print("[SFS2] mounted read-only\n");
     g_mounted = 1;
     return 1;
   }
@@ -880,7 +880,7 @@ uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap) {
         break;
       for (uint32_t j = 0; j < n; ++j)
         out[written++] = path[j];
-      out[written++] = '\\n';
+      out[written++] = '\n';
     }
     out[written] = 0;
     return written;
