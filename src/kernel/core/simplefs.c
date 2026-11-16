@@ -48,6 +48,7 @@ static storage_fs_kind_t g_kind = STORAGE_FS_NONE;
 static uint8_t g_mounted;
 static sfs2_volume_t g_sfs2;
 static uint64_t storage_sector_limit(void);
+static int storage_read_sector(uint32_t lba, void *buf);
 
 static int sfs2_storage_read(uint64_t lba, void *sector) {
   if (lba > 0xFFFFFFFFull || lba >= storage_sector_limit())
