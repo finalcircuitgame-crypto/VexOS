@@ -13,6 +13,7 @@
 #define SFS2_JOURNAL_MAGIC 0x524A3253u /* "S2JR" */
 #define SFS2_JOURNAL_COMMITTED 1u
 #define SFS2_JOURNAL_MAX_RECORDS 32u
+#define SFS2_MAX_FILE_SECTORS 32768u /* 16 MiB, one contiguous extent */
 #define SFS2_JOURNAL_HEADER_SECTORS 1u
 
 typedef struct __attribute__((packed)) {
@@ -79,7 +80,7 @@ int sfs2_stat_path(sfs2_volume_t *volume, const char *path,
 int sfs2_read_file_at(sfs2_volume_t *volume, const char *path,
                       uint64_t offset, void *out, uint32_t length,
                       uint32_t *out_read);
-/* Journaled root-directory file mutation. Writes are limited to 2 MiB/file. */
+/* Journaled nested-file mutation. Missing parent directories are created;\n   writes are limited to 16 MiB per file and one contiguous extent. */
 int sfs2_write_file(sfs2_volume_t *volume, const char *path,
                     const void *data, uint32_t length);
 int sfs2_unlink_file(sfs2_volume_t *volume, const char *path);
