@@ -373,9 +373,11 @@ int Process_Wait(ProcessId pid, int32_t *exit_code) {
     Process *current = find_by_task(Task_GetCurrentId());
     if (!current || current->info.state != PROCESS_RUNNING)
       return -1;
+    uint64_t irq_flags = process_irq_save_disable();
     current->info.state = PROCESS_BLOCKED;
     Task_BlockCurrent();
     Task_Yield();
+    process_irq_restore(irq_flags);
   }
 }
 
@@ -385,10 +387,16 @@ int Process_ReapTask(uint32_t task_id) {
       task_id == Task_GetCurrentId())
     return 0;
 
+  /* A zombie is never scheduled again. Keep the reaper atomic so another
+     waiter cannot observe a half-released task/process record. */
+  uint64_t irq_flags = process_irq_save_disable();
+
   /* The task is already off-CPU. Clear its scheduler slot before
      releasing the backing resources it referenced. */
-  if (!Task_Reap(task_id))
+  if (!Task_Reap(task_id)) {
+    process_irq_restore(irq_flags);
     return 0;
+  }
   if (process->address_space) {
     VMM_AddressSpaceDestroy(process->address_space);
     process->address_space = NULL;
@@ -406,6 +414,7 @@ int Process_ReapTask(uint32_t task_id) {
   process->kernel_stack_base = NULL;
   process->kernel_stack_top = 0;
   process->owns_kernel_stack = 0;
+  process_irq_restore(irq_flags);
   return 1;
 }
 
