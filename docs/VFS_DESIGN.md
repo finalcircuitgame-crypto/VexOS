@@ -14,7 +14,7 @@ Introduce a filesystem-independent kernel interface while preserving the current
 
 ## VFS v1 implementation
 
-`src/include/vfs.h` and `src/kernel/core/vfs.c` define the first adapter layer. It has a root mount with a backend operation table and supports stat, read, ranged read, write, count, and flat-file listing. It normalizes absolute and relative root-file paths, strips `.` components, and rejects `..` traversal and nested paths. The user-mode open/read syscalls now use this interface. This is intentionally a compatibility layer; it is not yet a hierarchical VFS with vnode caching or mount-point routing.
+`src/include/vfs.h` and `src/kernel/core/vfs.c` define the first adapter layer. It has a root mount with a backend operation table and supports stat, read, ranged read, write, count, and flat-file listing. It normalizes absolute and relative root-file paths, strips `.` components, and rejects `..` traversal and nested paths. It also provides per-open file handles with independent offsets, read, seek, and close; user-mode open/read/seek/close syscalls now use these handles, and process cleanup closes outstanding handles. This is intentionally a compatibility layer; it is not yet a hierarchical VFS with vnode caching or mount-point routing.
 
 ## Required repository audit before further implementation
 
@@ -79,7 +79,7 @@ VFS v1 is already present. The next steps must preserve its compatibility bounda
 ## Current VFS v1 limitations
 
 - Only the root mount exists; nested directory paths are rejected rather than silently flattened.
-- There are no vnode/open-file reference objects yet.
+- The current open-file handle is a lightweight value object, not a reference-counted vnode/open-file cache.
 - No create/unlink or directory creation operations are exposed through VFS.
 - The SimpleFS backend preserves its current disk format and limitations.
 - FAT32 ranged reads are not implemented by the current backend.
