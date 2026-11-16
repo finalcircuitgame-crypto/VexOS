@@ -26,7 +26,7 @@ static void input_log_arrow(uint8_t usage, int pressed) {
     serial_print((char[]){digits[--count], 0});
   serial_print(" key=");
   serial_print(key);
-  serial_print(pressed ? " state=DOWN\\n" : " state=UP\\n");
+  serial_print(pressed ? " state=DOWN\n" : " state=UP\n");
 }
 
 static input_pointer_state_t g_ptr;
