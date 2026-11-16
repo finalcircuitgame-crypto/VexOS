@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+extern void syscall_process_cleanup_task(uint32_t task_id);
+
 #define PROCESS_MAX TASK_MAX
 
 /* The scheduler runs on the PIT IRQ on this uniprocessor build. Keep a new
@@ -509,6 +511,10 @@ int Process_ReapTask(uint32_t task_id) {
     process_irq_restore(irq_flags);
     return 0;
   }
+
+  /* Reap all task-indexed syscall state even if an unusual kernel exit
+     bypassed the normal user-mode exit/fault cleanup path. */
+  syscall_process_cleanup_task(task_id);
 
   /* The task is already off-CPU. Clear its scheduler slot before releasing
      the backing resources it referenced. */
