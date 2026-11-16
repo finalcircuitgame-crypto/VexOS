@@ -315,7 +315,7 @@ void Process_OnTaskExit(uint32_t task_id) {
   process->info.exit_code = -1;
 }
 
-void Process_ExitKernelCurrent(int32_t exit_code) {
+__attribute__((noreturn)) void Process_ExitKernelCurrent(int32_t exit_code) {
   __asm__ volatile("cli" ::: "memory");
   Process *process = find_by_task(Task_GetCurrentId());
   if (process) {
