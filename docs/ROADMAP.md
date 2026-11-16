@@ -55,7 +55,7 @@ Implemented:
 - Preserved the existing SFS1 disk layout and existing file names.
 
 Remaining:
-1. Complete the SFS2 writable backend. The versioned metadata format, read-only compatibility mount, journal-enabled formatter/verifier, separate-image SFS1 migration, journal replay, and journaled root-file create/replace/unlink with bitmap updates are implemented. Remaining work is power-loss fault injection, nested-directory writes, larger-file scalability, and transaction concurrency protection. Keep SFS1 volumes mountable throughout.
+1. Complete the SFS2 writable backend. The versioned metadata format, read-only compatibility mount, journal-enabled formatter/verifier, separate-image SFS1 migration, journal replay, journaled nested-file create/replace/unlink, automatic parent-directory creation, 16 MiB file transactions, and write-boundary fault injection are implemented. Remaining work is transaction concurrency protection, broader physical-device qualification, and future extent-tree support. Keep SFS1 volumes mountable throughout.
 2. Add FAT32 subdirectory traversal and long-filename handling; retain explicit read-only behavior until writes are designed and tested.
 3. Stress-test concurrent open/read/create/unlink, cache exhaustion, interrupted storage I/O, and process-exit cleanup.
 4. Add a separate installer-only format operation that requires explicit user confirmation; normal mount code must remain non-destructive.
@@ -130,4 +130,4 @@ Milestones:
 
 ## Immediate next objective
 
-Finish the SFS2 implementation in stages: the metadata format, read-only compatibility mount, host formatter/verifier, offline SFS1 migration, redo-journal replay, and journaled root-file create/replace/unlink are in place. Next add power-loss fault-injection tests, nested-directory mutation, larger-file support, and transaction concurrency protection. Keep SFS1 mountable throughout. Before any installer or arbitrary physical-disk support, require explicit user confirmation for destructive formatting.
+Finish the SFS2 implementation in stages: the metadata format, read-only compatibility mount, host formatter/verifier, offline SFS1 migration, redo-journal replay, journaled nested-file create/replace/unlink, 16 MiB transactions, and fault-injection tests at each journal write boundary are in place. Next address transaction concurrency protection and physical-device qualification. Keep SFS1 mountable throughout. Before any installer or arbitrary physical-disk support, require explicit user confirmation for destructive formatting.
