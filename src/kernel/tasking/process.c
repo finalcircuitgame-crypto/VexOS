@@ -639,6 +639,204 @@ static void ci_discard_unstarted(Process *process) {
     VMM_AddressSpaceDestroy(space);
 }
 
+
+#define CI_RING3_WORKERS 4u
+#define CI_RING3_CODE_VA 0x0000600000000000ull
+#define CI_RING3_STACK_VA (CI_RING3_CODE_VA + PAGE_SIZE)
+#define CI_RING3_MMAP_VA 0x0000004000000000ull
+
+static void ci_ring3_emit8(uint8_t *code, uint32_t *length, uint8_t value) {
+  code[(*length)++] = value;
+}
+static void ci_ring3_emit32(uint8_t *code, uint32_t *length, uint32_t value) {
+  for (uint32_t i=0; i<4u; ++i) code[(*length)++]=(uint8_t)(value>>(i*8u));
+}
+static void ci_ring3_emit64(uint8_t *code, uint32_t *length, uint64_t value) {
+  for (uint32_t i=0; i<8u; ++i) code[(*length)++]=(uint8_t)(value>>(i*8u));
+}
+static void ci_ring3_patch_rel32(uint8_t *code, uint32_t displacement,
+                                 uint32_t target) {
+  uint32_t encoded=(uint32_t)(int32_t)((int64_t)target-(int64_t)(displacement+4u));
+  for (uint32_t i=0; i<4u; ++i) code[displacement+i]=(uint8_t)(encoded>>(i*8u));
+}
+static uint32_t ci_ring3_string_length(const char *value) {
+  uint32_t length=0;
+  while (value[length]) ++length;
+  return length;
+}
+
+static int ci_ring3_build_worker(uint8_t *code, uint32_t worker) {
+  static const char *const pass_messages[CI_RING3_WORKERS] = {
+    "[CI] RING3_WORKER_0_PASS\n", "[CI] RING3_WORKER_1_PASS\n",
+    "[CI] RING3_WORKER_2_PASS\n", "[CI] RING3_WORKER_3_PASS\n"
+  };
+  static const char *const fail_messages[CI_RING3_WORKERS] = {
+    "[CI] RING3_WORKER_0_FAIL\n", "[CI] RING3_WORKER_1_FAIL\n",
+    "[CI] RING3_WORKER_2_FAIL\n", "[CI] RING3_WORKER_3_FAIL\n"
+  };
+  if (!code || worker>=CI_RING3_WORKERS) return 0;
+
+  uint32_t n=0;
+  uint64_t sentinel=0x5645584F53000000ull|worker;
+  uint32_t mmap_fail, mmap_wrong, loop_start, loop_back, memory_fail;
+  uint32_t pass_disp, fail_disp;
+
+  /* All workers ask for their first mmap page at the same VA. */
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,2u);
+  ci_ring3_emit8(code,&n,0x31); ci_ring3_emit8(code,&n,0xFF);
+  ci_ring3_emit8(code,&n,0xBE); ci_ring3_emit32(code,&n,PAGE_SIZE);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0x83);
+  ci_ring3_emit8(code,&n,0xF8); ci_ring3_emit8(code,&n,0xFF);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x84);
+  mmap_fail=n; ci_ring3_emit32(code,&n,0u);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0xBA);
+  ci_ring3_emit64(code,&n,CI_RING3_MMAP_VA);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0x39);
+  ci_ring3_emit8(code,&n,0xD0);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x85);
+  mmap_wrong=n; ci_ring3_emit32(code,&n,0u);
+
+  /* Save the mapping pointer and place a process-specific value there. */
+  ci_ring3_emit8(code,&n,0x49); ci_ring3_emit8(code,&n,0x89);
+  ci_ring3_emit8(code,&n,0xC5);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0xBB);
+  ci_ring3_emit64(code,&n,sentinel);
+  ci_ring3_emit8(code,&n,0x49); ci_ring3_emit8(code,&n,0x89);
+  ci_ring3_emit8(code,&n,0x5D); ci_ring3_emit8(code,&n,0x00);
+
+  /* Poll the timer for 30 ticks. PIT interrupts should preempt each worker. */
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,7u);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0x49); ci_ring3_emit8(code,&n,0x89);
+  ci_ring3_emit8(code,&n,0xC6);
+  ci_ring3_emit8(code,&n,0x49); ci_ring3_emit8(code,&n,0x83);
+  ci_ring3_emit8(code,&n,0xC6); ci_ring3_emit8(code,&n,0x1E);
+  loop_start=n;
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,7u);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0x4C); ci_ring3_emit8(code,&n,0x39);
+  ci_ring3_emit8(code,&n,0xF0);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x82);
+  loop_back=n; ci_ring3_emit32(code,&n,0u);
+
+  /* Ensure this process still sees its own sentinel after concurrent runs. */
+  ci_ring3_emit8(code,&n,0x49); ci_ring3_emit8(code,&n,0x8B);
+  ci_ring3_emit8(code,&n,0x5D); ci_ring3_emit8(code,&n,0x00);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0xB8);
+  ci_ring3_emit64(code,&n,sentinel);
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0x39);
+  ci_ring3_emit8(code,&n,0xC3);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x85);
+  memory_fail=n; ci_ring3_emit32(code,&n,0u);
+
+  /* Success: report a unique marker, then exit(0) using syscall 15. */
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0x8D);
+  ci_ring3_emit8(code,&n,0x3D);
+  pass_disp=n; ci_ring3_emit32(code,&n,0u);
+  ci_ring3_emit8(code,&n,0xBE);
+  ci_ring3_emit32(code,&n,ci_ring3_string_length(pass_messages[worker]));
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,1u);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,15u);
+  ci_ring3_emit8(code,&n,0x31); ci_ring3_emit8(code,&n,0xFF);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x0B);
+
+  /* Failure: report FAIL and exit(1), which the parent checks with Wait. */
+  uint32_t fail_label=n;
+  ci_ring3_emit8(code,&n,0x48); ci_ring3_emit8(code,&n,0x8D);
+  ci_ring3_emit8(code,&n,0x3D);
+  fail_disp=n; ci_ring3_emit32(code,&n,0u);
+  ci_ring3_emit8(code,&n,0xBE);
+  ci_ring3_emit32(code,&n,ci_ring3_string_length(fail_messages[worker]));
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,1u);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0xB8); ci_ring3_emit32(code,&n,15u);
+  ci_ring3_emit8(code,&n,0xBF); ci_ring3_emit32(code,&n,1u);
+  ci_ring3_emit8(code,&n,0xCD); ci_ring3_emit8(code,&n,0x80);
+  ci_ring3_emit8(code,&n,0x0F); ci_ring3_emit8(code,&n,0x0B);
+
+  uint32_t pass_text=n;
+  for (uint32_t i=0; pass_messages[worker][i]; ++i)
+    ci_ring3_emit8(code,&n,(uint8_t)pass_messages[worker][i]);
+  uint32_t fail_text=n;
+  for (uint32_t i=0; fail_messages[worker][i]; ++i)
+    ci_ring3_emit8(code,&n,(uint8_t)fail_messages[worker][i]);
+
+  ci_ring3_patch_rel32(code,mmap_fail,fail_label);
+  ci_ring3_patch_rel32(code,mmap_wrong,fail_label);
+  ci_ring3_patch_rel32(code,loop_back,loop_start);
+  ci_ring3_patch_rel32(code,memory_fail,fail_label);
+  ci_ring3_patch_rel32(code,pass_disp,pass_text);
+  ci_ring3_patch_rel32(code,fail_disp,fail_text);
+  return n<=PAGE_SIZE;
+}
+
+int Process_CI_UserStressTest(void) {
+  ProcessId pids[CI_RING3_WORKERS]={0,0,0,0};
+  ProcessId parent_pid=Process_GetCurrentId();
+  uint32_t initial_count=Process_GetCount();
+  int setup_ok=parent_pid!=0 && process_manager_ready;
+  uint64_t irq_flags=process_irq_save_disable();
+
+  /* Keep every worker READY until all four private images are installed. */
+  for (uint32_t i=0; i<CI_RING3_WORKERS && setup_ok; ++i) {
+    AddressSpace *space=VMM_AddressSpaceCreate();
+    if (!space) { setup_ok=0; break; }
+    void *code_page=PMM_AllocatePage();
+    void *stack_page=PMM_AllocatePage();
+    if (!code_page || !stack_page) {
+      if (code_page) PMM_FreePage(code_page);
+      if (stack_page) PMM_FreePage(stack_page);
+      VMM_AddressSpaceDestroy(space);
+      setup_ok=0;
+      break;
+    }
+    for (uint32_t word=0; word<PAGE_SIZE/sizeof(uint64_t); ++word) {
+      ((uint64_t *)code_page)[word]=0;
+      ((uint64_t *)stack_page)[word]=0;
+    }
+    if (!ci_ring3_build_worker((uint8_t *)code_page,i)) {
+      PMM_FreePage(code_page); PMM_FreePage(stack_page);
+      VMM_AddressSpaceDestroy(space); setup_ok=0; break;
+    }
+    if (!VMM_AddressSpaceMapPage(space,(void *)(uintptr_t)CI_RING3_CODE_VA,
+                                 code_page,PAGE_USER|PAGE_PRESENT)) {
+      PMM_FreePage(code_page); PMM_FreePage(stack_page);
+      VMM_AddressSpaceDestroy(space); setup_ok=0; break;
+    }
+    if (!VMM_AddressSpaceMapPage(space,(void *)(uintptr_t)CI_RING3_STACK_VA,
+                                 stack_page,PAGE_USER|PAGE_WRITE|PAGE_PRESENT)) {
+      PMM_FreePage(stack_page);
+      VMM_AddressSpaceDestroy(space); setup_ok=0; break;
+    }
+    pids[i]=Process_CreateUser("ci-ring3-worker",space,CI_RING3_CODE_VA,
+                               CI_RING3_STACK_VA+PAGE_SIZE);
+    if (!pids[i]) { VMM_AddressSpaceDestroy(space); setup_ok=0; break; }
+  }
+
+  if (!setup_ok) {
+    for (uint32_t i=0; i<CI_RING3_WORKERS; ++i) {
+      Process *process=find_by_pid(pids[i]);
+      if (process) ci_discard_unstarted(process);
+    }
+    process_irq_restore(irq_flags);
+    return 0;
+  }
+  process_irq_restore(irq_flags);
+
+  int test_ok=1;
+  for (uint32_t i=0; i<CI_RING3_WORKERS; ++i) {
+    int32_t exit_code=-999;
+    if (Process_Wait(pids[i],&exit_code)!=0 || exit_code!=0)
+      test_ok=0;
+  }
+  return test_ok && Process_GetCount()==initial_count &&
+         Process_GetCurrentId()==parent_pid;
+}
+
+
 int Process_CI_SelfTest(void) {
   const uint64_t code_va = 0x0000600000000000ull;
   const uint64_t stack_va = code_va + PAGE_SIZE;

@@ -1069,6 +1069,9 @@ void kernel_main(BootInfo *bootInfo) {
   uint64_t last_frame_ticks = Timer_Ticks();
 
   int ci_task_runtime_reported = 0;
+#ifdef VEXOS_CI_INPUT_TEST
+  int ci_ring3_stress_reported = 0;
+#endif
   while (1) {
 #ifdef VEXOS_CI_INPUT_TEST
     if (!ci_task_runtime_reported && Task_CI_RuntimeTestPassed()) {
@@ -1078,6 +1081,12 @@ void kernel_main(BootInfo *bootInfo) {
     if (!ci_task_runtime_reported && Task_CI_RuntimeBadFrameCS() != 0) {
       serial_print("[CI] IRQ scheduler rejected an invalid task CS frame\n");
       ci_task_runtime_reported = 1;
+    }
+    if (!ci_ring3_stress_reported && Task_CI_RuntimeTestPassed()) {
+      if (!Process_CI_UserStressTest())
+        ci_memory_test_fail("concurrent ring-3 process stress test");
+      serial_print("[CI] Concurrent ring-3 workers, private mmap state, memory isolation, and exit/reap passed\n");
+      ci_ring3_stress_reported = 1;
     }
 #endif
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.

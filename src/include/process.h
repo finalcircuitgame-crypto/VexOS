@@ -51,6 +51,7 @@ void Process_OnTaskExit(uint32_t task_id);
 
 #ifdef VEXOS_CI_INPUT_TEST
 int Process_CI_SelfTest(void);
+int Process_CI_UserStressTest(void);
 #endif
 
 #endif

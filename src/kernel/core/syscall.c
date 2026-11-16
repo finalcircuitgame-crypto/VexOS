@@ -351,6 +351,13 @@ uint64_t syscall_handler(uint64_t rsp) {
         xhci_poll_events();
         frame->rax = input_kbd_arrow_state();
         break;
+    case 15:
+        /* Exit an independently managed user process without changing the desktop app. */
+        usermode_cleanup_current();
+        syscall_process_cleanup();
+        if (Process_IsCurrentUser())
+            return Process_ExitCurrent(rsp, (int32_t)frame->rdi);
+        return Task_Exit(rsp);
     case 9: {
         uint64_t w = frame->rsi;
         uint64_t h = frame->rdx;
