@@ -26,12 +26,14 @@ All metadata uses 512-byte sectors. The first sector is the SFS2 superblock:
 | Region | Location |
 |---|---|
 | Primary superblock | LBA 0 |
+| Optional redo journal | `journal_lba .. journal_lba + journal_sectors` |
 | Free-space bitmap | `bitmap_lba .. bitmap_lba + bitmap_sectors` |
 | Fixed inode table | `inode_table_lba .. inode_table_lba + inode_table_sectors` |
 | Data area | `data_lba .. volume_sectors` |
 
 The superblock includes a format version, declared volume size, generation,
-metadata region bounds, inode capacity, root inode ID, and an FNV-1a checksum.
+metadata region bounds, optional journal geometry, inode capacity, root inode ID,
+and an FNV-1a checksum.
 The validator rejects overlapping/out-of-order regions, out-of-device volume
 sizes, undersized metadata regions, and invalid checksums.
 
@@ -104,28 +106,32 @@ python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 ## Safety and compatibility
 
 - SFS1 remains unchanged and remains the kernel's writable native format.
-- SFS2 kernel mount is read-only; no normal boot path formats or migrates media.
+- Legacy SFS2 images without journal geometry mount read-only; journal-enabled images mount with the transactional root-file writer when durable sector writes are available. No normal boot path formats or migrates media.
 - Never auto-format an unknown, damaged, or unsupported volume.
 - Host formatting and migration are explicit offline operations against image
   files, not automatic install or boot operations.
 - Do not switch boot configuration to an SFS2 image until the image has been
   verified and the kernel has passed the relevant QEMU disk-image tests.
-- A writable kernel backend still needs ordered metadata commits, journal
-  replay, allocator rollback on failed I/O, duplicate-name checks, parent/type
-  validation, and bitmap/extent consistency checks.
+- Journaled writes commit new file data before metadata, and use redo replay for
+  metadata recovery. Failed transactions require remount/replay before further
+  access. The current transaction scratch buffer is not yet concurrency-safe.
 
 ## Implemented kernel helpers
 
 - Version, geometry, metadata-region, and checksum validation for superblocks.
 - Inode type, root-inode, component-name, extent-boundary, and checksum checks.
 - Bounds-checked bitmap-bit lookup and contiguous free-run search helpers.
-- Read-only mount using caller-supplied sector I/O callbacks.
+- Mount using caller-supplied sector I/O callbacks, including committed redo
+  journal replay before metadata validation.
+- Journaled root-file create/replace/unlink, contiguous allocation, bitmap
+  persistence, inode updates, and superblock generation updates.
 - Full inode-table loading with table-padding handling, root/parent/type checks,
   unique sibling names, and rejection of orphaned/cyclic directory trees.
 - Absolute or relative path resolution, stat, directory enumeration, and
   ranged reads across sector boundaries.
-- CI-only metadata checks and an in-memory disk-image test covering mount,
-  empty directories, lookup, file reads, and damaged metadata rejection.
+- CI-only metadata checks and in-memory disk-image tests covering mount, empty
+  directories, lookup, ranged reads, damaged metadata rejection, interrupted
+  journal replay, create/replace/readback, and unlink.
 
 ## Remaining kernel milestones
 
