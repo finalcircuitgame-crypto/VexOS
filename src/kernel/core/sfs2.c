@@ -21,6 +21,16 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(sfs2_journal_header_t) == SFS2_SECTOR_SIZE,
                "SFS2 journal header must occupy one sector");
 
+static uint32_t sfs2_journal_record_capacity(
+        const sfs2_superblock_t *sb) {
+    if (!sb || sb->journal_sectors <= SFS2_JOURNAL_HEADER_SECTORS)
+        return 0;
+    uint32_t capacity = sb->journal_sectors -
+                        SFS2_JOURNAL_HEADER_SECTORS;
+    return capacity > SFS2_JOURNAL_MAX_RECORDS
+        ? SFS2_JOURNAL_MAX_RECORDS : capacity;
+}
+
 static int sfs2_sector_is_zero(const uint8_t *sector) {
     for (uint32_t i = 0; i < SFS2_SECTOR_SIZE; ++i)
         if (sector[i] != 0)
@@ -36,8 +46,7 @@ static int sfs2_replay_journal(const sfs2_superblock_t *sb,
     if (sb->journal_lba == 0 && sb->journal_sectors == 0)
         return 1;
     if (sb->journal_lba == 0 ||
-        sb->journal_sectors < SFS2_JOURNAL_HEADER_SECTORS +
-                              SFS2_JOURNAL_MAX_RECORDS)
+        sfs2_journal_record_capacity(sb) == 0)
         return 0;
 
     uint8_t header_sector[SFS2_SECTOR_SIZE];
@@ -60,7 +69,7 @@ static int sfs2_replay_journal(const sfs2_superblock_t *sb,
         return header.record_count == 0u;
     if (header.state != SFS2_JOURNAL_COMMITTED ||
         header.record_count == 0u ||
-        header.record_count > SFS2_JOURNAL_MAX_RECORDS ||
+        header.record_count > sfs2_journal_record_capacity(sb) ||
         !write_sector)
         return 0;
 
@@ -129,8 +138,7 @@ int sfs2_validate_superblock(const sfs2_superblock_t *sb,
     int has_journal = sb->journal_lba != 0 || sb->journal_sectors != 0;
     if ((has_journal &&
          (sb->journal_lba < 1u ||
-          sb->journal_sectors < SFS2_JOURNAL_HEADER_SECTORS +
-                                SFS2_JOURNAL_MAX_RECORDS ||
+          sb->journal_sectors <= SFS2_JOURNAL_HEADER_SECTORS ||
           journal_end < sb->journal_lba ||
           journal_end > sb->volume_sectors ||
           sb->bitmap_lba < journal_end)) ||
@@ -268,7 +276,8 @@ static int sfs2_tx_commit(sfs2_volume_t *volume) {
         volume->superblock.journal_lba == 0 ||
         volume->superblock.journal_sectors <
             SFS2_JOURNAL_HEADER_SECTORS + SFS2_JOURNAL_MAX_RECORDS ||
-        tx->count == 0 || tx->count > SFS2_JOURNAL_MAX_RECORDS)
+        tx->count == 0 ||
+        tx->count > sfs2_journal_record_capacity(&volume->superblock))
         return 0;
 
     sfs2_journal_header_t header;
