@@ -76,7 +76,7 @@ The latest CI run must be checked against the exact PR head before this work is 
 
 ## Remaining work
 
-1. Complete the SFS2 writable backend. The kernel now probes SFS2, validates its inode tree and data bitmap, and exposes read-only path/stat/list/ranged-read operations through VFS. SFS2 remains read-only: add an explicit host-side formatter, journaled create/replace/unlink with bitmap updates, crash recovery, and verified SFS1 migration. See [SFS2_FORMAT.md](SFS2_FORMAT.md).
+1. Complete the SFS2 writable backend. The kernel probes SFS2, validates its inode tree and data bitmap, and exposes read-only path/stat/list/ranged-read operations through VFS. Offline host formatting, metadata verification, and separate-image SFS1 migration tooling now exist in `tools/sfs2_image.py`; they do not make the kernel writable. Remaining work is a journaled create/replace/unlink backend, persistent bitmap updates, recovery-before-mount, storage flush/error propagation, and QEMU fault-injection tests. See [SFS2_FORMAT.md](SFS2_FORMAT.md).
 2. Add a FAT32 image fixture covering fragmented files, multi-cluster reads, invalid cluster chains, and end-of-chain handling; later design subdirectory and long-name support.
 3. Add safe ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process policy.
 4. Add tests for cache exhaustion, concurrent operations, interrupted I/O, and repeated create/delete cycles.
