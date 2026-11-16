@@ -149,6 +149,9 @@ DOOM_OBJS = $(addprefix $(DOOMOBJDIR)/,$(addsuffix .o,$(DOOMCORE_NAMES))) \
 $(DOOM_OBJS): Makefile
 # Doom runs at 128 GiB, leaving the 256 GiB user heap/mmap region free, outside the kernel's low identity map.
 DOOM_CFLAGS = -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -mno-red-zone -mcmodel=large -O2 -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -I$(DOOMDIR) -I$(SRCDIR)/usermode/libc
+ifeq ($(VEXOS_CI),1)
+DOOM_CFLAGS += -DVEXOS_CI_INPUT_TEST
+endif
 DOOM_LDFLAGS = -nostdlib -static -no-pie -Wl,-T,$(SRCDIR)/usermode/doom/linker.ld -Wl,--build-id=none
 
 .PHONY: doom
