@@ -224,8 +224,12 @@ int vfs_open(vfs_file_t *file, const char *path) {
         info.type != VFS_NODE_FILE)
         return 0;
 
-    for (uint32_t i = 0; i < VFS_PATH_MAX; ++i)
+    uint32_t i = 0;
+    do {
         file->path[i] = name[i];
+    } while (name[i++] && i < VFS_PATH_MAX);
+    while (i < VFS_PATH_MAX)
+        file->path[i++] = '\0';
     file->size = info.size;
     file->offset = 0;
     file->is_open = 1;
@@ -262,12 +266,9 @@ int64_t vfs_file_seek(vfs_file_t *file, int64_t offset, int whence) {
     else
         return -1;
 
-    if ((offset > 0 && base > INT64_MAX - offset) ||
-        (offset < 0 && base < INT64_MIN - offset))
+    if (offset < -base || offset > (int64_t)file->size - base)
         return -1;
     int64_t target = base + offset;
-    if (target < 0 || target > (int64_t)file->size)
-        return -1;
     file->offset = (uint32_t)target;
     return target;
 }
