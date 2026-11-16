@@ -125,3 +125,19 @@ void PMM_FreePage(void *addr) {
         bitmap[page / 8ULL] &= (uint8_t)~mask;
     pmm_irq_restore(irq_flags);
 }
+
+/* CI and diagnostics helper: count currently free physical pages without
+   changing allocator state. The bitmap uses one bits for allocated pages. */
+uint64_t PMM_GetFreePageCount(void) {
+    if (!bitmap || max_pages == 0) return 0;
+
+    uint64_t irq_flags = pmm_irq_save_disable();
+    uint64_t free_pages = 0;
+    for (uint64_t page = 0; page < max_pages; ++page) {
+        uint8_t mask = (uint8_t)(1u << (page % 8ULL));
+        if (!(bitmap[page / 8ULL] & mask))
+            ++free_pages;
+    }
+    pmm_irq_restore(irq_flags);
+    return free_pages;
+}
