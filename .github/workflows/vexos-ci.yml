@@ -274,6 +274,7 @@ jobs:
             "[CI] ELF header/segment validation and rollback passed" \
             "[CI] Task IRET frame and scheduler checks passed" \
             "[CI] Runtime task IRET frames validated" \
+            "[CI] Process control blocks and private CR3 fixtures created" \
             "[CI] Successful framebuffer syscall draw passed" \
             "[CI] Doom test surface cleanup passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
