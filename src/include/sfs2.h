@@ -88,6 +88,7 @@ int sfs2_bitmap_find_free_run(const uint8_t *bitmap, uint32_t bit_count,
 
 #ifdef VEXOS_CI_INPUT_TEST
 int sfs2_ci_metadata_self_test(void);
+int sfs2_ci_mount_read_test(void);
 #endif
 
 #endif
