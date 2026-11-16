@@ -145,7 +145,10 @@ static void ci_test_vfs_syscalls(void) {
     char readback[sizeof(payload)];
     vexfs_stat_t info;
     vexfs_dir_t directory = {-1};
+    vexfs_dir_t root = {-1};
     vexfs_dirent_t entry;
+    int fd = -1;
+    int type = -1;
 
     (void)vexfs_unlink(path);
     if (vexfs_create(path) != 0)
@@ -156,7 +159,7 @@ static void ci_test_vfs_syscalls(void) {
         info.type != VEXFS_NODE_FILE || info.size != sizeof(payload))
         goto fail;
 
-    int fd = vexfs_open_read(path);
+    fd = vexfs_open_read(path);
     if (fd < 3)
         goto fail;
     if (vexfs_unlink(path) == 0 ||
@@ -164,25 +167,26 @@ static void ci_test_vfs_syscalls(void) {
         goto fail;
     int bytes = vexfs_read_file(fd, readback, sizeof(readback));
     if (bytes != (int)sizeof(payload))
-        goto fail_open;
+        goto fail;
     for (uint32_t i = 0; i < sizeof(payload); ++i) {
         if (readback[i] != payload[i])
-            goto fail_open;
+            goto fail;
     }
     if (vexfs_seek_file(fd, 0, 0) != 0 ||
         vexfs_close_file(fd) != 0)
         goto fail;
+    fd = -1;
 
     if (vexfs_open_dir(&directory, parent) < 3)
         goto fail;
     uint32_t entry_size = 0;
     if (vexfs_readdir_sized(&directory, entry.name, 2u,
                             &entry_size) != -1)
-        goto fail_dir;
+        goto fail;
     if (vexfs_readdir_sized(&directory, (char *)(uintptr_t)1u,
                             sizeof(entry.name), &entry_size) != -1)
-        goto fail_dir;
-    int type = vexfs_readdir(&directory, &entry);
+        goto fail;
+    type = vexfs_readdir(&directory, &entry);
     if (type != (int)VEXFS_NODE_FILE ||
         entry.size != sizeof(payload) ||
         entry.name[0] != 'd' || entry.name[1] != 'a' ||
@@ -194,7 +198,6 @@ static void ci_test_vfs_syscalls(void) {
         vexfs_close_dir(&directory) != 0)
         goto fail;
 
-    vexfs_dir_t root = {-1};
     if (vexfs_open_dir(&root, "/") < 3)
         goto fail;
     int found_parent = 0;
@@ -220,18 +223,20 @@ static void ci_test_vfs_syscalls(void) {
                          sizeof(passed) - 1u, 0);
     return;
 
-fail_dir:
-    (void)vexfs_close_dir(&directory);
-    goto fail;
-fail_open:
-    (void)vexfs_close_file(fd);
 fail:
+    if (fd >= 3)
+        (void)vexfs_close_file(fd);
+    if (directory.fd >= 3)
+        (void)vexfs_close_dir(&directory);
+    if (root.fd >= 3)
+        (void)vexfs_close_dir(&root);
+    (void)vexfs_unlink(path);
     static const char failed[] =
         "[CI] RING3 VFS mutation/stat/directory syscalls FAILED\n";
     (void)vexfs_syscall3(1u, (uint64_t)(uintptr_t)failed,
                          sizeof(failed) - 1u, 0);
 }
-#endif
+#endiff
 
 void DG_Init(void) {
     mouse_buttons = 0;
