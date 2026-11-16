@@ -76,7 +76,7 @@ The latest CI run must be checked against the exact PR head before this work is 
 
 ## Remaining work
 
-1. Design a versioned SFS2 or compatible metadata layer with a free-space map, durable directory entries, longer paths, and crash-safe updates. Preserve SFS1 mounting and specify migration/recovery before changing formats.
+1. Complete the SFS2 backend. The initial versioned metadata structures, superblock/inode validators, and bitmap-run helper now exist in `src/include/sfs2.h` and `src/kernel/core/sfs2.c`; they are not yet wired into mount, VFS reads/writes, or a formatter. See [SFS2_FORMAT.md](SFS2_FORMAT.md). Next add disk-image fixtures and a read-only mount/list/read path, then transactional writes, persistent directories, crash recovery, and verified SFS1 migration.
 2. Add a FAT32 image fixture covering fragmented files, multi-cluster reads, invalid cluster chains, and end-of-chain handling; later design subdirectory and long-name support.
 3. Add safe ring-3 create/write/unlink/directory syscalls with user-buffer validation and per-process policy.
 4. Add tests for cache exhaustion, concurrent operations, interrupted I/O, and repeated create/delete cycles.
