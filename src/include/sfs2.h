@@ -44,6 +44,35 @@ typedef struct __attribute__((packed)) {
     uint8_t reserved[8];
 } sfs2_inode_t;
 
+
+typedef int (*sfs2_read_sector_fn)(uint64_t lba, void *sector);
+typedef int (*sfs2_write_sector_fn)(uint64_t lba, const void *sector);
+
+typedef struct {
+    sfs2_superblock_t superblock;
+    sfs2_read_sector_fn read_sector;
+    sfs2_write_sector_fn write_sector;
+    uint8_t mounted;
+} sfs2_volume_t;
+
+typedef struct {
+    uint32_t inode_id;
+    uint32_t parent_id;
+    uint8_t type;
+    uint64_t size_bytes;
+} sfs2_stat_t;
+
+/* Read-only mount and namespace/file access. Mount never formats media. */
+int sfs2_mount(sfs2_volume_t *volume, sfs2_read_sector_fn read_sector,
+               sfs2_write_sector_fn write_sector, uint64_t device_sectors);
+int sfs2_stat_path(sfs2_volume_t *volume, const char *path,
+                   sfs2_stat_t *out_stat);
+int sfs2_read_file_at(sfs2_volume_t *volume, const char *path,
+                      uint64_t offset, void *out, uint32_t length,
+                      uint32_t *out_read);
+int sfs2_list_directory(sfs2_volume_t *volume, const char *path,
+                        uint32_t *cursor, sfs2_inode_t *out_inode);
+
 /* Pure metadata helpers. These do not perform disk I/O or format a volume. */
 uint32_t sfs2_checksum(const void *data, uint32_t length,
                        uint32_t checksum_offset);
