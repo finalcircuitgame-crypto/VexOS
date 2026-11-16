@@ -26,7 +26,7 @@ typedef struct __attribute__((packed)) {
     uint64_t data_lba;
     uint32_t root_inode;
     uint32_t checksum;
-    uint8_t reserved[432];
+    uint8_t reserved[440];
 } sfs2_superblock_t;
 
 typedef struct __attribute__((packed)) {
