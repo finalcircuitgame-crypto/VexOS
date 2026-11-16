@@ -320,6 +320,7 @@ uint64_t Task_Schedule(uint64_t current_rsp) {
         const uint64_t *frame = (const uint64_t *)(uintptr_t)tasks[next].rsp;
         if (frame[16] != 0x08u && frame[16] != 0x1Bu) {
           ci_runtime_bad_frame_cs = frame[16];
+          tasks[next].state = TASK_READY;
           current_task = previous;
           if (tasks[previous].state != TASK_BLOCKED &&
               tasks[previous].state != TASK_ZOMBIE)
