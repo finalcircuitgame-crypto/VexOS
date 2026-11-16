@@ -179,8 +179,8 @@ int vfs_read_at(const char *path, uint32_t offset, void *out,
                 uint32_t max_len, uint32_t *out_len) {
     if (out_len)
         *out_len = 0;
-    if ((!out && max_len != 0) || !vfs_init() || !g_root_mount.ops
-        !g_root_mount.ops->read_at)
+    if ((!out && max_len != 0) || !vfs_init() ||
+        !g_root_mount.ops || !g_root_mount.ops->read_at)
         return 0;
     char name[VFS_PATH_MAX];
     if (!vfs_resolve(path, name, sizeof(name)))
@@ -192,8 +192,8 @@ int vfs_read(const char *path, void *out, uint32_t max_len,
              uint32_t *out_len) {
     if (out_len)
         *out_len = 0;
-    if ((!out && max_len != 0) || !g_root_mount.ops ||
-        !g_root_mount.ops->read)
+    if ((!out && max_len != 0) || !vfs_init() ||
+        !g_root_mount.ops || !g_root_mount.ops->read)
         return 0;
     char name[VFS_PATH_MAX];
     if (!vfs_resolve(path, name, sizeof(name)))
@@ -202,8 +202,8 @@ int vfs_read(const char *path, void *out, uint32_t max_len,
 }
 
 int vfs_write(const char *path, const void *data, uint32_t len) {
-    if ((!data && len != 0) || !vfs_init() || !g_root_mount.ops
-        !g_root_mount.ops->write)
+    if ((!data && len != 0) || !vfs_init() ||
+        !g_root_mount.ops || !g_root_mount.ops->write)
         return 0;
     char name[VFS_PATH_MAX];
     if (!vfs_resolve(path, name, sizeof(name)))
@@ -214,17 +214,17 @@ int vfs_write(const char *path, const void *data, uint32_t len) {
 }
 
 uint32_t vfs_file_count(void) {
-    return g_root_mount.mounted && g_root_mount.ops && g_root_mount.ops->count
+    return vfs_init() && g_root_mount.ops && g_root_mount.ops->count
                ? g_root_mount.ops->count() : 0;
 }
 
 int vfs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap) {
-    return g_root_mount.mounted && g_root_mount.ops &&
+    return vfs_init() && g_root_mount.ops &&
            g_root_mount.ops->name_at &&
            g_root_mount.ops->name_at(index, out_name, out_cap);
 }
 
 uint32_t vfs_list_to_buffer(char *out, uint32_t out_cap) {
-    return g_root_mount.mounted && g_root_mount.ops && g_root_mount.ops->list
+    return vfs_init() && g_root_mount.ops && g_root_mount.ops->list
                ? g_root_mount.ops->list(out, out_cap) : 0;
 }
