@@ -163,7 +163,7 @@ int main(void) {
           memcmp(buffer, "file", 4) == 0, "read first handle");
     CHECK(vfs_file_read(&second, buffer, 5) == 5 &&
           memcmp(buffer, "files", 5) == 0, "independent file offsets");
-    CHECK(vfs_file_seek(&first, -4, 2) == (int64_t)sizeof(original) - 4,
+    CHECK(vfs_file_seek(&first, -5, 2) == (int64_t)sizeof(original) - 5,
           "seek from end");
     memset(buffer, 0, sizeof(buffer));
     CHECK(vfs_file_read(&first, buffer, 4) == 4 &&
