@@ -1,4 +1,5 @@
 #include "../../include/usermode.h"
+#include "../../include/process.h"
 #include "../../include/gdt.h"
 #include "../../include/pmm.h"
 #include "../../include/vmm.h"
@@ -37,6 +38,7 @@ void usermode_cleanup_current(void) {
 
     Process_AttachCurrentAddressSpace(NULL);
     Process_SetCurrentKernelStack(0);
+    Process_DetachCurrentAddressSpace();
     VMM_Activate();
     if (g_user_address_space) {
         VMM_AddressSpaceDestroy(g_user_address_space);
