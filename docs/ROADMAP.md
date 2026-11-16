@@ -35,18 +35,18 @@ Remaining:
 
 ## 3. Virtual File System (VFS)
 
-**Status: In progress — design and integration are the next work**
+**Status: Initial root-filesystem adapter implemented; directory/mount architecture remains**
 
-The existing SimpleFS persistent storage must remain usable while filesystem access is moved behind a filesystem-independent VFS interface.
+The existing SimpleFS persistent storage remains the first backend behind a filesystem-independent VFS interface. The initial implementation exposes flat root-file paths only.
 
 Milestones:
-1. Inventory the existing SimpleFS format, storage driver, file APIs, and every caller.
-2. Define VFS objects and operations: filesystem, mount, vnode/inode, directory iteration, open/read/write/close, create, unlink, and stat.
-3. Implement path normalization and mount-point lookup, starting with a root mount backed by the existing SimpleFS.
-4. Route kernel and desktop file access through VFS instead of calling SimpleFS directly.
-5. Connect per-process file descriptors to VFS open-file objects with independent offsets and safe cleanup on process exit.
+Implemented first slice: added `vfs.h`/`vfs.c`, mounted SimpleFS lazily as the root backend, added root-file stat/read-at/write/enumeration calls, and routed user file syscalls plus the desktop file-manager listing through VFS. The SimpleFS on-disk format is unchanged.\n\nRemaining milestones:\n1. Complete the audit of SimpleFS/FAT32 behavior, storage locking, and all direct backend callers.
+2. Define filesystem/mount/vnode objects and directory operations; the current adapter is intentionally a narrow compatibility layer.
+3. Implement hierarchical path resolution and mount-point lookup.
+4. Route remaining kernel and desktop file access through VFS instead of calling SimpleFS directly.
+5. Replace filename-backed descriptors with VFS open-file objects and reference-counted vnodes.
 6. Add directory and file operation tests, error-path tests, and concurrent access tests.
-7. Add a second filesystem backend only after the abstraction is stable (FAT32 is the first candidate).
+7. Add full FAT32 directory traversal and writes only after the abstraction is stable.
 
 Acceptance criteria:
 - Existing persistent files remain readable and writable without changing their on-disk format.
