@@ -697,6 +697,11 @@ int simplefs_write_file(const char *name, const void *data, uint32_t len) {
   g_table[idx].start_lba = start_lba;
   g_table[idx].size_bytes = len;
 
+  g_sb.file_count = 0;
+  for (uint32_t i = 0; i < SFS_MAX_FILES; ++i)
+    if (g_table[i].used)
+      ++g_sb.file_count;
+
   g_sb.next_free_lba = start_lba + sectors;
   if (!sfs_store_table())
     return 0;
@@ -798,8 +803,6 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
     *out_len = 0;
   if (!g_storage_ready || !name || (!out && maxlen != 0))
     return 0;
-  if (maxlen == 0)
-    return 1;
 
   uint32_t file_size = 0;
   uint32_t idx = 0;
@@ -815,7 +818,7 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
     return 0;
   }
 
-  if (offset >= file_size)
+  if (maxlen == 0 || offset >= file_size)
     return 1;
 
   uint32_t remaining = file_size - offset;
