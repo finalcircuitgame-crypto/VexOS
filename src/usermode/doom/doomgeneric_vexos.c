@@ -42,11 +42,11 @@ static void trace_arrow_event(uint8_t usage, int pressed) {
 #define TRACE_ARROW_CASE(code, label) \
     case code: \
         if (pressed) { \
-            message = "[CI] Doom backend received " label " down\\n"; \
-            length = sizeof("[CI] Doom backend received " label " down\\n") - 1u; \
+            message = "[CI] Doom backend received " label " down\n"; \
+            length = sizeof("[CI] Doom backend received " label " down\n") - 1u; \
         } else { \
-            message = "[CI] Doom backend received " label " released\\n"; \
-            length = sizeof("[CI] Doom backend received " label " released\\n") - 1u; \
+            message = "[CI] Doom backend received " label " released\n"; \
+            length = sizeof("[CI] Doom backend received " label " released\n") - 1u; \
         } \
         break
     switch (usage) {
