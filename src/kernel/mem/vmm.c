@@ -33,7 +33,8 @@ static page_table *get_or_create_table(page_table *parent, uint64_t index,
                                        uint64_t table_flags) {
     uint64_t entry = parent->entries[index];
     if (entry & PAGE_PRESENT) {
-        if (table_flags & PAGE_USER) parent->entries[index] |= PAGE_USER;
+        /* A large-page leaf is not a pointer to a lower-level table. */
+        if (entry & PAGE_LARGE) return NULL;
         return (page_table *)(uintptr_t)(entry & PHYSICAL_ADDRESS_MASK);
     }
 
@@ -96,8 +97,10 @@ static page_table *clone_table_tree(const page_table *source, uint32_t level) {
                 PMM_FreePage(copy);
                 return NULL;
             }
+            /* Preserve every non-address bit, including NX and software flags. */
             copy->entries[i] = ((uint64_t)(uintptr_t)child_copy &
-                                PHYSICAL_ADDRESS_MASK) | (entry & 0xFFFULL);
+                                PHYSICAL_ADDRESS_MASK) |
+                               (entry & ~PHYSICAL_ADDRESS_MASK);
         }
     }
     return copy;
@@ -121,12 +124,32 @@ static int map_page_in_root(page_table *root, void *virtual_addr,
     uint64_t pd_idx   = (v >> 21) & 0x1FF;
     uint64_t pt_idx   = (v >> 12) & 0x1FF;
 
+    int created_pdp = !(root->entries[pml4_idx] & PAGE_PRESENT);
     page_table *pdp = get_or_create_table(root, pml4_idx, table_flags);
     if (!pdp) return 0;
+
+    int created_pd = !(pdp->entries[pdp_idx] & PAGE_PRESENT);
     page_table *pd = get_or_create_table(pdp, pdp_idx, table_flags);
-    if (!pd) return 0;
+    if (!pd) {
+        if (created_pdp) {
+            root->entries[pml4_idx] = 0;
+            PMM_FreePage(pdp);
+        }
+        return 0;
+    }
+
     page_table *pt = get_or_create_table(pd, pd_idx, table_flags);
-    if (!pt) return 0;
+    if (!pt) {
+        if (created_pd) {
+            pdp->entries[pdp_idx] = 0;
+            PMM_FreePage(pd);
+        }
+        if (created_pdp) {
+            root->entries[pml4_idx] = 0;
+            PMM_FreePage(pdp);
+        }
+        return 0;
+    }
 
     uint64_t old_entry = pt->entries[pt_idx];
     uint64_t new_entry = (p & PHYSICAL_ADDRESS_MASK) |
@@ -140,7 +163,24 @@ static int map_page_in_root(page_table *root, void *virtual_addr,
         pt->entries[pt_idx] = new_entry;
     }
 
+    /* Promote ancestor permissions only after the leaf is committed. This
+       keeps a failed map from leaving partially modified user permissions. */
+    if (flags & PAGE_USER) {
+        root->entries[pml4_idx] |= PAGE_USER;
+        pdp->entries[pdp_idx] |= PAGE_USER;
+        pd->entries[pd_idx] |= PAGE_USER;
+    }
+
     __asm__ volatile ("invlpg (%0)" : : "r"(virtual_addr) : "memory");
+    return 1;
+}
+
+static int page_table_is_empty(const page_table *table) {
+    if (!table) return 1;
+    for (uint32_t i = 0; i < 512u; ++i) {
+        if (table->entries[i] & PAGE_PRESENT)
+            return 0;
+    }
     return 1;
 }
 
@@ -152,7 +192,7 @@ static int unmap_page_in_root(page_table *root, void *virtual_addr,
     uint64_t i4 = (v >> 39) & 0x1FF, i3 = (v >> 30) & 0x1FF;
     uint64_t i2 = (v >> 21) & 0x1FF, i1 = (v >> 12) & 0x1FF;
     uint64_t e4 = root->entries[i4];
-    if (!(e4 & PAGE_PRESENT)) return 0;
+    if (!(e4 & PAGE_PRESENT) || (e4 & PAGE_LARGE)) return 0;
     page_table *pdpt = (page_table *)(uintptr_t)(e4 & PHYSICAL_ADDRESS_MASK);
     uint64_t e3 = pdpt->entries[i3];
     if (!(e3 & PAGE_PRESENT) || (e3 & PAGE_LARGE)) return 0;
@@ -168,6 +208,21 @@ static int unmap_page_in_root(page_table *root, void *virtual_addr,
     __asm__ volatile ("invlpg (%0)" : : "r"(virtual_addr) : "memory");
     if (free_physical)
         PMM_FreePage((void *)(uintptr_t)(entry & PHYSICAL_ADDRESS_MASK));
+
+    /* Release now-empty page-table branches. Inherited kernel branches remain
+       populated and therefore cannot be pruned by this path. */
+    if (page_table_is_empty(pt)) {
+        pd->entries[i2] = 0;
+        PMM_FreePage(pt);
+        if (page_table_is_empty(pd)) {
+            pdpt->entries[i3] = 0;
+            PMM_FreePage(pd);
+            if (page_table_is_empty(pdpt)) {
+                root->entries[i4] = 0;
+                PMM_FreePage(pdpt);
+            }
+        }
+    }
     return 1;
 }
 
