@@ -1222,6 +1222,10 @@ int simplefs_read_file_at(const char *name, uint32_t offset, void *out,
   return 1;
 }
 
+uint32_t simplefs_path_limit(void) {
+  return g_kind == STORAGE_FS_SFS2 ? 127u : 31u;
+}
+
 int simplefs_is_mounted(void) {
   return g_kind != STORAGE_FS_NONE;
 }
