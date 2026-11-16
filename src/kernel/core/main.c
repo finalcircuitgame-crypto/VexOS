@@ -8,6 +8,7 @@
 #include "pmm.h"
 #include "simplefs.h"
 #include "task.h"
+#include "process.h"
 #include "vmm.h"
 #include "pci.h"
 #include <stddef.h>
@@ -1003,6 +1004,7 @@ void kernel_main(BootInfo *bootInfo) {
 #endif
 
   Task_Init();
+  Process_Init();
 #ifdef VEXOS_CI_INPUT_TEST
   extern void Task_CI_StartRuntimeTest(void);
   extern int Task_CI_RuntimeTestPassed(void);
