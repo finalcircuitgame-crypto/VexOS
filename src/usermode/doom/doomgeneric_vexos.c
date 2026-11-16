@@ -4,7 +4,6 @@
 #include "d_event.h"
 
 #define SYS_EXIT       0u
-#define SYS_TICKS      7u
 #define SYS_DRAW       9u
 #define SYS_KEY_EVENT 10u
 #define SYS_APP_READY 11u
@@ -33,181 +32,6 @@ static inline uint64_t vex_syscall3(uint64_t n, uint64_t a, uint64_t b,
                      : "a"(n), "D"(a), "S"(b), "d"(c)
                      : "memory", "rcx", "r11");
     return r;
-}
-
-static uint32_t log_append_text(char *buffer, uint32_t offset,
-                                const char *value) {
-    while (value && *value)
-        buffer[offset++] = *value++;
-    return offset;
-}
-
-static uint32_t log_append_u64(char *buffer, uint32_t offset, uint64_t value) {
-    char digits[20];
-    uint32_t count = 0;
-    do {
-        digits[count++] = (char)('0' + (value % 10u));
-        value /= 10u;
-    } while (value && count < sizeof(digits));
-    while (count)
-        buffer[offset++] = digits[--count];
-    return offset;
-}
-
-static uint32_t log_append_i32(char *buffer, uint32_t offset, int32_t value) {
-    uint32_t magnitude;
-    if (value < 0) {
-        buffer[offset++] = '-';
-        magnitude = (uint32_t)(-(value + 1)) + 1u;
-    } else {
-        magnitude = (uint32_t)value;
-    }
-    return log_append_u64(buffer, offset, magnitude);
-}
-
-/*
- * Log the actual ticcmd produced by Doom after all keyboard, mouse, and
- * joystick inputs have been combined. This is distinct from KEYSYNC, which
- * only reports the kernel HID snapshot copied into gamekeydown[].
- */
-void VEXOS_DoomTraceTiccmd(int maketic, int angleturn,
-                           int forwardmove, int sidemove) {
-    static int previous_valid;
-    static int previous_turn;
-    static int previous_forward;
-    static int previous_side;
-
-    if (previous_valid && angleturn == previous_turn &&
-        forwardmove == previous_forward && sidemove == previous_side)
-        return;
-
-    previous_valid = 1;
-    previous_turn = angleturn;
-    previous_forward = forwardmove;
-    previous_side = sidemove;
-
-    char message[160];
-    uint32_t length = 0;
-    int active = angleturn != 0 || forwardmove != 0 || sidemove != 0;
-    length = log_append_text(message, length, "[DOOM][CMD] tick=");
-    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
-    length = log_append_text(message, length, " tic=");
-    length = log_append_i32(message, length, maketic);
-    length = log_append_text(message, length, active ? " state=ACTIVE" : " state=NEUTRAL");
-    length = log_append_text(message, length, " turn=");
-    length = log_append_i32(message, length, angleturn);
-    length = log_append_text(message, length, " forward=");
-    length = log_append_i32(message, length, forwardmove);
-    length = log_append_text(message, length, " side=");
-    length = log_append_i32(message, length, sidemove);
-    message[length++] = '\n';
-    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
-}
-
-
-/*
- * Trace the actual player object after P_PlayerThink has applied the ticcmd
- * and world movement. This separates held input from residual world momentum.
- */
-void VEXOS_DoomTracePlayerState(int leveltime, int angleturn,
-                                int forwardmove, int sidemove,
-                                int momx, int momy, unsigned int angle) {
-    static int previous_valid;
-    static int previous_angleturn;
-    static int previous_forward;
-    static int previous_side;
-    static int previous_momx;
-    static int previous_momy;
-    static unsigned int previous_angle;
-
-    if (previous_valid && angleturn == previous_angleturn &&
-        forwardmove == previous_forward && sidemove == previous_side &&
-        momx == previous_momx && momy == previous_momy &&
-        angle == previous_angle)
-        return;
-
-    previous_valid = 1;
-    previous_angleturn = angleturn;
-    previous_forward = forwardmove;
-    previous_side = sidemove;
-    previous_momx = momx;
-    previous_momy = momy;
-    previous_angle = angle;
-
-    char message[224];
-    uint32_t length = 0;
-    length = log_append_text(message, length, "[DOOM][PLAYER] tick=");
-    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
-    length = log_append_text(message, length, " leveltic=");
-    length = log_append_i32(message, length, leveltime);
-    length = log_append_text(message, length, " cmd_turn=");
-    length = log_append_i32(message, length, angleturn);
-    length = log_append_text(message, length, " cmd_forward=");
-    length = log_append_i32(message, length, forwardmove);
-    length = log_append_text(message, length, " cmd_side=");
-    length = log_append_i32(message, length, sidemove);
-    length = log_append_text(message, length, " momx=");
-    length = log_append_i32(message, length, momx);
-    length = log_append_text(message, length, " momy=");
-    length = log_append_i32(message, length, momy);
-    length = log_append_text(message, length, " angle=");
-    length = log_append_u64(message, length, angle);
-    length = log_append_text(message, length,
-        (momx == 0 && momy == 0) ? " momentum=STOPPED\n" : " momentum=ACTIVE\n");
-    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
-}
-
-static const char *arrow_label_from_usage(uint8_t usage) {
-    switch (usage) {
-        case 0x4F: return "RIGHT";
-        case 0x50: return "LEFT";
-        case 0x51: return "DOWN";
-        case 0x52: return "UP";
-        default: return 0;
-    }
-}
-
-static void log_arrow_transition(const char *stage, uint8_t usage,
-                                 int pressed, const char *source) {
-    const char *key = arrow_label_from_usage(usage);
-    if (!key)
-        return;
-
-    char message[128];
-    uint32_t length = 0;
-    length = log_append_text(message, length, "[DOOM] tick=");
-    length = log_append_u64(message, length, vex_syscall0(SYS_TICKS));
-    length = log_append_text(message, length, " stage=");
-    length = log_append_text(message, length, stage);
-    length = log_append_text(message, length, " key=");
-    length = log_append_text(message, length, key);
-    length = log_append_text(message, length, " state=");
-    length = log_append_text(message, length, pressed ? "DOWN" : "UP");
-    length = log_append_text(message, length, " source=");
-    length = log_append_text(message, length, source);
-    message[length++] = '\n';
-    (void)vex_syscall3(1u, (uint64_t)(uintptr_t)message, length, 0);
-}
-
-static void log_arrow_ticcmd_state(uint8_t state) {
-    static uint8_t previous_state;
-    static uint8_t state_valid;
-    static const uint8_t bits[4] = {1u, 2u, 4u, 8u};
-    static const uint8_t usages[4] = {0x4Fu, 0x50u, 0x51u, 0x52u};
-
-    if (!state_valid) {
-        previous_state = state;
-        state_valid = 1u;
-        return;
-    }
-
-    uint8_t changed = (uint8_t)(previous_state ^ state);
-    previous_state = state;
-    for (uint32_t i = 0; i < 4u; ++i) {
-        if (changed & bits[i])
-            log_arrow_transition("KEYSYNC", usages[i],
-                                 (state & bits[i]) != 0, "kernel-snapshot");
-    }
 }
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -310,7 +134,6 @@ void VEXOS_DoomSyncArrowKeys(unsigned int *keys, int key_right, int key_left,
     if (key_up > 0 && key_up < 256)
         keys[key_up] = (state & 8u) ? 1u : 0u;
 
-    log_arrow_ticcmd_state(state);
     trace_arrow_sync_state(state);
 }
 
@@ -501,7 +324,6 @@ static int reconcile_arrow_state(int *pressed, unsigned char *key) {
             if (key)
                 *key = arrow_key_from_index(i);
             uint8_t usage = (uint8_t)(i == 0u ? 0x4Fu : i == 1u ? 0x50u : i == 2u ? 0x51u : 0x52u);
-            log_arrow_transition("EVENT", usage, (actual & bit) != 0, "state-reconcile");
             trace_arrow_event(usage, (actual & bit) != 0);
             return 1;
         }
@@ -536,7 +358,6 @@ int DG_GetKey(int *pressed, unsigned char *key) {
             else
                 arrow_state &= (uint8_t)~bit;
             arrow_state_valid = 1;
-            log_arrow_transition("EVENT", usage, is_pressed, "event-queue");
             trace_arrow_event(usage, is_pressed);
         }
 
