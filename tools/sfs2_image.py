@@ -18,8 +18,10 @@ NAME_MAX = 48
 INODE_MAX = 256
 SFS1_MAGIC = 0x31465353
 SFS1_VERSION = 1
-SB = struct.Struct("<IHHIQQQI QIIQI I440s")
+SB = struct.Struct("<IHHIQQQI QIIQI IQI428s")
 INODE = struct.Struct("<IIBBH48sQQIII8s")
+JOURNAL = struct.Struct("<IIIIQ8Q8I392s")
+JOURNAL_SECTORS = 1 + 8
 SFS1_SB = struct.Struct("<8I")
 SFS1_ENTRY = struct.Struct("<B32sIII")
 
@@ -110,7 +112,9 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
         seen.add(name)
         prepared.append((encoded, data))
 
-    bitmap_lba = 1
+    journal_lba = 1
+    journal_sectors = JOURNAL_SECTORS
+    bitmap_lba = journal_lba + journal_sectors
     bitmap_sectors = ceildiv(volume_sectors, SECTOR * 8)
     inode_lba = bitmap_lba + bitmap_sectors
     inode_sectors = ceildiv(inode_capacity * INODE.size, SECTOR)
@@ -149,7 +153,8 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
 
     sb = bytearray(SB.pack(MAGIC, VERSION, SECTOR, SECTOR, volume_sectors, 1,
                            bitmap_lba, bitmap_sectors, inode_lba, inode_sectors,
-                           inode_capacity, data_lba, 1, 0, bytes(440)))
+                           inode_capacity, data_lba, 1, 0,
+                           journal_lba, journal_sectors, bytes(428)))
     struct.pack_into("<I", sb, 68, checksum(sb, 68))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +171,8 @@ def build_image(destination: Path, volume_sectors: int, files: list[tuple[str, b
             if padded > len(data):
                 f.write(bytes(padded - len(data)))
             cursor += ceildiv(len(data), SECTOR)
-    return {"sectors": volume_sectors, "files": len(files), "data_lba": data_lba,
+    return {"sectors": volume_sectors, "files": len(files), "journal_lba": journal_lba,
+            "journal_sectors": journal_sectors, "data_lba": data_lba,
             "used_sectors": cursor - data_lba, "inode_capacity": inode_capacity}
 
 
@@ -181,13 +187,20 @@ def verify_image(image: Path):
         fields = SB.unpack(raw)
         (magic, version, header_size, sector_size, volume, _generation,
          bitmap_lba, bitmap_n, inode_lba, inode_n, cap, data_lba,
-         root, sb_sum, _reserved) = fields
+         root, sb_sum, journal_lba, journal_n, _reserved) = fields
         if (magic, version, header_size, sector_size) != (MAGIC, VERSION, SECTOR, SECTOR):
             raise ValueError("invalid SFS2 signature/version/header")
         if volume != size // SECTOR or root != 1 or sb_sum != checksum(raw, 68):
             raise ValueError("superblock checksum or geometry mismatch")
-        if not 1 <= cap <= INODE_MAX or bitmap_lba < 1 or bitmap_n == 0 or inode_n == 0:
+        if not 1 <= cap <= INODE_MAX or bitmap_n == 0 or inode_n == 0:
             raise ValueError("invalid SFS2 metadata capacity or region size")
+        if (journal_lba < 1 or journal_n < JOURNAL_SECTORS or
+                journal_lba + journal_n > bitmap_lba):
+            raise ValueError("invalid SFS2 journal region")
+        f.seek(journal_lba * SECTOR)
+        journal_header = f.read(SECTOR)
+        if len(journal_header) != SECTOR or journal_header != bytes(SECTOR):
+            raise ValueError("SFS2 image contains an un-replayed journal")
         bitmap_end = bitmap_lba + bitmap_n
         inode_end = inode_lba + inode_n
         if (bitmap_end < bitmap_lba or inode_lba < bitmap_end or
