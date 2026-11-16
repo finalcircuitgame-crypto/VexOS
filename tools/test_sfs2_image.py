@@ -35,6 +35,31 @@ class SFS2ImageTests(unittest.TestCase):
                     }[name]
                     self.assertEqual(payload, expected)
 
+    def test_formats_and_verifies_nested_directory_tree(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "nested.img"
+            image.build_image(path, 256, [
+                ("docs/notes/readme.txt", b"nested payload"),
+                ("docs/assets/empty.bin", b""),
+                ("projects/vexos/info.txt", b"VexOS"),
+            ], 24)
+            verified = image.verify_image(path)
+            self.assertEqual(
+                [entry[0] for entry in verified["files"]],
+                ["docs/notes/readme.txt", "docs/assets/empty.bin",
+                 "projects/vexos/info.txt"],
+            )
+
+    def test_rejects_file_as_parent_of_nested_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "conflict.img"
+            with self.assertRaisesRegex(ValueError, "file cannot be a parent"):
+                image.build_image(path, 128, [
+                    ("node", b"file"),
+                    ("node/child.txt", b"child"),
+                ], 16)
+            self.assertFalse(path.exists())
+
     def test_formats_and_verifies_file_larger_than_2_mib(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "large.img"
