@@ -2,7 +2,7 @@ name: VexOS CI
 
 on:
   push:
-    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework, feature/sfs2-foundation]
+    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework]
   pull_request:
     branches: [main]
   workflow_dispatch:
