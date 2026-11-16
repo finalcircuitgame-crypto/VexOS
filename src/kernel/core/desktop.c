@@ -4,6 +4,7 @@
 #include "../../include/hw_profile.h"
 #include "../../include/usermode.h"
 #include "../../include/task.h"
+#include "../../include/process.h"
 #include "../../include/simplefs.h"
 #include "../../include/ramfs.h"
 #include "../../include/png.h"
