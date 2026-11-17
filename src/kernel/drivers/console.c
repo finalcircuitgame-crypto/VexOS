@@ -48,9 +48,9 @@ void ConsoleInit(BootInfo *bootInfo) {
 static uint8_t console_font_coverage(uint8_t character,
                                      uint32_t x, uint32_t y) {
     uint32_t pixel = (uint32_t)character * 64u + y * 8u + x;
-    uint8_t packed = _binary_font_atlas_bin_start[pixel >> 2];
-    uint8_t shift = (uint8_t)(6u - ((pixel & 3u) * 2u));
-    return (uint8_t)(((packed >> shift) & 3u) * 85u);
+    uint8_t packed = _binary_font_atlas_bin_start[pixel >> 1];
+    uint8_t shift = (pixel & 1u) ? 0u : 4u;
+    return (uint8_t)(((packed >> shift) & 15u) * 17u);
 }
 
 static uint32_t console_blend(uint32_t background, uint32_t foreground,
