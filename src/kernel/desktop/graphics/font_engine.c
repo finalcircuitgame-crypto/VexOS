@@ -1,6 +1,7 @@
 #include "font_engine.h"
 
 #include <stddef.h>
+#include <string.h>
 #include <stdint.h>
 
 #include "../../../include/heap.h"
