@@ -73,8 +73,11 @@ static void icmp_receive(net_device_t *device,
     ++g_stats.rx_echo_requests;
 
     /* Never answer an IPv4 broadcast or an unspecified source address. */
-    if (info->source == 0u || info->destination == 0xFFFFFFFFu ||
-        (info->destination & 0xFFu) == 0xFFu) {
+    ipv4_config_t config;
+    if (info->source == 0u || !ipv4_get_config(device, &config) ||
+        info->destination == 0xFFFFFFFFu ||
+        info->destination == ((config.address & config.netmask) |
+                              ~config.netmask)) {
         ++g_stats.rx_other;
         return;
     }
