@@ -17,6 +17,7 @@
 #include "pci.h"
 #include "netdev.h"
 #include "ethernet.h"
+#include "arp.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1232,8 +1233,10 @@ void kernel_main(BootInfo *bootInfo) {
   // device registry only after the kernel heap and VMM are ready.
   netdev_init();
   ethernet_init();
+  if (!arp_init())
+    serial_print("[ARP] Failed to register ARP protocol handler\n");
   netdev_set_receive_handler(ethernet_receive);
-  serial_print("[NET] Network-device registry and Ethernet II dispatcher initialized\n");
+  serial_print("[NET] Network-device registry, Ethernet II dispatcher, and ARP initialized\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
@@ -1343,6 +1346,7 @@ void kernel_main(BootInfo *bootInfo) {
     // Poll network rings in task context; this first driver does not enable
     // device interrupts until VexOS has general IRQ routing.
     netdev_poll_all(16u);
+    arp_poll();
 
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
     xhci_poll_events_atomic();
@@ -1366,6 +1370,7 @@ void kernel_main(BootInfo *bootInfo) {
         // while the desktop renderer remains frame-rate limited.
         xhci_poll_events_atomic();
         netdev_poll_all(16u);
+        arp_poll();
         // Desktop rendering stays on the frame cadence below. Calling
         // desktop_tick() here used to repaint the full scene on every PIT
         // wakeup (up to 1000 times/second), starving window interaction.
