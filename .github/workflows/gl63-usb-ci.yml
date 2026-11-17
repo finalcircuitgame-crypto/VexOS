@@ -132,6 +132,8 @@ jobs:
           }
           trap cleanup EXIT
 
+          # First require the controller to start, then wait for the guest's
+          # synchronous root-port enumeration pass to finish.
           deadline=$((SECONDS + 90))
           while (( SECONDS < deadline )); do
             if grep -Fq "[xHCI] Controller Running" serial.log; then
@@ -158,15 +160,90 @@ jobs:
             exit 1
           fi
 
-          if grep -Fq "[KERNEL] FATAL:" serial.log; then
-            echo "Kernel fatal error detected after xHCI initialization."
+          enumeration_deadline=$((SECONDS + 90))
+          while (( SECONDS < enumeration_deadline )); do
+            if grep -Fq "[xHCI][SUMMARY]" serial.log; then
+              break
+            fi
+            if grep -Fq "[KERNEL] FATAL:" serial.log; then
+              echo "Kernel fatal error during USB enumeration:"
+              cat serial.log
+              exit 1
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before USB enumeration completed."
+              cat qemu.log
+              cat serial.log
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          if ! grep -Fq "[xHCI][SUMMARY]" serial.log; then
+            echo "Timed out waiting for the xHCI root-port enumeration summary."
+            cat qemu.log
             cat serial.log
             exit 1
           fi
 
-          echo "PASS: VexOS booted under Q35/UEFI and brought the emulated xHCI controller to the running state."
-          echo "NOTE: USB device enumeration and class-driver operation are not claimed by this smoke test."
-          grep -E "\\[PCI\\]|\\[xHCI\\]" serial.log || true
+          if grep -Fq "[KERNEL] FATAL:" serial.log; then
+            echo "Kernel fatal error detected during xHCI enumeration."
+            cat serial.log
+            exit 1
+          fi
+
+          # QEMU attaches a USB keyboard, tablet (HID mouse), and mass-storage
+          # device. Require all three to be connected, addressed, and described.
+          # The current kernel does not implement a USB mass-storage class
+          # driver, so this test deliberately stops at descriptor/config setup.
+          count_matches() {
+            local pattern="$1"
+            grep -cF "$pattern" serial.log || true
+          }
+
+          connected_count="$(grep -oE 'connected=[0-9]+' serial.log | tail -n1 | cut -d= -f2)"
+          addressed_count="$(grep -oE 'addressed=[0-9]+' serial.log | tail -n1 | cut -d= -f2)"
+          descriptor_count="$(count_matches '[USB] Device Descriptor VID:PID=')"
+          config_count="$(count_matches '[USB] Config total_len=')"
+          set_config_count="$(count_matches '[USB] SET_CONFIGURATION done')"
+          hid_armed_count="$(count_matches '[HID] Interrupt IN armed')"
+
+          echo "USB enumeration results:"
+          echo "  connected ports:       ${connected_count:-0}"
+          echo "  addressed devices:     ${addressed_count:-0}"
+          echo "  device descriptors:    ${descriptor_count}"
+          echo "  configuration reads:   ${config_count}"
+          echo "  configurations set:    ${set_config_count}"
+          echo "  HID interrupt IN armed:${hid_armed_count}"
+
+          failures=0
+          require_minimum() {
+            local label="$1"
+            local actual="${2:-0}"
+            local expected="$3"
+            if (( actual < expected )); then
+              echo "FAIL: expected at least ${expected} ${label}, got ${actual}."
+              failures=$((failures + 1))
+            fi
+          }
+
+          require_minimum "connected USB devices" "$connected_count" 3
+          require_minimum "addressed USB devices" "$addressed_count" 3
+          require_minimum "successful device descriptors" "$descriptor_count" 3
+          require_minimum "successful configuration descriptor reads" "$config_count" 3
+          require_minimum "SET_CONFIGURATION completions" "$set_config_count" 3
+          require_minimum "HID interrupt-IN endpoints armed" "$hid_armed_count" 2
+
+          if (( failures > 0 )); then
+            echo "USB enumeration smoke test failed. Full serial log follows:"
+            cat serial.log
+            exit 1
+          fi
+
+          echo "PASS: VexOS detected, addressed, and read descriptors for the three emulated USB devices."
+          echo "PASS: Both emulated HID devices reached interrupt-IN endpoint setup."
+          echo "NOTE: USB mass-storage data transfers and live HID input are not tested by this CI job."
+          grep -E "\\[PCI\\]|\\[xHCI\\]|\\[USB\\]|\\[HID\\]" serial.log || true
 
       - name: Upload boot diagnostics
         if: always()
