@@ -6,3 +6,5 @@
 *.nsh
 *.img
 *.elf
+# Locally generated font atlas from tools/prepare_font_atlas.py.
+assets/fonts/font_atlas.bin
