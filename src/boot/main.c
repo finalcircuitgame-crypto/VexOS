@@ -2,11 +2,6 @@
 #include <efilib.h>
 #include <elf.h>
 #include "bootinfo.h"
-#include "uefi_bootlog.h"
-
-#ifndef EFI_MEMORY_RUNTIME
-#define EFI_MEMORY_RUNTIME 0x8000000000000000ull
-#endif
 
 #define ELF_MAX_LOAD_SEGMENTS 128u
 #define ELF_PF_X 1u
@@ -97,185 +92,6 @@ static EFI_STATUS LoadKernelFile(EFI_HANDLE image_handle,
     return EFI_SUCCESS;
 }
 
-
-/*
- * Export the previous kernel's UEFI-variable checkpoint to the FAT boot
- * volume. This runs before ExitBootServices(), so UEFI file protocols are
- * still available even when the kernel's USB controller driver is broken.
- */
-static EFI_STATUS ExportPreviousBootLog(EFI_HANDLE image_handle,
-                                         EFI_SYSTEM_TABLE *system_table) {
-    if (!system_table || !system_table->RuntimeServices ||
-        !system_table->RuntimeServices->GetVariable ||
-        !system_table->RuntimeServices->SetVariable)
-        return EFI_UNSUPPORTED;
-
-    UINT8 record[sizeof(VexOSBootLogHeader) +
-                 VEXOS_BOOTLOG_MAX_PAYLOAD] __attribute__((aligned(8)));
-    UINTN record_size = sizeof(record);
-    UINT32 attributes = 0;
-    EFI_STATUS status = system_table->RuntimeServices->GetVariable(
-        (CHAR16 *)VEXOS_BOOTLOG_VARIABLE_NAME,
-        (EFI_GUID *)&VEXOS_BOOTLOG_VENDOR_GUID,
-        &attributes, &record_size, record);
-    if (status == EFI_NOT_FOUND)
-        return status;
-    if (EFI_ERROR(status))
-        return status;
-
-    if (record_size < sizeof(VexOSBootLogHeader) ||
-        record_size > sizeof(record))
-        return EFI_LOAD_ERROR;
-
-    VexOSBootLogHeader header;
-    CopyMem(&header, record, sizeof(header));
-    if (header.magic != VEXOS_BOOTLOG_MAGIC ||
-        header.version != VEXOS_BOOTLOG_VERSION ||
-        header.header_size != sizeof(VexOSBootLogHeader) ||
-        header.payload_size > VEXOS_BOOTLOG_MAX_PAYLOAD ||
-        record_size != sizeof(VexOSBootLogHeader) + header.payload_size ||
-        vexos_bootlog_checksum(record + sizeof(VexOSBootLogHeader),
-                               header.payload_size) != header.checksum) {
-        Print(L"[VexOS] Previous UEFI boot log was invalid; leaving it untouched\n");
-        return EFI_LOAD_ERROR;
-    }
-
-    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *filesystem = NULL;
-    EFI_FILE *root = NULL;
-    EFI_FILE *file = NULL;
-    EFI_FILE_INFO *file_info = NULL;
-    UINTN info_size = 0;
-
-    status = system_table->BootServices->HandleProtocol(
-        image_handle, &gEfiLoadedImageProtocolGuid, (void **)&loaded_image);
-    if (EFI_ERROR(status) || !loaded_image)
-        return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
-
-    status = system_table->BootServices->HandleProtocol(
-        loaded_image->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid,
-        (void **)&filesystem);
-    if (EFI_ERROR(status) || !filesystem)
-        return EFI_ERROR(status) ? status : EFI_UNSUPPORTED;
-
-    status = filesystem->OpenVolume(filesystem, &root);
-    if (EFI_ERROR(status) || !root)
-        return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
-
-    status = root->Open(root, &file, L"boot.log",
-                        EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE |
-                            EFI_FILE_MODE_CREATE,
-                        0);
-    if (EFI_ERROR(status) || !file) {
-        root->Close(root);
-        return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
-    }
-
-    status = file->SetPosition(file, 0);
-    if (!EFI_ERROR(status)) {
-        UINTN bytes_to_write = header.payload_size;
-        status = file->Write(file, &bytes_to_write,
-                             record + sizeof(VexOSBootLogHeader));
-        if (!EFI_ERROR(status) && bytes_to_write != header.payload_size)
-            status = EFI_DEVICE_ERROR;
-    }
-
-    if (!EFI_ERROR(status)) {
-        status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, NULL);
-        if (status == EFI_BUFFER_TOO_SMALL && info_size != 0) {
-            status = system_table->BootServices->AllocatePool(
-                EfiLoaderData, info_size, (void **)&file_info);
-            if (!EFI_ERROR(status)) {
-                status = file->GetInfo(file, &gEfiFileInfoGuid,
-                                       &info_size, file_info);
-                if (!EFI_ERROR(status)) {
-                    file_info->FileSize = header.payload_size;
-                    status = file->SetInfo(file, &gEfiFileInfoGuid,
-                                           info_size, file_info);
-                }
-                system_table->BootServices->FreePool(file_info);
-                file_info = NULL;
-            }
-        } else if (!EFI_ERROR(status)) {
-            status = EFI_DEVICE_ERROR;
-        }
-    }
-
-    file->Close(file);
-    root->Close(root);
-    if (EFI_ERROR(status))
-        return status;
-
-    Print(L"[VexOS] Exported previous boot checkpoint to boot.log (%u bytes)\n",
-          header.payload_size);
-
-    /* Clear only after the complete file write and truncate have succeeded. */
-    status = system_table->RuntimeServices->SetVariable(
-        (CHAR16 *)VEXOS_BOOTLOG_VARIABLE_NAME,
-        (EFI_GUID *)&VEXOS_BOOTLOG_VENDOR_GUID,
-        0, 0, NULL);
-    if (EFI_ERROR(status))
-        Print(L"[VexOS] Warning: exported log, but could not clear NVRAM copy (%r)\n",
-              status);
-
-    return EFI_SUCCESS;
-}
-
-static int CaptureRuntimeRegions(EFI_SYSTEM_TABLE *system_table,
-                                 EFI_MEMORY_DESCRIPTOR *map,
-                                 UINTN map_size, UINTN descriptor_size,
-                                 BootInfo *boot_info) {
-    if (!boot_info)
-        return 0;
-    boot_info->RuntimeSetVariable = 0;
-    boot_info->RuntimeRegionCount = 0;
-
-    if (!system_table || !system_table->RuntimeServices ||
-        !system_table->RuntimeServices->SetVariable || !map || !boot_info ||
-        descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR))
-        return 0;
-
-    UINT64 set_variable = (UINT64)(UINTN)
-        system_table->RuntimeServices->SetVariable;
-    UINT32 count = 0;
-    int set_variable_is_runtime = 0;
-
-    for (UINTN offset = 0; offset + descriptor_size <= map_size;
-         offset += descriptor_size) {
-        EFI_MEMORY_DESCRIPTOR *desc =
-            (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + offset);
-        if (!(desc->Attribute & EFI_MEMORY_RUNTIME) ||
-            desc->NumberOfPages == 0)
-            continue;
-
-        if (desc->NumberOfPages > (~(UINT64)0) / EFI_PAGE_SIZE)
-            return 0;
-        UINT64 bytes = desc->NumberOfPages * EFI_PAGE_SIZE;
-        if (desc->PhysicalStart > (~(UINT64)0) - bytes)
-            return 0;
-        UINT64 end = desc->PhysicalStart + bytes;
-
-        if (count >= BOOTINFO_MAX_RUNTIME_REGIONS)
-            return 0;
-
-        boot_info->RuntimeRegions[count].Base = desc->PhysicalStart;
-        boot_info->RuntimeRegions[count].Pages = desc->NumberOfPages;
-        ++count;
-
-        if (set_variable >= desc->PhysicalStart && set_variable < end)
-            set_variable_is_runtime = 1;
-    }
-
-    if (!set_variable_is_runtime || count == 0) {
-        boot_info->RuntimeRegionCount = 0;
-        boot_info->RuntimeSetVariable = 0;
-        return 0;
-    }
-
-    boot_info->RuntimeRegionCount = count;
-    boot_info->RuntimeSetVariable = set_variable;
-    return 1;
-}
 
 static void FreeLoadedSegments(EFI_BOOT_SERVICES *boot_services,
                                LoadedSegment *segments, UINTN count) {
@@ -456,15 +272,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
     Print(L"VexOS 2.0.0-dev UEFI bootloader initializing...\n");
 
-    EFI_STATUS previous_log_status =
-        ExportPreviousBootLog(ImageHandle, SystemTable);
-    if (previous_log_status != EFI_SUCCESS &&
-        previous_log_status != EFI_NOT_FOUND &&
-        previous_log_status != EFI_UNSUPPORTED) {
-        Print(L"[VexOS] Previous boot log export unavailable (%r)\n",
-              previous_log_status);
-    }
-
     status = LoadKernelFile(ImageHandle, SystemTable,
                             &kernel_buffer, &kernel_size);
     if (EFI_ERROR(status)) {
@@ -496,9 +303,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     boot_info.pitch = gop->Mode->Info->PixelsPerScanLine;
     boot_info.LargestFreeRegion.Base = 0;
     boot_info.LargestFreeRegion.Size = 0;
-    boot_info.RuntimeSetVariable = 0;
-    boot_info.RuntimeRegionCount = 0;
-    boot_info.RuntimeReserved = 0;
 
     // ExitBootServices requires a fresh map key. Retry a few times if the
     // firmware reports that the key changed between GetMemoryMap and exit.
@@ -524,14 +328,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
             Print(L"VexOS: no usable conventional memory region\n");
             return EFI_OUT_OF_RESOURCES;
         }
-
-        /*
-         * Preserve every EFI_MEMORY_RUNTIME range. The kernel replaces the
-         * firmware page tables, so these pages must be identity-mapped before
-         * it invokes Runtime Services such as SetVariable().
-         */
-        (void)CaptureRuntimeRegions(SystemTable, memory_map, memory_map_size,
-                                    descriptor_size, &boot_info);
 
         status = SystemTable->BootServices->ExitBootServices(ImageHandle, map_key);
         if (!EFI_ERROR(status)) {
