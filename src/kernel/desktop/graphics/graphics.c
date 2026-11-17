@@ -368,7 +368,7 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
 }
 
 void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold) {
-  if ((uint32_t)family > (uint32_t)GFX_FONT_DEJAVU_MONO)
+  if ((uint32_t)family > (uint32_t)GFX_FONT_NOTO_SERIF)
     family = GFX_FONT_INTER;
   if (scale < 1u) scale = 1u;
   if (scale > 3u) scale = 3u;
