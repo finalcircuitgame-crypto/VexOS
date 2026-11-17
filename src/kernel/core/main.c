@@ -1194,7 +1194,7 @@ void kernel_main(BootInfo *bootInfo) {
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
 
   if (FontEngine_Init()) {
-    serial_print("[FONT] stb_truetype runtime initialized (4 families, regular/bold)\n");
+    serial_print("[FONT] stb_truetype runtime initialized (6 families, regular/bold)\n");
 #ifdef VEXOS_CI_INPUT_TEST
     if (!FontEngine_SelfTest())
       ci_memory_test_fail("TrueType font loading, metrics, or glyph rasterization");
