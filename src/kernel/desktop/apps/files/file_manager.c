@@ -402,6 +402,7 @@ static file_manager_event_t fm_open_storage_index(
       !fm_get_name(storage_index, name) ||
       !fm_build_path(name, full_path, sizeof(full_path))) {
     fm_set_status("Select an item first");
+    wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
 
@@ -412,6 +413,7 @@ static file_manager_event_t fm_open_storage_index(
     g_last_click_index = 0xFFFFFFFFu;
     fm_refresh();
     fm_set_status("Folder opened");
+    wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
 
@@ -781,18 +783,15 @@ file_manager_event_t file_manager_handle_click(
              (int32_t)(by + 10u), 56, 23)) {
     g_search_focused = 0;
     g_delete_armed = 0;
-    file_manager_event_t result =
-        fm_open_storage_index(g_selected, open_file);
-    wm_raise(APP_EXPLORER);
-    return result;
+    return fm_open_storage_index(g_selected, open_file);
   }
   if (list_panel_w > 450u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 204u),
              (int32_t)(by + 10u), 68, 23)) {
     g_search_focused = 0;
     g_delete_armed = 0;
-    fm_create_file(open_file);
     wm_raise(APP_EXPLORER);
+    fm_create_file(open_file);
     return FILE_MANAGER_EVENT_CHANGED;
   }
   if (list_panel_w > 450u &&
