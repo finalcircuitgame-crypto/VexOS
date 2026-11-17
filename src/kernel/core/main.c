@@ -19,6 +19,7 @@
 #include "ethernet.h"
 #include "arp.h"
 #include "ipv4.h"
+#include "icmp.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1239,7 +1240,7 @@ void kernel_main(BootInfo *bootInfo) {
   if (!ipv4_init())
     serial_print("[IPv4] Failed to register IPv4 protocol handler\n");
   netdev_set_receive_handler(ethernet_receive);
-  serial_print("[NET] Network-device registry, Ethernet II, ARP, and IPv4 core initialized (address configuration pending)\n");
+  serial_print("[NET] Network-device registry, Ethernet II, ARP, IPv4, and ICMPv4 echo initialized (address configuration pending)\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
