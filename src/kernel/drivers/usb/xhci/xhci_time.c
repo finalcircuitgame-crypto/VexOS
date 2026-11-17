@@ -12,6 +12,7 @@
 
 static uint64_t g_tsc_hz;
 static uint8_t g_time_initialized;
+static const char *g_tsc_source = "uninitialized";
 
 static inline uint64_t xhci_rdtsc(void) {
     uint32_t lo, hi;
@@ -118,10 +119,25 @@ void xhci_time_init(void) {
 
     g_time_initialized = 1;
     g_tsc_hz = xhci_tsc_hz_from_cpuid();
-    if (!g_tsc_hz)
-        g_tsc_hz = xhci_tsc_hz_from_pit();
-    if (!g_tsc_hz)
-        g_tsc_hz = xhci_tsc_hz_from_cpuid_leaf16();
+    if (g_tsc_hz) {
+        g_tsc_source = "CPUID.15";
+        return;
+    }
+
+    g_tsc_hz = xhci_tsc_hz_from_pit();
+    if (g_tsc_hz) {
+        g_tsc_source = "PIT-channel-2";
+        return;
+    }
+
+    g_tsc_hz = xhci_tsc_hz_from_cpuid_leaf16();
+    if (g_tsc_hz) {
+        g_tsc_source = "CPUID.16-estimate";
+        return;
+    }
+
+    /* This fallback bounds waits but is an estimate, not a calibration. */
+    g_tsc_source = "1GHz-fallback";
 }
 
 /* Returns a TSC deadline. The 1 GHz fallback keeps waits finite on unusual CPUs
@@ -152,4 +168,55 @@ uint64_t xhci_time_frequency_hz(void) {
     if (!g_time_initialized)
         xhci_time_init();
     return g_tsc_hz;
+}
+
+uint64_t xhci_time_now_ticks(void) {
+    return xhci_rdtsc();
+}
+
+static void xhci_time_print_u64(uint64_t value) {
+    char buf[21];
+    uint32_t used = 0;
+    if (value == 0) {
+        serial_print("0");
+        return;
+    }
+    while (value && used < sizeof(buf)) {
+        buf[used++] = (char)('0' + (value % 10u));
+        value /= 10u;
+    }
+    while (used) {
+        char digit[2] = {buf[--used], 0};
+        serial_print(digit);
+    }
+}
+
+void xhci_time_log_clock(void) {
+    if (!g_time_initialized)
+        xhci_time_init();
+
+    serial_print("[xHCI][TIME] source=");
+    serial_print(g_tsc_source);
+    serial_print(" tsc_hz=");
+    xhci_time_print_u64(g_tsc_hz ? g_tsc_hz : 1000000000ull);
+    if (!g_tsc_hz)
+        serial_print(" (fallback estimate)");
+    serial_print("\n");
+}
+
+void xhci_time_log_elapsed(const char *stage, uint64_t start_ticks,
+                           const char *result) {
+    uint64_t hz = g_tsc_hz ? g_tsc_hz : 1000000000ull;
+    uint64_t delta = xhci_rdtsc() - start_ticks;
+    uint64_t elapsed_us =
+        (delta / hz) * 1000000ull +
+        ((delta % hz) * 1000000ull) / hz;
+
+    serial_print("[xHCI][TIME] ");
+    serial_print(stage ? stage : "stage");
+    serial_print(" result=");
+    serial_print(result ? result : "unknown");
+    serial_print(" elapsed_us=");
+    xhci_time_print_u64(elapsed_us);
+    serial_print("\n");
 }
