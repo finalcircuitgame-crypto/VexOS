@@ -13,10 +13,9 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
@@ -140,11 +139,28 @@ def validate_build() -> None:
             raise RuntimeError(f"Build artifact is empty: {path}")
 
 
-def copy_boot_files(drive_letter: str, progress=None, log=None) -> dict:
+def validate_usb_volume(drive_letter: str, expected_disk_number: int | None = None) -> None:
+    letter = drive_letter.upper()
+    if len(letter) != 1 or not letter.isalpha():
+        raise ValueError("Invalid destination drive letter.")
+    script = rf"""
+$ErrorActionPreference = 'Stop'
+$partition = Get-Partition -DriveLetter '{letter}' -ErrorAction Stop
+$disk = Get-Disk -Number $partition.DiskNumber -ErrorAction Stop
+if ($disk.BusType -ne 'USB') {{ throw 'Refusing to copy: destination is not on a USB disk.' }}
+if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Refusing to copy: destination belongs to a Windows boot/system disk.' }}
+if ({expected_disk_number if expected_disk_number is not None else -1} -ge 0 -and $disk.Number -ne {expected_disk_number if expected_disk_number is not None else -1}) {{ throw 'USB disk identity changed. Refresh devices and try again.' }}
+"""
+    run_powershell(script)
+
+
+def copy_boot_files(drive_letter: str, progress=None, log=None,
+                    expected_disk_number: int | None = None) -> dict:
     validate_build()
     if len(drive_letter) != 1 or not drive_letter.isalpha():
         raise ValueError("Invalid destination drive letter.")
 
+    validate_usb_volume(drive_letter, expected_disk_number)
     root = f"{drive_letter.upper()}:\\"
     if not os.path.isdir(root):
         raise FileNotFoundError(f"USB volume {root} is not accessible.")
@@ -233,7 +249,7 @@ if (-not $volume.DriveLetter) {{ throw 'Formatting completed but Windows did not
         log("Installing UEFI bootloader and kernel...")
     if progress:
         progress(20)
-    result = copy_boot_files(letter, progress=lambda value: progress(20 + int(value * 0.8)) if progress else None, log=log)
+    result = copy_boot_files(letter, progress=lambda value: progress(20 + int(value * 0.8)) if progress else None, log=log, expected_disk_number=number)
     result["drive_letter"] = letter
     return result
 
@@ -473,7 +489,7 @@ class VexOSFlasher(tk.Tk):
         if not confirmed:
             return
         phrase = f"ERASE {number}"
-        typed = tk.simpledialog.askstring(
+        typed = simpledialog.askstring(
             "Confirm disk erase",
             f"Type exactly {phrase} to authorize formatting this USB disk:",
             parent=self,
