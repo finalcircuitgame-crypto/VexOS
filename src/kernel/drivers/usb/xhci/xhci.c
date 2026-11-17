@@ -1220,7 +1220,8 @@ void xhci_init(uint64_t mmio_phys) {
   op_regs->usb_cmd &= ~USB_CMD_RS;
   serial_print("[xHCI] Waiting for halt (timeout 1000 ms)...\n");
   (void)bootlog_checkpoint();
-  (void)bootlog_flush();
+
+
   {
     uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
@@ -1241,7 +1242,8 @@ void xhci_init(uint64_t mmio_phys) {
 
   serial_print("[xHCI] Issuing Reset...\n");
   (void)bootlog_checkpoint();
-  (void)bootlog_flush();
+
+
   op_regs->usb_cmd |= USB_CMD_HCRST;
   {
     uint64_t wait_start = xhci_time_now_ticks();
@@ -1263,7 +1265,8 @@ void xhci_init(uint64_t mmio_phys) {
 
   serial_print("[xHCI] Waiting for CNR (timeout 1000 ms)...\n");
   (void)bootlog_checkpoint();
-  (void)bootlog_flush();
+
+
   {
     const uint32_t USB_STS_CNR = 1u << 11;
     uint64_t wait_start = xhci_time_now_ticks();
@@ -1500,7 +1503,8 @@ void xhci_init(uint64_t mmio_phys) {
       xhci_print_u32_dec(speed);
       serial_print("\n");
       (void)bootlog_checkpoint();
-      (void)bootlog_flush();
+
+
       continue;
     }
 
@@ -1541,5 +1545,6 @@ void xhci_init(uint64_t mmio_phys) {
   xhci_time_log_elapsed("controller_init", controller_init_start, "finished");
   xhci_log_controller_registers("init-complete");
   (void)bootlog_checkpoint();
-  (void)bootlog_flush();
+
+
 }
