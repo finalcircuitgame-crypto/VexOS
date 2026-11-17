@@ -83,7 +83,7 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Partial — network-device layer and first Ethernet driver implemented; protocol stack not started**
+**Status: Partial — network-device layer, E1000 driver, and Ethernet II receive dispatch implemented**
 
 Implemented on `feature/network-foundation`:
 - Generic network-device registration and bounded interface table.
@@ -91,19 +91,25 @@ Implemented on `feature/network-foundation`:
 - Polling-only Intel 82540EM-compatible E1000 driver for QEMU (`8086:100E`).
 - PCI BAR discovery, MMIO mapping, controller reset, MAC address discovery, RX/TX descriptor rings, and packet-buffer setup.
 - Kernel-loop polling with bounded receive work; interrupts remain disabled until general network IRQ routing is available.
-- QEMU CI now boots with an E1000 NIC and checks controller discovery and descriptor-ring initialization; the first run is pending.
+- Bounded Ethernet II EtherType registry and receive dispatch for registered protocols.
+- Ethernet header length and MTU validation, big-endian EtherType parsing, and drop accounting for malformed, unsupported, or unhandled frames.
+- Explicit borrowed-buffer contract: protocol handlers execute synchronously and must copy any packet data they need to retain.
+- Host-side tests for Ethernet II bounds, handler registration, EtherType dispatch, unsupported 802.3/VLAN frames, and receive-drop accounting.
+- QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
-1. Ethernet protocol dispatch and packet-buffer ownership rules.
-2. ARP with cache expiry and bounded pending queues.
-3. IPv4 validation, ICMP echo, and fragmentation policy.
-4. UDP and TCP with timeout/retransmission handling.
+1. ARP with cache expiry, conflict-safe learning, and bounded pending queues.
+2. IPv4 validation, ICMP echo, and fragmentation policy.
+3. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
+4. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
 5. DHCP and DNS clients.
 6. User-mode socket API and loopback/QEMU integration tests.
 7. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
 
 Current limitations:
 - No ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, or Internet access yet.
+- The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
+- Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
 - Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
 - Driver operation is polled in task context; no E1000 interrupts, MSI/MSI-X, APIC routing, or SMP support.
 - QEMU success is not physical hardware qualification.
