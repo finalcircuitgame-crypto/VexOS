@@ -588,10 +588,12 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
     // USB 3.x (speed 4-5): try warm reset first, then cold reset
     if (speed_hint >= 4) {
       serial_print("[xHCI] Forcing warm reset (USB3)\n");
+      (void)bootlog_checkpoint();
       xhci_port_warm_reset(portsc);
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
       xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
+      (void)bootlog_checkpoint();
 
       if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
         if (out_speed)
@@ -609,10 +611,12 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
 
     // Cold reset for both USB 2.0 and USB 3.x
     serial_print("[xHCI] Forcing cold reset\n");
+    (void)bootlog_checkpoint();
     xhci_port_cold_reset(portsc);
     ps = *portsc;
     xhci_port_clear_w1c(portsc, &ps);
     xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
+    (void)bootlog_checkpoint();
 
     if (xhci_port_wait_ready(portsc, 20000000, &ps)) {
       if (out_speed)
@@ -1096,16 +1100,19 @@ void xhci_init(uint64_t mmio_phys) {
   serial_print("[xHCI] Resetting Controller...\n");
   op_regs->usb_cmd &= ~USB_CMD_RS;
   serial_print("[xHCI] Waiting for halt...\n");
+  (void)bootlog_checkpoint();
   (void)bootlog_flush();
   while (!(op_regs->usb_sts & USB_STS_HCH))
     ;
 
   serial_print("[xHCI] Issuing Reset...\n");
+  (void)bootlog_checkpoint();
   (void)bootlog_flush();
   op_regs->usb_cmd |= USB_CMD_HCRST;
   while (op_regs->usb_cmd & USB_CMD_HCRST)
     ;
   serial_print("[xHCI] Waiting for CNR...\n");
+  (void)bootlog_checkpoint();
   (void)bootlog_flush();
   while (op_regs->usb_sts & (1 << 11))
     ;
@@ -1318,6 +1325,7 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print(" speed=");
       xhci_print_u32_dec(speed);
       serial_print("\n");
+      (void)bootlog_checkpoint();
       (void)bootlog_flush();
       continue;
     }
