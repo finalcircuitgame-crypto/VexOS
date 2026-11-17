@@ -5,7 +5,7 @@
 #include "../../../../include/vfs.h"
 
 #define FILE_MANAGER_MAX_FILES 128u
-#define FILE_MANAGER_NAME_CAP 64u
+#define FILE_MANAGER_NAME_CAP VFS_NAME_MAX
 #define FILE_MANAGER_SEARCH_CAP 48u
 #define FILE_MANAGER_ROW_HEIGHT 28u
 #define FILE_MANAGER_STATUS_CAP 64u
@@ -35,6 +35,7 @@ static uint32_t g_screen_height;
 static uint32_t g_visible[FILE_MANAGER_MAX_FILES];
 static uint32_t g_visible_count;
 static uint8_t g_delete_armed;
+static uint8_t g_writable;
 static char g_status[FILE_MANAGER_STATUS_CAP];
 
 static uint32_t fm_min_u32(uint32_t a, uint32_t b) {
@@ -235,7 +236,11 @@ static void fm_set_status(const char *message) {
   fm_copy(g_status, message, sizeof(g_status));
 }
 
-static void fm_create_file(void) {
+static void fm_create_file(file_manager_open_file_fn open_file) {
+  if (!g_writable) {
+    fm_set_status("This volume is read-only");
+    return;
+  }
   char full_path[VFS_PATH_MAX];
   char candidate[FILE_MANAGER_NAME_CAP];
   for (uint32_t suffix = 1; suffix <= 99u; ++suffix) {
@@ -265,7 +270,10 @@ static void fm_create_file(void) {
       g_selected = 0xFFFFFFFFu;
       g_delete_armed = 0;
       fm_refresh();
-      fm_set_status("Created a new text file");
+      if (open_file && open_file(full_path))
+        fm_set_status("Created and opened in Notepad");
+      else
+        fm_set_status("Created a new text file");
       return;
     }
   }
@@ -273,6 +281,11 @@ static void fm_create_file(void) {
 }
 
 static void fm_delete_selected_file(void) {
+  if (!g_writable) {
+    fm_set_status("This volume is read-only");
+    g_delete_armed = 0;
+    return;
+  }
   char name[FILE_MANAGER_NAME_CAP];
   char full_path[VFS_PATH_MAX];
   if (g_selected == 0xFFFFFFFFu ||
@@ -330,10 +343,12 @@ static void fm_refresh(void) {
       g_current_path[0] = '/';
       g_current_path[1] = 0;
       if (!vfs_dir_open(&directory, g_current_path)) {
+        fm_set_status("Unable to read this volume");
         fm_rebuild_visible();
         return;
       }
     } else {
+      fm_set_status("Unable to read this folder");
       fm_rebuild_visible();
       return;
     }
@@ -377,6 +392,39 @@ static void fm_refresh(void) {
   fm_rebuild_visible();
 }
 
+
+static file_manager_event_t fm_open_storage_index(
+    uint32_t storage_index, file_manager_open_file_fn open_file) {
+  char name[FILE_MANAGER_NAME_CAP];
+  char full_path[VFS_PATH_MAX];
+  if (storage_index == 0xFFFFFFFFu ||
+      storage_index >= g_order_count ||
+      !fm_get_name(storage_index, name) ||
+      !fm_build_path(name, full_path, sizeof(full_path))) {
+    fm_set_status("Select an item first");
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+
+  if (g_is_directory[storage_index]) {
+    fm_copy(g_current_path, full_path, sizeof(g_current_path));
+    g_scroll = 0;
+    g_selected = 0xFFFFFFFFu;
+    g_last_click_index = 0xFFFFFFFFu;
+    fm_refresh();
+    fm_set_status("Folder opened");
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+
+  if (open_file && open_file(full_path)) {
+    g_last_click_index = 0xFFFFFFFFu;
+    fm_set_status("File opened");
+    return FILE_MANAGER_EVENT_CHANGED;
+  }
+
+  fm_set_status("Unable to open this file");
+  return FILE_MANAGER_EVENT_OPEN_FAILED;
+}
+
 void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
   g_screen_width = screen_width;
   g_screen_height = screen_height;
@@ -394,6 +442,7 @@ void file_manager_init(uint32_t screen_width, uint32_t screen_height) {
   g_order_count = 0;
   g_visible_count = 0;
   g_delete_armed = 0;
+  g_writable = 0;
   g_status[0] = 0;
   g_current_path[0] = '/';
   g_current_path[1] = 0;
@@ -411,6 +460,8 @@ void file_manager_open(void) {
   g_search_focused = 0;
   g_delete_armed = 0;
   fm_refresh();
+  g_writable = (uint8_t)vfs_is_writable();
+  fm_set_status(g_writable ? "Ready" : "Read-only volume: editing disabled");
   wm_raise(APP_EXPLORER);
 }
 
@@ -542,20 +593,26 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                   0xF0F1FCu);
   gfx_draw_string(list_x + 14u, body_y + 30u,
                   "Saved on this VexOS volume", 0x8995B1u);
-  if (list_w > 390u) {
+  if (list_w > 450u) {
     uint32_t action_y = body_y + 10u;
+    uint32_t open_x = list_x + list_w - 266u;
     uint32_t new_x = list_x + list_w - 204u;
     uint32_t del_x = list_x + list_w - 130u;
     uint32_t refresh_x = list_x + list_w - 64u;
-    gfx_blend_round_rect(new_x, action_y, 68u, 23u, 5u, 0x3A315F, 255u);
-    gfx_draw_string(new_x + 9u, action_y + 8u, "+ New", 0xE6E0FFu);
+    gfx_blend_round_rect(open_x, action_y, 56u, 23u, 5u, 0x263A4Au, 255u);
+    gfx_draw_string(open_x + 9u, action_y + 8u, "Open", 0xB8E3D4u);
+    gfx_blend_round_rect(new_x, action_y, 68u, 23u, 5u,
+                         g_writable ? 0x3A315Fu : 0x252B39u, 255u);
+    gfx_draw_string(new_x + 9u, action_y + 8u, "+ New",
+                    g_writable ? 0xE6E0FFu : 0x77839Au);
     gfx_blend_round_rect(del_x, action_y, 58u, 23u, 5u,
                          g_delete_armed ? 0x70404Bu : 0x283247u, 255u);
     gfx_draw_string(del_x + 8u, action_y + 8u,
                     g_delete_armed ? "Confirm" : "Delete",
-                    g_delete_armed ? 0xFFE4E8u : 0xC6D0E5u);
-    gfx_blend_round_rect(refresh_x, action_y, 54u, 23u, 5u, 0x202B3E, 255u);
-    gfx_draw_string(refresh_x + 8u, action_y + 8u, "Reload", 0xA9DCCB);
+                    g_writable ? (g_delete_armed ? 0xFFE4E8u : 0xC6D0E5u)
+                               : 0x77839Au);
+    gfx_blend_round_rect(refresh_x, action_y, 54u, 23u, 5u, 0x202B3Eu, 255u);
+    gfx_draw_string(refresh_x + 8u, action_y + 8u, "Reload", 0xA9DCCBu);
   }
 
   uint32_t header_y = body_y + 50u;
@@ -719,16 +776,26 @@ file_manager_event_t file_manager_handle_click(
   }
   uint32_t list_panel_x = (uint32_t)x + 160u;
   uint32_t list_panel_w = w > 176 ? (uint32_t)w - 172u : 1u;
-  if (list_panel_w > 390u &&
+  if (list_panel_w > 450u &&
+      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 266u),
+             (int32_t)(by + 10u), 56, 23)) {
+    g_search_focused = 0;
+    g_delete_armed = 0;
+    file_manager_event_t result =
+        fm_open_storage_index(g_selected, open_file);
+    wm_raise(APP_EXPLORER);
+    return result;
+  }
+  if (list_panel_w > 450u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 204u),
              (int32_t)(by + 10u), 68, 23)) {
     g_search_focused = 0;
     g_delete_armed = 0;
-    fm_create_file();
+    fm_create_file(open_file);
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
-  if (list_panel_w > 390u &&
+  if (list_panel_w > 450u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 130u),
              (int32_t)(by + 10u), 58, 23)) {
     g_search_focused = 0;
@@ -736,6 +803,9 @@ file_manager_event_t file_manager_handle_click(
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
+  if (list_panel_w > 450u &&
+      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
+             (int32_t)(by + 10u), 54, 23)) {
   if (list_panel_w > 390u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
              (int32_t)(by + 10u), 54, 23)) {
@@ -778,24 +848,7 @@ file_manager_event_t file_manager_handle_click(
     g_status[0] = 0;
     uint32_t elapsed = tick - g_last_click_tick;
     if (g_last_click_index == storage_index && elapsed < 45u) {
-      char name[FILE_MANAGER_NAME_CAP];
-      char full_path[VFS_PATH_MAX];
-      if (!fm_get_name(storage_index, name) ||
-          !fm_build_path(name, full_path, sizeof(full_path)))
-        return FILE_MANAGER_EVENT_OPEN_FAILED;
-      if (g_is_directory[storage_index]) {
-        fm_copy(g_current_path, full_path, sizeof(g_current_path));
-        g_scroll = 0;
-        g_selected = 0xFFFFFFFFu;
-        g_last_click_index = 0xFFFFFFFFu;
-        fm_refresh();
-        return FILE_MANAGER_EVENT_CHANGED;
-      }
-      if (open_file && open_file(full_path)) {
-        g_last_click_index = 0xFFFFFFFFu;
-        return FILE_MANAGER_EVENT_CHANGED;
-      }
-      return FILE_MANAGER_EVENT_OPEN_FAILED;
+      return fm_open_storage_index(storage_index, open_file);
     }
     g_last_click_tick = tick;
     g_last_click_index = storage_index;
