@@ -81,10 +81,10 @@ FONT_OBJ = $(OBJDIR)/font.o
 FONT_SEARCH_ROOTS ?= assets/fonts /usr/share/fonts
 font_find = $(shell find $(FONT_SEARCH_ROOTS) -type f \( $(foreach name,$(1),-iname '$(name)' -o ) -false \) -print -quit 2>/dev/null)
 
-FONT_SOURCE_INTER_REGULAR := $(call font_find,Inter-Regular.ttf Inter_18pt-Regular.ttf)
-FONT_SOURCE_INTER_BOLD := $(call font_find,Inter-Bold.ttf Inter_18pt-Bold.ttf)
-FONT_SOURCE_LATO_REGULAR := $(call font_find,Lato-Regular.ttf)
-FONT_SOURCE_LATO_BOLD := $(call font_find,Lato-Bold.ttf)
+FONT_SOURCE_INTER_REGULAR := $(call font_find,Inter-Regular.ttf Inter-Regular.otf Inter_18pt-Regular.ttf)
+FONT_SOURCE_INTER_BOLD := $(call font_find,Inter-Bold.ttf Inter-Bold.otf Inter_18pt-Bold.ttf)
+FONT_SOURCE_LATO_REGULAR := $(call font_find,Lato-Regular.ttf Lato-Regular.otf)
+FONT_SOURCE_LATO_BOLD := $(call font_find,Lato-Bold.ttf Lato-Bold.otf)
 FONT_SOURCE_DEJAVU_SANS_REGULAR := $(call font_find,DejaVuSans.ttf)
 FONT_SOURCE_DEJAVU_SANS_BOLD := $(call font_find,DejaVuSans-Bold.ttf)
 FONT_SOURCE_DEJAVU_MONO_REGULAR := $(call font_find,DejaVuSansMono.ttf)
