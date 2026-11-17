@@ -1,0 +1,146 @@
+name: MSI GL63-Inspired USB CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Makefile"
+      - "src/boot/**"
+      - "src/include/**"
+      - "src/kernel/**"
+      - ".github/workflows/gl63-usb-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Makefile"
+      - "src/boot/**"
+      - "src/include/**"
+      - "src/kernel/**"
+      - ".github/workflows/gl63-usb-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  q35-xhci-compatibility:
+    name: Q35 laptop-style UEFI + xHCI smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out VexOS
+        uses: actions/checkout@v4
+
+      - name: Install build and emulation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf
+
+      - name: Build CI-instrumented VexOS
+        run: |
+          make clean
+          make VEXOS_CI=1 -j2 all
+          test -s dist/BOOTX64.EFI
+          test -s dist/kernel.elf
+          test -s dist/tiny64.img
+          test -s dist/storage.img
+
+      - name: Prepare disposable USB mass-storage device
+        run: |
+          mkdir -p artifacts
+          truncate -s 16M dist/usb-test.img
+          cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/OVMF_VARS_GL63.fd
+
+      - name: Boot Q35 laptop-style machine with xHCI and USB devices
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
+          test -s "$OVMF_CODE"
+          : > serial.log
+          : > qemu.log
+
+          # Q35 provides a PCIe-oriented Intel-style chipset topology.
+          # QEMU's qemu-xhci is a generic emulated xHCI controller, not the
+          # exact Intel HM370 controller found in some MSI GL63 variants.
+          qemu-system-x86_64 \
+            -machine q35 \
+            -cpu max \
+            -m 2G \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS_GL63.fd \
+            -device ich9-ahci,id=sata \
+            -drive if=none,id=bootdisk,format=raw,file=dist/tiny64.img \
+            -device ide-hd,drive=bootdisk,bus=sata.0 \
+            -drive if=none,id=storage,format=raw,file=dist/storage.img \
+            -device ide-hd,drive=storage,bus=sata.1 \
+            -drive if=none,id=usb_disk,format=raw,file=dist/usb-test.img \
+            -device qemu-xhci,id=xhci \
+            -device usb-kbd,bus=xhci.0 \
+            -device usb-tablet,bus=xhci.0 \
+            -device usb-storage,drive=usb_disk,bus=xhci.0 \
+            -display none \
+            -monitor none \
+            -serial file:serial.log \
+            -no-reboot -no-shutdown >qemu.log 2>&1 &
+          qemu_pid=$!
+
+          cleanup() {
+            status=$?
+            if kill -0 "$qemu_pid" 2>/dev/null; then
+              kill "$qemu_pid" 2>/dev/null || true
+            fi
+            wait "$qemu_pid" 2>/dev/null || true
+            cp serial.log artifacts/serial.log
+            cp qemu.log artifacts/qemu.log
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          deadline=$((SECONDS + 90))
+          while (( SECONDS < deadline )); do
+            if grep -Fq "[xHCI] Controller Running" serial.log; then
+              break
+            fi
+            if grep -Fq "[KERNEL] FATAL:" serial.log; then
+              echo "VexOS reported a fatal kernel error:"
+              cat serial.log
+              exit 1
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before xHCI reached the running state."
+              cat qemu.log
+              cat serial.log
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          if ! grep -Fq "[xHCI] Controller Running" serial.log; then
+            echo "Timed out waiting for xHCI controller initialization."
+            cat qemu.log
+            cat serial.log
+            exit 1
+          fi
+
+          if grep -Fq "[KERNEL] FATAL:" serial.log; then
+            echo "Kernel fatal error detected after xHCI initialization."
+            cat serial.log
+            exit 1
+          fi
+
+          echo "PASS: VexOS booted under Q35/UEFI and brought the emulated xHCI controller to the running state."
+          echo "NOTE: USB device enumeration and class-driver operation are not claimed by this smoke test."
+          grep -E "\\[PCI\\]|\\[xHCI\\]" serial.log || true
+
+      - name: Upload boot diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl63-q35-usb-ci-${{ github.run_number }}-${{ github.run_id }}
+          path: |
+            artifacts/
+            serial.log
+            qemu.log
+          if-no-files-found: warn
+          retention-days: 14
