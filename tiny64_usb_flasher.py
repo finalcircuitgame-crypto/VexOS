@@ -149,6 +149,8 @@ $partition = Get-Partition -DriveLetter '{letter}' -ErrorAction Stop
 $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction Stop
 if ($disk.BusType -ne 'USB') {{ throw 'Refusing to copy: destination is not on a USB disk.' }}
 if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Refusing to copy: destination belongs to a Windows boot/system disk.' }}
+$volume = Get-Volume -Partition $partition -ErrorAction Stop
+if ($volume.FileSystem -ne 'FAT32') {{ throw 'Quick Flash requires a FAT32 USB volume. Use Full Flash to prepare it.' }}
 if ({expected_disk_number if expected_disk_number is not None else -1} -ge 0 -and $disk.Number -ne {expected_disk_number if expected_disk_number is not None else -1}) {{ throw 'USB disk identity changed. Refresh devices and try again.' }}
 """
     run_powershell(script)
@@ -289,7 +291,7 @@ class VexOSFlasher(tk.Tk):
         ttk.Label(header, text="VexOS USB Flasher", style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(
             header,
-            text="Prepare bootable UEFI USB media or safely update an existing VexOS volume.",
+            text="Quick Flash updates a FAT32 USB without elevation. Full Flash prepares the entire USB and requires administrator permission.",
             style="Sub.TLabel",
         ).pack(anchor=tk.W, pady=(3, 0))
 
@@ -297,13 +299,13 @@ class VexOSFlasher(tk.Tk):
         toolbar.pack(fill=tk.X)
         self.refresh_button = ttk.Button(toolbar, text="Refresh devices", command=self.refresh_devices)
         self.refresh_button.pack(side=tk.LEFT, padx=(0, 8))
-        self.copy_button = ttk.Button(toolbar, text="Update selected volume", command=self.copy_selected)
+        self.copy_button = ttk.Button(toolbar, text="Quick Flash (no admin)", command=self.copy_selected)
         self.copy_button.pack(side=tk.LEFT)
 
         content = ttk.Frame(self, padding=(14, 8))
         content.pack(fill=tk.BOTH, expand=True)
 
-        disk_panel = ttk.LabelFrame(content, text="Physical USB disks — flashing erases the entire selected disk", padding=10)
+        disk_panel = ttk.LabelFrame(content, text="Full Flash — requires administrator permission and erases the entire selected USB disk", padding=10)
         disk_panel.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         self.disk_tree = ttk.Treeview(
             disk_panel,
@@ -319,10 +321,10 @@ class VexOSFlasher(tk.Tk):
             self.disk_tree.heading(key, text=label)
             self.disk_tree.column(key, width=width, anchor=tk.W)
         self.disk_tree.pack(fill=tk.BOTH, expand=True)
-        ttk.Button(disk_panel, text="Prepare + flash selected USB (ERASES DISK)", style="Danger.TButton",
+        ttk.Button(disk_panel, text="Full Flash selected USB (ADMIN — ERASES DISK)", style="Danger.TButton",
                    command=self.flash_selected).pack(anchor=tk.E, pady=(9, 0))
 
-        volume_panel = ttk.LabelFrame(content, text="Mounted volumes on USB disks — copy mode preserves other files", padding=10)
+        volume_panel = ttk.LabelFrame(content, text="Quick Flash — FAT32 volumes only; no admin; preserves unrelated files", padding=10)
         volume_panel.pack(fill=tk.BOTH, expand=True)
         self.volume_tree = ttk.Treeview(
             volume_panel,
@@ -437,14 +439,20 @@ class VexOSFlasher(tk.Tk):
         letter, volume = selected
         if not messagebox.askyesno(
             "Update VexOS files",
-            f"Copy the current VexOS bootloader and kernel to {letter}:\\?\n\n"
-            "This does not format the volume. Existing files other than the VexOS boot files are preserved.",
+            f"Quick Flash VexOS to {letter}:\\?\n\n"
+            "No administrator permission is needed. This requires FAT32 and does not format the USB. "
+            "Existing files other than VexOS boot files are preserved.",
             parent=self,
         ):
             return
         self._start_worker(
             f"Updating {letter}:\\",
-            lambda: copy_boot_files(letter, progress=self.set_progress, log=self.log_line),
+            lambda: copy_boot_files(
+                letter,
+                progress=self.set_progress,
+                log=self.log_line,
+                expected_disk_number=int(volume["DiskNumber"]),
+            ),
             "VexOS volume updated",
         )
 
@@ -469,7 +477,7 @@ class VexOSFlasher(tk.Tk):
         if not is_admin():
             messagebox.showwarning(
                 "Administrator permission required",
-                "Close the flasher and reopen it with Run as administrator before flashing a physical disk.",
+                "Only Full Flash needs administrator permission because it repartitions and formats the physical disk. Quick Flash in the lower panel works without admin on an existing FAT32 USB.",
                 parent=self,
             )
             return
