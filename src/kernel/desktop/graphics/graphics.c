@@ -385,11 +385,13 @@ static uint8_t gfx_font_coverage(uint8_t character, uint32_t x,
                                  uint32_t y) {
   if (character >= 128u || x >= 8u || y >= 8u)
     return 0;
-  uint32_t glyph_index = (uint32_t)g_font_family * 128u + character;
+  uint32_t face_index = (uint32_t)g_font_family * 2u +
+                       (g_font_bold ? 1u : 0u);
+  uint32_t glyph_index = face_index * 128u + character;
   uint32_t pixel_index = glyph_index * 64u + y * 8u + x;
-  uint8_t packed = _binary_font_atlas_bin_start[pixel_index >> 2];
-  uint8_t shift = (uint8_t)(6u - ((pixel_index & 3u) * 2u));
-  return (uint8_t)(((packed >> shift) & 3u) * 85u);
+  uint8_t packed = _binary_font_atlas_bin_start[pixel_index >> 1];
+  uint8_t shift = (pixel_index & 1u) ? 0u : 4u;
+  return (uint8_t)(((packed >> shift) & 15u) * 17u);
 }
 
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
@@ -422,11 +424,6 @@ void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
     for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
       for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
         uint8_t alpha = gfx_font_coverage(character, gx, gy);
-        if (g_font_bold && gx)
-          {
-            uint8_t left = gfx_font_coverage(character, gx - 1u, gy);
-            if (left > alpha) alpha = left;
-          }
         if (!alpha)
           continue;
         uint32_t px0 = x + gx * scale;
