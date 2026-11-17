@@ -127,7 +127,7 @@ static float font_acos(float value) {
 #undef memcpy
 #undef strlen
 
-#define FONT_FAMILY_COUNT 4u
+#define FONT_FAMILY_COUNT 6u
 #define FONT_WEIGHT_COUNT 2u
 #define FONT_CACHE_CAPACITY 256u
 #define FONT_MIN_PIXEL_HEIGHT 6u
@@ -150,6 +150,14 @@ extern const uint8_t _binary_font_dejavu_mono_regular_ttf_start[];
 extern const uint8_t _binary_font_dejavu_mono_regular_ttf_end[];
 extern const uint8_t _binary_font_dejavu_mono_bold_ttf_start[];
 extern const uint8_t _binary_font_dejavu_mono_bold_ttf_end[];
+extern const uint8_t _binary_font_noto_sans_regular_ttf_start[];
+extern const uint8_t _binary_font_noto_sans_regular_ttf_end[];
+extern const uint8_t _binary_font_noto_sans_bold_ttf_start[];
+extern const uint8_t _binary_font_noto_sans_bold_ttf_end[];
+extern const uint8_t _binary_font_noto_serif_regular_ttf_start[];
+extern const uint8_t _binary_font_noto_serif_regular_ttf_end[];
+extern const uint8_t _binary_font_noto_serif_bold_ttf_start[];
+extern const uint8_t _binary_font_noto_serif_bold_ttf_end[];
 
 typedef struct {
     uint32_t codepoint;
@@ -248,6 +256,14 @@ static const uint8_t *const g_font_data[FONT_FAMILY_COUNT][FONT_WEIGHT_COUNT] = 
     {
         _binary_font_dejavu_mono_regular_ttf_start,
         _binary_font_dejavu_mono_bold_ttf_start
+    },
+    {
+        _binary_font_noto_sans_regular_ttf_start,
+        _binary_font_noto_sans_bold_ttf_start
+    },
+    {
+        _binary_font_noto_serif_regular_ttf_start,
+        _binary_font_noto_serif_bold_ttf_start
     }
 };
 
@@ -267,6 +283,14 @@ static const uint8_t *const g_font_end[FONT_FAMILY_COUNT][FONT_WEIGHT_COUNT] = {
     {
         _binary_font_dejavu_mono_regular_ttf_end,
         _binary_font_dejavu_mono_bold_ttf_end
+    },
+    {
+        _binary_font_noto_sans_regular_ttf_end,
+        _binary_font_noto_sans_bold_ttf_end
+    },
+    {
+        _binary_font_noto_serif_regular_ttf_end,
+        _binary_font_noto_serif_bold_ttf_end
     }
 };
 
