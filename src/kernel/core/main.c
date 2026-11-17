@@ -12,6 +12,7 @@
 #include "task.h"
 #include "process.h"
 #include "vmm.h"
+#include "../desktop/graphics/font_engine.h"
 #include "pci.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -1191,6 +1192,20 @@ void kernel_main(BootInfo *bootInfo) {
   }
 
   Heap_Init((void *)heap_base, (size_t)(heap_pages * 4096ull));
+
+  if (FontEngine_Init()) {
+    serial_print("[FONT] stb_truetype runtime initialized (4 families, regular/bold)\n");
+#ifdef VEXOS_CI_INPUT_TEST
+    if (!FontEngine_SelfTest())
+      ci_memory_test_fail("TrueType font loading, metrics, or glyph rasterization");
+    serial_print("[CI] TrueType font loading, metrics, and glyph rasterization passed\n");
+#endif
+  } else {
+    serial_print("[FONT] TrueType initialization failed; retaining CGA fallback\n");
+#ifdef VEXOS_CI_INPUT_TEST
+    ci_memory_test_fail("TrueType font engine initialization");
+#endif
+  }
 #ifdef VEXOS_CI_INPUT_TEST
   ci_memory_self_test();
   ci_address_space_self_test();
