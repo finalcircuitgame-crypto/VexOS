@@ -133,26 +133,25 @@ static void console_put_codepoint(uint32_t codepoint, uint32_t color) {
         int32_t ascent = 0, descent = 0, line_gap = 0;
         FontEngine_GetLineMetrics(0, 0, CONSOLE_FONT_PIXEL_HEIGHT,
                                   &ascent, &descent, &line_gap);
-        if (g_PreviousCodepoint) {
-            g_CursorX += (uint32_t)FontEngine_GetKerning(
+        int32_t pen_x = (int32_t)g_CursorX;
+        if (g_PreviousCodepoint)
+            pen_x += FontEngine_GetKerning(
                 0, 0, CONSOLE_FONT_PIXEL_HEIGHT,
                 g_PreviousCodepoint, codepoint);
-        }
+        if (pen_x < 0)
+            pen_x = 0;
 
-        FontEngine_DrawGlyph(
-            0, 0, CONSOLE_FONT_PIXEL_HEIGHT, codepoint,
-            g_BootInfo->framebuffer, g_BootInfo->pitch,
-            g_BootInfo->width, g_BootInfo->height,
-            (int32_t)g_CursorX, (int32_t)(g_CursorY + (uint32_t)ascent),
-            0, 0, g_BootInfo->width, g_BootInfo->height,
-            color, NULL);
         FontEngineGlyphMetrics metrics;
         int32_t advance = FontEngine_DrawGlyph(
             0, 0, CONSOLE_FONT_PIXEL_HEIGHT, codepoint,
-            NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, &metrics);
+            g_BootInfo->framebuffer, g_BootInfo->pitch,
+            g_BootInfo->width, g_BootInfo->height,
+            pen_x, (int32_t)(g_CursorY + (uint32_t)ascent),
+            0, 0, g_BootInfo->width, g_BootInfo->height,
+            color, &metrics);
         if (advance <= 0)
             advance = (int32_t)(CONSOLE_FONT_PIXEL_HEIGHT / 2u);
-        g_CursorX += (uint32_t)advance;
+        g_CursorX = (uint32_t)(pen_x + advance);
         g_PreviousCodepoint = codepoint;
     } else {
         console_put_fallback(codepoint, color);
