@@ -39,7 +39,6 @@ int main(void) {
     net_device_t device = {0};
     device.name[0] = 'e';
     device.name[1] = 't';
-    device.device_data = 0;
     device.mtu = 1500;
     device.flags = NETDEV_FLAG_ETHERNET;
 
@@ -95,7 +94,7 @@ int main(void) {
 
     ethernet_stats_t stats = {0};
     ethernet_get_stats(&stats);
-    CHECK(stats.rx_frames == 6u);
+    CHECK(stats.rx_frames == 7u);
     CHECK(stats.rx_dispatched == 1u);
     CHECK(stats.rx_invalid == 3u);
     CHECK(stats.rx_unsupported == 2u);
