@@ -37,9 +37,9 @@ SECTIONS {
     /*
      * Large TTF files live in a separate read-only PT_LOAD segment. This
      * prevents their bytes from expanding the low-address executable segment
-     * and lets UEFI reserve the font blob independently at 16 MiB.
+     * and lets UEFI reserve the font blob independently at 64 MiB.
      */
-    . = 0x01000000;
+    . = 0x04000000;
     .font_assets : ALIGN(0x1000) {
         *(.font_assets)
     } :fonts
