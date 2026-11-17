@@ -147,13 +147,13 @@ static void pci_probe_ahci_before_usb(void) {
 static void pci_init_e1000(uint8_t bus, uint8_t slot, uint8_t func) {
     uint32_t bar0 = pci_config_read_dword(bus, slot, func, 0x10);
     if (bar0 == 0 || bar0 == 0xFFFFFFFFu || (bar0 & 1u)) {
-        serial_print("[PCI] E1000 has no usable MMIO BAR0\\n");
+        serial_print("[PCI] E1000 has no usable MMIO BAR0\n");
         return;
     }
 
     uint32_t memory_type = (bar0 >> 1) & 0x3u;
     if (memory_type == 0x3u) {
-        serial_print("[PCI] E1000 BAR0 uses a reserved memory type\\n");
+        serial_print("[PCI] E1000 BAR0 uses a reserved memory type\n");
         return;
     }
 
@@ -164,7 +164,7 @@ static void pci_init_e1000(uint8_t bus, uint8_t slot, uint8_t func) {
     }
 
     if (mmio_base == 0) {
-        serial_print("[PCI] E1000 BAR0 is unassigned\\n");
+        serial_print("[PCI] E1000 BAR0 is unassigned\n");
         return;
     }
 
@@ -176,9 +176,9 @@ static void pci_init_e1000(uint8_t bus, uint8_t slot, uint8_t func) {
 
     serial_print("[PCI] Initializing Intel E1000 MMIO at ");
     print_hex(mmio_base);
-    serial_print("\\n");
+    serial_print("\n");
     if (!e1000_init(mmio_base))
-        serial_print("[PCI] E1000 initialization failed\\n");
+        serial_print("[PCI] E1000 initialization failed\n");
 }
 
 static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
@@ -261,7 +261,7 @@ void pci_enumerate() {
                 if (class_code == 0x02 && subclass == 0x00 &&
                     vendor_id == E1000_VENDOR_INTEL &&
                     device_id == E1000_DEVICE_82540EM) {
-                    serial_print("[PCI] Found supported Intel E1000 Ethernet controller\\n");
+                    serial_print("[PCI] Found supported Intel E1000 Ethernet controller\n");
                     pci_init_e1000((uint8_t)bus, slot, func);
                 }
 
