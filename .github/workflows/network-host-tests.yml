@@ -1,0 +1,28 @@
+name: VexOS Network Host Tests
+
+on:
+  push:
+    branches: [feature/network-foundation]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ethernet-dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Compile Ethernet dispatcher tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c tools/net_ethernet_test.c \
+            -o /tmp/vexos-ethernet-tests
+
+      - name: Test Ethernet II validation and dispatch
+        run: /tmp/vexos-ethernet-tests
