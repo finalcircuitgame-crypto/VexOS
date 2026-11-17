@@ -79,44 +79,39 @@ int xhci_poll_event(xhci_trb_t *out) {
 }
 
 int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
-  for (uint32_t spins = 0; spins < 5000000; spins++) {
+  /* Command completion should normally be immediate; cap broken hardware at 250 ms. */
+  uint64_t deadline = xhci_time_deadline_us(250000u);
+  while (!xhci_time_expired(deadline)) {
     xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      continue;
-    }
-
-    if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
-      if (out_slot_id) {
-        *out_slot_id = trb_slot_id(evt.control);
+    if (xhci_poll_event(&evt)) {
+      if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
+        if (out_slot_id)
+          *out_slot_id = trb_slot_id(evt.control);
+        if (out_cc)
+          *out_cc = trb_cc(evt.status);
+        return 1;
       }
-      if (out_cc) {
-        *out_cc = trb_cc(evt.status);
-      }
-      return 1;
+    } else {
+      __asm__ volatile("pause");
     }
   }
   return 0;
 }
 
 int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
-  uint32_t seen_other = 0;
-  for (uint32_t spins = 0; spins < 50000000; spins++) {
+  /* Slow/absent USB devices must not stall boot for an unbounded spin budget. */
+  uint64_t deadline = xhci_time_deadline_us(500000u);
+  while (!xhci_time_expired(deadline)) {
     xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      continue;
-    }
-
-    if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT) {
-      uint32_t cc = trb_cc(evt.status);
-      uint32_t eslot = trb_slot_id(evt.control);
-      if (eslot == slot_id) {
-        if (out_cc) {
-          *out_cc = cc;
-        }
+    if (xhci_poll_event(&evt)) {
+      if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT &&
+          trb_slot_id(evt.control) == slot_id) {
+        if (out_cc)
+          *out_cc = trb_cc(evt.status);
         return 1;
       }
-
-      (void)seen_other;
+    } else {
+      __asm__ volatile("pause");
     }
   }
   return 0;
