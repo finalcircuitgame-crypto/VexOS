@@ -92,7 +92,7 @@ jobs:
           : > qemu.log
 
           # Q35 provides a PCIe-oriented Intel-style chipset topology.
-          # QEMU e1000 supplies an emulated Intel 82540EM PCI Ethernet NIC.
+          # QEMU e1000e supplies an emulated Intel 82574L PCIe Ethernet NIC.
           # This currently tests PCI discovery only: VexOS has no Ethernet
           # driver or network stack yet, so no packets/DHCP/ping are claimed.
           # QEMU's qemu-xhci is a generic emulated xHCI controller, not the
@@ -118,7 +118,7 @@ jobs:
             -device usb-tablet,bus=xhci.0 \
             -device usb-storage,drive=usb_disk,bus=xhci.0 \
             -netdev user,id=net0 \
-            -device e1000,netdev=net0 \
+            -device e1000e,netdev=net0,bus=pcie.0,addr=0x5 \
             -display none \
             -monitor none \
             -serial file:serial.log \
@@ -249,13 +249,13 @@ jobs:
           echo "PASS: Both emulated HID devices reached interrupt-IN endpoint setup."
           echo "NOTE: USB mass-storage data transfers and live HID input are not tested by this CI job."
           echo "Checking emulated Ethernet NIC discovery..."
-          # QEMU e1000 is Intel 8086:100E (PCI class 02:00:00).
-          if ! grep -Fq "100E8086" serial.log || ! grep -Fq "class=00000002" serial.log; then
-            echo "FAIL: VexOS did not enumerate the emulated Intel e1000 Ethernet controller."
+          # QEMU e1000e is Intel 8086:10D3 (PCIe class 02:00:00).
+          if ! grep -Fq "10D38086" serial.log || ! grep -Fq "class=00000002" serial.log; then
+            echo "FAIL: VexOS did not enumerate the emulated Intel e1000e PCIe Ethernet controller."
             cat serial.log
             exit 1
           fi
-          echo "PASS: VexOS PCI enumeration detected the emulated Intel e1000 Ethernet controller (8086:100E)."
+          echo "PASS: VexOS PCI enumeration detected the emulated Intel e1000e PCIe Ethernet controller (8086:10D3)."
           echo "NOTE: Ethernet link, packet TX/RX, ARP, DHCP, DNS, and ping are not tested; a network driver/stack is not implemented yet."
           grep -E "\\[PCI\\]|\\[xHCI\\]|\\[USB\\]|\\[HID\\]" serial.log || true
 
