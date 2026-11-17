@@ -492,6 +492,56 @@ static void xhci_log_portsc(uint32_t port_id, const char *prefix,
   serial_print("\n");
 }
 
+static void xhci_log_controller_registers(const char *phase) {
+  serial_print("[xHCI][REGS] ");
+  serial_print(phase);
+  serial_print(" HCIVERSION=");
+  xhci_print_hex32((uint32_t)cap_regs->hci_version);
+  serial_print(" CAPLENGTH=");
+  xhci_print_u32_dec(cap_regs->cap_length);
+  serial_print(" HCS1=");
+  xhci_print_hex32(cap_regs->hcs_params1);
+  serial_print(" HCS2=");
+  xhci_print_hex32(cap_regs->hcs_params2);
+  serial_print(" HCS3=");
+  xhci_print_hex32(cap_regs->hcs_params3);
+  serial_print(" HCC1=");
+  xhci_print_hex32(cap_regs->hcc_params1);
+  serial_print(" DBOFF=");
+  xhci_print_hex32(cap_regs->dboff);
+  serial_print(" RTSOFF=");
+  xhci_print_hex32(cap_regs->rtsoff);
+  serial_print("\n");
+
+  serial_print("[xHCI][REGS] USBCMD=");
+  xhci_print_hex32(op_regs->usb_cmd);
+  serial_print(" USBSTS=");
+  xhci_print_hex32(op_regs->usb_sts);
+  serial_print(" PAGESIZE=");
+  xhci_print_hex32(op_regs->page_size);
+  serial_print(" CRCR=");
+  print_hex64(op_regs->crcr);
+  serial_print(" DCBAAP=");
+  print_hex64(op_regs->dcbaap);
+  serial_print(" CONFIG=");
+  xhci_print_hex32(op_regs->config);
+  serial_print("\n");
+
+  if (runtime_regs) {
+    serial_print("[xHCI][REGS] MFINDEX=");
+    xhci_print_hex32(runtime_regs->mfindex);
+    serial_print(" IMAN0=");
+    xhci_print_hex32(runtime_regs->interrupters[0].iman);
+    serial_print(" ERSTSZ0=");
+    xhci_print_hex32(runtime_regs->interrupters[0].erstsz);
+    serial_print(" ERSTBA0=");
+    print_hex64(runtime_regs->interrupters[0].erstba);
+    serial_print(" ERDP0=");
+    print_hex64(runtime_regs->interrupters[0].erdp);
+    serial_print("\n");
+  }
+}
+
 static int xhci_port_ready(uint32_t ps) {
   return (ps & PORTSC_CCS) && (ps & PORTSC_PED) &&
          (xhci_port_speed(ps) != 0) && (xhci_port_pls(ps) == 0);
@@ -516,21 +566,29 @@ static void xhci_port_clear_w1c(volatile uint32_t *portsc, uint32_t *ps) {
 }
 
 static int xhci_port_wait_ready(volatile uint32_t *portsc,
+                                uint32_t port_id, const char *stage,
                                 uint64_t timeout_us, uint32_t *out_ps) {
+  uint64_t start = xhci_time_now_ticks();
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
     uint32_t ps = *portsc;
     if (xhci_port_ready(ps)) {
       if (out_ps)
         *out_ps = ps;
+      xhci_time_log_elapsed(stage, start, "ready");
+      xhci_log_portsc(port_id, "[xHCI][PORT] Ready state", ps);
       return 1;
     }
     __asm__ volatile("pause");
   }
 
+  uint32_t final_ps = *portsc;
   if (out_ps)
-    *out_ps = *portsc;
-  return xhci_port_ready(out_ps ? *out_ps : *portsc);
+    *out_ps = final_ps;
+  int ready = xhci_port_ready(final_ps);
+  xhci_time_log_elapsed(stage, start, ready ? "ready-at-deadline" : "timeout");
+  xhci_log_portsc(port_id, "[xHCI][PORT] Wait final state", final_ps);
+  return ready;
 }
 
 static void xhci_port_force_u0(volatile uint32_t *portsc) {
@@ -546,33 +604,53 @@ static void xhci_port_force_u0(volatile uint32_t *portsc) {
 }
 
 static int xhci_port_warm_reset(volatile uint32_t *portsc,
-                                 uint64_t timeout_us) {
+                                 uint32_t port_id, uint64_t timeout_us) {
+  uint64_t start = xhci_time_now_ticks();
   uint32_t ps = *portsc;
   *portsc = xhci_portsc_rw_config(ps) | PORTSC_WPR;
 
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
     ps = *portsc;
-    if (!(ps & PORTSC_WPR))
+    if (!(ps & PORTSC_WPR)) {
+      xhci_time_log_elapsed("port_warm_reset", start, "complete");
+      xhci_log_portsc(port_id, "[xHCI][PORT] After warm reset", ps);
       return 1;
+    }
     __asm__ volatile("pause");
   }
-  return ((*portsc & PORTSC_WPR) == 0);
+
+  ps = *portsc;
+  int complete = (ps & PORTSC_WPR) == 0;
+  xhci_time_log_elapsed("port_warm_reset", start,
+                        complete ? "complete-at-deadline" : "timeout");
+  xhci_log_portsc(port_id, "[xHCI][PORT] Warm reset final", ps);
+  return complete;
 }
 
 static int xhci_port_cold_reset(volatile uint32_t *portsc,
-                                uint64_t timeout_us) {
+                                uint32_t port_id, uint64_t timeout_us) {
+  uint64_t start = xhci_time_now_ticks();
   uint32_t ps = *portsc;
   *portsc = xhci_portsc_rw_config(ps) | PORTSC_PR;
 
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
     ps = *portsc;
-    if (!(ps & PORTSC_PR))
+    if (!(ps & PORTSC_PR)) {
+      xhci_time_log_elapsed("port_cold_reset", start, "complete");
+      xhci_log_portsc(port_id, "[xHCI][PORT] After cold reset", ps);
       return 1;
+    }
     __asm__ volatile("pause");
   }
-  return ((*portsc & PORTSC_PR) == 0);
+
+  ps = *portsc;
+  int complete = (ps & PORTSC_PR) == 0;
+  xhci_time_log_elapsed("port_cold_reset", start,
+                        complete ? "complete-at-deadline" : "timeout");
+  xhci_log_portsc(port_id, "[xHCI][PORT] Cold reset final", ps);
+  return complete;
 }
 
 static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
@@ -581,6 +659,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   xhci_port_power_on(portsc, &ps);
   xhci_port_clear_w1c(portsc, &ps);
 
+  xhci_log_portsc(port_id, "[xHCI][PORT] Recovery start", ps);
   if (xhci_port_ready(ps)) {
     if (out_speed)
       *out_speed = xhci_port_speed(ps);
@@ -599,13 +678,13 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   if (speed_hint >= 4) {
     serial_print("[xHCI] Forcing warm reset (USB3)\n");
     (void)bootlog_checkpoint();
-    if (xhci_port_warm_reset(portsc, 100000u)) {
+    if (xhci_port_warm_reset(portsc, port_id, 100000u)) {
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
       xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
       (void)bootlog_checkpoint();
 
-      if (xhci_port_wait_ready(portsc, 300000u, &ps)) {
+      if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
         if (out_speed)
           *out_speed = xhci_port_speed(ps);
         return 1;
@@ -615,7 +694,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
     }
 
     xhci_port_force_u0(portsc);
-    if (xhci_port_wait_ready(portsc, 150000u, &ps)) {
+    if (xhci_port_wait_ready(portsc, port_id, "after_u0_request", 150000u, &ps)) {
       if (out_speed)
         *out_speed = xhci_port_speed(ps);
       return 1;
@@ -624,7 +703,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
 
   serial_print("[xHCI] Forcing cold reset\n");
   (void)bootlog_checkpoint();
-  if (!xhci_port_cold_reset(portsc, 100000u)) {
+  if (!xhci_port_cold_reset(portsc, port_id, 100000u)) {
     serial_print("[xHCI] Cold reset timed out\n");
     ps = *portsc;
     if (out_speed)
@@ -637,7 +716,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
   (void)bootlog_checkpoint();
 
-  if (xhci_port_wait_ready(portsc, 300000u, &ps)) {
+  if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
     if (out_speed)
       *out_speed = xhci_port_speed(ps);
     return 1;
@@ -1095,10 +1174,17 @@ void xhci_init(uint64_t mmio_phys) {
 
   /* xHCI initializes before IRQ0 is enabled; prepare a standalone clock. */
   xhci_time_init();
-  serial_print("[xHCI] Early wait clock initialized\n");
+  xhci_time_log_clock();
+  uint64_t controller_init_start = xhci_time_now_ticks();
+  xhci_log_controller_registers("initial");
 
   // Real hardware often requires BIOS->OS ownership handoff.
-  xhci_bios_handoff();
+  {
+    uint64_t handoff_start = xhci_time_now_ticks();
+    xhci_bios_handoff();
+    xhci_time_log_elapsed("bios_ownership_handoff", handoff_start, "finished");
+    xhci_log_controller_registers("after-bios-handoff");
+  }
 
   // Context size (HCCPARAMS1.CSZ): 0=32B contexts, 1=64B contexts
   g_ctx_size = (cap_regs->hcc_params1 & (1u << 2)) ? 64u : 32u;
@@ -1113,14 +1199,21 @@ void xhci_init(uint64_t mmio_phys) {
   (void)bootlog_checkpoint();
   (void)bootlog_flush();
   {
+    uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while (!(op_regs->usb_sts & USB_STS_HCH) &&
            !xhci_time_expired(deadline))
       __asm__ volatile("pause");
     if (!(op_regs->usb_sts & USB_STS_HCH)) {
+      xhci_time_log_elapsed("controller_halt", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller did not halt; skipping this controller\n");
+      xhci_log_controller_registers("halt-timeout");
+      xhci_time_log_elapsed("controller_init", controller_init_start, "halt-timeout");
+      (void)bootlog_checkpoint();
       return;
     }
+    xhci_time_log_elapsed("controller_halt", wait_start, "halted");
+    xhci_log_controller_registers("halted");
   }
 
   serial_print("[xHCI] Issuing Reset...\n");
@@ -1128,14 +1221,21 @@ void xhci_init(uint64_t mmio_phys) {
   (void)bootlog_flush();
   op_regs->usb_cmd |= USB_CMD_HCRST;
   {
+    uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while ((op_regs->usb_cmd & USB_CMD_HCRST) &&
            !xhci_time_expired(deadline))
       __asm__ volatile("pause");
     if (op_regs->usb_cmd & USB_CMD_HCRST) {
+      xhci_time_log_elapsed("controller_reset", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller reset timed out; skipping this controller\n");
+      xhci_log_controller_registers("reset-timeout");
+      xhci_time_log_elapsed("controller_init", controller_init_start, "reset-timeout");
+      (void)bootlog_checkpoint();
       return;
     }
+    xhci_time_log_elapsed("controller_reset", wait_start, "complete");
+    xhci_log_controller_registers("after-reset-bit-clear");
   }
 
   serial_print("[xHCI] Waiting for CNR (timeout 1000 ms)...\n");
@@ -1143,14 +1243,21 @@ void xhci_init(uint64_t mmio_phys) {
   (void)bootlog_flush();
   {
     const uint32_t USB_STS_CNR = 1u << 11;
+    uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while ((op_regs->usb_sts & USB_STS_CNR) &&
            !xhci_time_expired(deadline))
       __asm__ volatile("pause");
     if (op_regs->usb_sts & USB_STS_CNR) {
+      xhci_time_log_elapsed("controller_not_ready", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller not ready after reset; skipping this controller\n");
+      xhci_log_controller_registers("cnr-timeout");
+      xhci_time_log_elapsed("controller_init", controller_init_start, "cnr-timeout");
+      (void)bootlog_checkpoint();
       return;
     }
+    xhci_time_log_elapsed("controller_not_ready", wait_start, "ready");
+    xhci_log_controller_registers("controller-ready");
   }
 
   // 3) Configure MaxSlots
@@ -1262,6 +1369,7 @@ void xhci_init(uint64_t mmio_phys) {
   // 7) Run controller (do NOT enable INTE yet; polling only)
   op_regs->usb_cmd |= USB_CMD_RS | USB_CMD_INTE;
   serial_print("[xHCI] Controller Running\n");
+  xhci_log_controller_registers("running");
 
   // Prime ERDP
   xhci_event_ring_update_erdp();
@@ -1293,6 +1401,11 @@ void xhci_init(uint64_t mmio_phys) {
                               (1u << 20) | (1u << 21) | (1u << 22);
 
   serial_print("[xHCI] PORT SCAN BEGIN\n");
+  uint32_t connected_ports = 0;
+  uint32_t ready_ports = 0;
+  uint32_t failed_ports = 0;
+  uint32_t addressed_devices = 0;
+  uint64_t port_scan_start = xhci_time_now_ticks();
 
   /*
    * Power every root port once. Only incur the power-good delay if we actually
@@ -1305,9 +1418,13 @@ void xhci_init(uint64_t mmio_phys) {
     volatile uint32_t *portsc =
         (uint32_t *)((uint64_t)op_regs + 0x400 + (i * 0x10));
     uint32_t ps = *portsc;
+    uint32_t port_id = i + 1u;
 
     if (!(ps & PORTSC_PP)) {
+      xhci_log_portsc(port_id, "[xHCI][PORT] Power-on before", ps);
       *portsc = xhci_portsc_rw_config(ps) | PORTSC_PP;
+      ps = *portsc;
+      xhci_log_portsc(port_id, "[xHCI][PORT] Power-on after", ps);
       powered_any_port = 1;
     }
   }
@@ -1324,6 +1441,7 @@ void xhci_init(uint64_t mmio_phys) {
 
     uint32_t port_id = i + 1;
     if (ps & PORTSC_CCS) {
+      ++connected_ports;
       xhci_log_portsc(port_id, "[xHCI] Device detected", ps);
     } else {
       xhci_log_portsc(port_id, "[xHCI] Port", ps);
@@ -1346,8 +1464,10 @@ void xhci_init(uint64_t mmio_phys) {
     xhci_log_portsc(port_id, "[xHCI] Final", ps);
 
     if (ready) {
+      ++ready_ports;
       serial_print("[xHCI] Port ready\n");
     } else {
+      ++failed_ports;
       serial_print("[xHCI] Port NOT ready after reset(s)\n");
       serial_print("[xHCI] Stuck state: PLS=");
       xhci_print_u32_dec(xhci_port_pls(ps));
@@ -1371,8 +1491,30 @@ void xhci_init(uint64_t mmio_phys) {
       continue;
     }
 
-    serial_print("[xHCI] PORT SCAN END\n");
+    ++addressed_devices;
+    serial_print("[xHCI] Device addressed port=");
+    xhci_print_u32_dec(port_id);
+    serial_print(" slot=");
+    xhci_print_u32_dec(slot_id);
+    serial_print(" speed=");
+    xhci_print_u32_dec(speed);
+    serial_print("\n");
   }
 
+  serial_print("[xHCI][SUMMARY] ports=");
+  xhci_print_u32_dec(num_ports);
+  serial_print(" connected=");
+  xhci_print_u32_dec(connected_ports);
+  serial_print(" ready=");
+  xhci_print_u32_dec(ready_ports);
+  serial_print(" failed=");
+  xhci_print_u32_dec(failed_ports);
+  serial_print(" addressed=");
+  xhci_print_u32_dec(addressed_devices);
+  serial_print("\n");
+  xhci_time_log_elapsed("root_port_scan", port_scan_start, "finished");
+  xhci_time_log_elapsed("controller_init", controller_init_start, "finished");
+  xhci_log_controller_registers("init-complete");
+  (void)bootlog_checkpoint();
   (void)bootlog_flush();
 }
