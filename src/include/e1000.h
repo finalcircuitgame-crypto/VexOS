@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-/* First supported controller: QEMU's Intel 82540EM-compatible 8086:100E. */
-#define E1000_VENDOR_INTEL 0x8086u
-#define E1000_DEVICE_82540EM 0x100Eu
+/* QEMU's Intel 82540EM-compatible E1000 controller. */
+#define E1000_VENDOR_INTEL    0x8086u
+#define E1000_DEVICE_82540EM  0x100Eu
 
-int e1000_init(uint8_t bus, uint8_t slot, uint8_t function,
-               uint16_t vendor_id, uint16_t device_id);
+/* The caller enables PCI memory decoding and bus mastering before this call. */
+int e1000_init(uint64_t mmio_base);
 
 #endif
