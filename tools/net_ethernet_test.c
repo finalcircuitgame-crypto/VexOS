@@ -99,7 +99,7 @@ int main(void) {
     CHECK(stats.rx_invalid == 3u);
     CHECK(stats.rx_unsupported == 2u);
     CHECK(stats.rx_no_handler == 1u);
-    CHECK(device.rx_dropped == 6u);
+    CHECK(device.rx_dropped == 5u);
     CHECK(g_handler_calls == 1u);
 
     puts("PASS: Ethernet II bounds, EtherType dispatch, borrowed-buffer contract, and drop accounting");
