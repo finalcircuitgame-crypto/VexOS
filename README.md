@@ -6,6 +6,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 - EFI bootloader (src/boot) that loads kernel.elf and passes a BootInfo struct
 - Kernel core (src/kernel/core): framebuffer console, PMM, VMM, heap, PCI enumeration and drivers, desktop UI, and setup wizard
 - Persistent SimpleFS storage with SFS1 compatibility and journaled SFS2 nested-file operations
+- Boot diagnostics: serial output is buffered in a 32 KiB ring and saved to `/boot.log` when a writable SFS1 or journal-enabled SFS2 volume is available; logging never formats a disk
 
 ## Development roadmap
 
@@ -59,6 +60,8 @@ The flasher provides two operations:
 - **Full Flash (admin)** creates a GPT partition table and FAT32 `VEXOS` volume, then copies the boot files. This erases every partition and file on the selected physical USB disk. Only this operation requires running elevated; verify the model and capacity, and complete both confirmation prompts.
 
 The utility only lists physical USB disks for whole-disk flashing, rechecks the disk identity immediately before repartitioning, refuses Windows boot/system disks, and verifies copied files with SHA-256. It does not install VexOS to internal drives. The separate `dist/storage.img` is not written by this boot-media utility; persistent storage over USB mass storage is not part of this USB boot workflow yet.
+
+Boot-log persistence uses the kernel's existing ATA PIO/AHCI SimpleFS backend. It does **not** write to the FAT32 boot partition, Windows NTFS volumes, NVMe devices, or USB flash drives; FAT32 is currently read-only and USB mass-storage support is not implemented. When no compatible writable VexOS volume is mounted, the most recent 32 KiB stays in RAM for that boot and is not yet exportable after a reset.
 
 A successful flash creates this boot layout:
 
