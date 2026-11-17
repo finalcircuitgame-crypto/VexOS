@@ -130,7 +130,7 @@ $(OBJDIR)/font_inter_regular.o: $(FONT_SOURCE_INTER_REGULAR)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding Inter Regular: $<"
 	cp "$<" "$(OBJDIR)/font_inter_regular.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_inter_regular.ttf font_inter_regular.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_inter_regular.ttf font_inter_regular.o
 else
 $(OBJDIR)/font_inter_regular.o:
 	@echo "Missing required font face: Inter Regular" >&2
@@ -143,7 +143,7 @@ $(OBJDIR)/font_inter_bold.o: $(FONT_SOURCE_INTER_BOLD)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding Inter Bold: $<"
 	cp "$<" "$(OBJDIR)/font_inter_bold.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_inter_bold.ttf font_inter_bold.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_inter_bold.ttf font_inter_bold.o
 else
 $(OBJDIR)/font_inter_bold.o:
 	@echo "Missing required font face: Inter Bold" >&2
@@ -156,7 +156,7 @@ $(OBJDIR)/font_lato_regular.o: $(FONT_SOURCE_LATO_REGULAR)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding Lato Regular: $<"
 	cp "$<" "$(OBJDIR)/font_lato_regular.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_lato_regular.ttf font_lato_regular.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_lato_regular.ttf font_lato_regular.o
 else
 $(OBJDIR)/font_lato_regular.o:
 	@echo "Missing required font face: Lato Regular" >&2
@@ -169,7 +169,7 @@ $(OBJDIR)/font_lato_bold.o: $(FONT_SOURCE_LATO_BOLD)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding Lato Bold: $<"
 	cp "$<" "$(OBJDIR)/font_lato_bold.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_lato_bold.ttf font_lato_bold.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_lato_bold.ttf font_lato_bold.o
 else
 $(OBJDIR)/font_lato_bold.o:
 	@echo "Missing required font face: Lato Bold" >&2
@@ -182,7 +182,7 @@ $(OBJDIR)/font_dejavu_sans_regular.o: $(FONT_SOURCE_DEJAVU_SANS_REGULAR)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding DejaVu Sans Regular: $<"
 	cp "$<" "$(OBJDIR)/font_dejavu_sans_regular.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_sans_regular.ttf font_dejavu_sans_regular.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_sans_regular.ttf font_dejavu_sans_regular.o
 else
 $(OBJDIR)/font_dejavu_sans_regular.o:
 	@echo "Missing required font face: DejaVu Sans Regular" >&2
@@ -195,7 +195,7 @@ $(OBJDIR)/font_dejavu_sans_bold.o: $(FONT_SOURCE_DEJAVU_SANS_BOLD)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding DejaVu Sans Bold: $<"
 	cp "$<" "$(OBJDIR)/font_dejavu_sans_bold.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_sans_bold.ttf font_dejavu_sans_bold.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_sans_bold.ttf font_dejavu_sans_bold.o
 else
 $(OBJDIR)/font_dejavu_sans_bold.o:
 	@echo "Missing required font face: DejaVu Sans Bold" >&2
@@ -208,7 +208,7 @@ $(OBJDIR)/font_dejavu_mono_regular.o: $(FONT_SOURCE_DEJAVU_MONO_REGULAR)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding DejaVu Sans Mono Regular: $<"
 	cp "$<" "$(OBJDIR)/font_dejavu_mono_regular.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_mono_regular.ttf font_dejavu_mono_regular.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_mono_regular.ttf font_dejavu_mono_regular.o
 else
 $(OBJDIR)/font_dejavu_mono_regular.o:
 	@echo "Missing required font face: DejaVu Sans Mono Regular" >&2
@@ -221,7 +221,7 @@ $(OBJDIR)/font_dejavu_mono_bold.o: $(FONT_SOURCE_DEJAVU_MONO_BOLD)
 	@mkdir -p $(OBJDIR)
 	@echo "[FONT] Embedding DejaVu Sans Mono Bold: $<"
 	cp "$<" "$(OBJDIR)/font_dejavu_mono_bold.ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_mono_bold.ttf font_dejavu_mono_bold.o
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_mono_bold.ttf font_dejavu_mono_bold.o
 else
 $(OBJDIR)/font_dejavu_mono_bold.o:
 	@echo "Missing required font face: DejaVu Sans Mono Bold" >&2
