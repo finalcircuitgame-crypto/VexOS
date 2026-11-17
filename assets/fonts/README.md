@@ -30,6 +30,34 @@ The kernel embeds the atlas; it does not load TTF/OTF files at runtime or
 depend on a runtime font engine. The original CGA bitmap font remains available
 as a fallback for bytes outside the built-in ASCII atlas.
 
+## Recommended folder layout
+
+Keep only the faces used by the atlas generator and each family's license:
+
+```text
+assets/fonts/
+  README.md
+  font_atlas.bin                 # generated locally; ignored by Git
+  Inter/
+    Inter-Regular.ttf
+    Inter-Bold.ttf
+    OFL.txt
+  Lato/
+    Lato-Regular.ttf
+    Lato-Bold.ttf
+    OFL.txt
+  DejaVu/
+    DejaVuSans.ttf
+    DejaVuSans-Bold.ttf
+    DejaVuSansMono.ttf
+    DejaVuSansMono-Bold.ttf
+    LICENSE
+```
+
+`font_atlas.bin` is generated output, not a source font. The generator
+recursively searches the family folders, so this layout works without copying
+font files into the top-level `assets/fonts/` directory.
+
 ## Preparing the source fonts
 
 Download the static **regular and bold** font files for all four families
