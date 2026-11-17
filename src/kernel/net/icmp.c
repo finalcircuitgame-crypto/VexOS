@@ -12,10 +12,6 @@
 
 static icmp_stats_t g_stats;
 
-static uint16_t icmp_read_be16(const uint8_t *bytes) {
-    return (uint16_t)(((uint16_t)bytes[0] << 8) | bytes[1]);
-}
-
 static void icmp_write_be16(uint8_t *bytes, uint16_t value) {
     bytes[0] = (uint8_t)(value >> 8);
     bytes[1] = (uint8_t)value;
