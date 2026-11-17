@@ -595,7 +595,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                   0xF0F1FCu);
   gfx_draw_string(list_x + 14u, body_y + 30u,
                   "Saved on this VexOS volume", 0x8995B1u);
-  if (list_w > 450u) {
+  if (list_w > 280u) {
     uint32_t action_y = body_y + 10u;
     uint32_t open_x = list_x + list_w - 266u;
     uint32_t new_x = list_x + list_w - 204u;
@@ -778,14 +778,14 @@ file_manager_event_t file_manager_handle_click(
   }
   uint32_t list_panel_x = (uint32_t)x + 160u;
   uint32_t list_panel_w = w > 176 ? (uint32_t)w - 172u : 1u;
-  if (list_panel_w > 450u &&
+  if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 266u),
              (int32_t)(by + 10u), 56, 23)) {
     g_search_focused = 0;
     g_delete_armed = 0;
     return fm_open_storage_index(g_selected, open_file);
   }
-  if (list_panel_w > 450u &&
+  if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 204u),
              (int32_t)(by + 10u), 68, 23)) {
     g_search_focused = 0;
@@ -794,7 +794,7 @@ file_manager_event_t file_manager_handle_click(
     fm_create_file(open_file);
     return FILE_MANAGER_EVENT_CHANGED;
   }
-  if (list_panel_w > 450u &&
+  if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 130u),
              (int32_t)(by + 10u), 58, 23)) {
     g_search_focused = 0;
@@ -802,10 +802,10 @@ file_manager_event_t file_manager_handle_click(
     wm_raise(APP_EXPLORER);
     return FILE_MANAGER_EVENT_CHANGED;
   }
-  if (list_panel_w > 450u &&
+  if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
              (int32_t)(by + 10u), 54, 23)) {
-  if (list_panel_w > 390u &&
+  if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
              (int32_t)(by + 10u), 54, 23)) {
     g_search_focused = 0;
