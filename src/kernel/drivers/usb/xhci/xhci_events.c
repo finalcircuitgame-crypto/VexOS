@@ -80,40 +80,108 @@ int xhci_poll_event(xhci_trb_t *out) {
 
 int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
   /* Command completion should normally be immediate; cap broken hardware at 250 ms. */
+  uint64_t start = xhci_time_now_ticks();
   uint64_t deadline = xhci_time_deadline_us(250000u);
   while (!xhci_time_expired(deadline)) {
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
       if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
+        uint32_t slot = trb_slot_id(evt.control);
+        uint32_t cc = trb_cc(evt.status);
         if (out_slot_id)
-          *out_slot_id = trb_slot_id(evt.control);
+          *out_slot_id = slot;
         if (out_cc)
-          *out_cc = trb_cc(evt.status);
+          *out_cc = cc;
+
+        serial_print("[xHCI][CMD] completion slot=");
+        xhci_print_u32_dec(slot);
+        serial_print(" cc=");
+        xhci_print_u32_dec(cc);
+        serial_print(" status=");
+        xhci_print_hex32(evt.status);
+        serial_print(" control=");
+        xhci_print_hex32(evt.control);
+        serial_print("\n");
+        xhci_time_log_elapsed("command_completion", start,
+                              cc == 1u ? "success" : "device-error");
         return 1;
       }
     } else {
       __asm__ volatile("pause");
     }
   }
+
+  serial_print("[xHCI][CMD] TIMEOUT waiting for command completion");
+  if (op_regs) {
+    serial_print(" USBSTS=");
+    xhci_print_hex32(op_regs->usb_sts);
+    serial_print(" USBCMD=");
+    xhci_print_hex32(op_regs->usb_cmd);
+  }
+  if (runtime_regs) {
+    serial_print(" IMAN=");
+    xhci_print_hex32(runtime_regs->interrupters[0].iman);
+    serial_print(" ERDP=");
+    xhci_print_hex32((uint32_t)runtime_regs->interrupters[0].erdp);
+  }
+  serial_print(" event_index=");
+  xhci_print_u32_dec(event_ring_index);
+  serial_print(" cycle=");
+  xhci_print_u32_dec(event_ring_cycle);
+  serial_print("\n");
+  xhci_time_log_elapsed("command_completion", start, "timeout");
   return 0;
 }
 
 int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
   /* Slow/absent USB devices must not stall boot for an unbounded spin budget. */
+  uint64_t start = xhci_time_now_ticks();
   uint64_t deadline = xhci_time_deadline_us(500000u);
   while (!xhci_time_expired(deadline)) {
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
       if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT &&
           trb_slot_id(evt.control) == slot_id) {
+        uint32_t cc = trb_cc(evt.status);
         if (out_cc)
-          *out_cc = trb_cc(evt.status);
+          *out_cc = cc;
+
+        serial_print("[xHCI][XFER] completion slot=");
+        xhci_print_u32_dec(slot_id);
+        serial_print(" cc=");
+        xhci_print_u32_dec(cc);
+        serial_print(" status=");
+        xhci_print_hex32(evt.status);
+        serial_print(" control=");
+        xhci_print_hex32(evt.control);
+        serial_print("\n");
+        xhci_time_log_elapsed("transfer_completion", start,
+                              (cc == 1u || cc == 13u) ? "success" : "device-error");
         return 1;
       }
     } else {
       __asm__ volatile("pause");
     }
   }
+
+  serial_print("[xHCI][XFER] TIMEOUT slot=");
+  xhci_print_u32_dec(slot_id);
+  if (op_regs) {
+    serial_print(" USBSTS=");
+    xhci_print_hex32(op_regs->usb_sts);
+  }
+  if (runtime_regs) {
+    serial_print(" IMAN=");
+    xhci_print_hex32(runtime_regs->interrupters[0].iman);
+    serial_print(" ERDP=");
+    xhci_print_hex32((uint32_t)runtime_regs->interrupters[0].erdp);
+  }
+  serial_print(" event_index=");
+  xhci_print_u32_dec(event_ring_index);
+  serial_print(" cycle=");
+  xhci_print_u32_dec(event_ring_cycle);
+  serial_print("\n");
+  xhci_time_log_elapsed("transfer_completion", start, "timeout");
   return 0;
 }
 
