@@ -2,6 +2,7 @@
 #include "bootlog.h"
 #include "ahci.h"
 #include "usb/xhci.h"
+#include "usb/xhci_quirks.h"
 
 // I/O ports for PCI
 static inline void outl(uint16_t port, uint32_t val) {
@@ -142,7 +143,7 @@ static void pci_probe_ahci_before_usb(void) {
 }
 
 static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
-                                    uint16_t vendor_id) {
+                                    uint32_t quirk_flags) {
     uint32_t usb2pr = pci_config_read_dword(bus, slot, func, 0xD0);
     uint32_t usb3pr = pci_config_read_dword(bus, slot, func, 0xD4);
 
@@ -152,7 +153,7 @@ static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
     print_hex(usb3pr);
     serial_print("\n");
 
-    if (vendor_id != 0x8086) {
+    if (!(quirk_flags & XHCI_QUIRK_INTEL_EXTENDED_ROUTING)) {
         return;
     }
 
@@ -240,8 +241,23 @@ void pci_enumerate() {
                     command |= (uint16_t)0x0006u;
                     pci_config_write_dword((uint8_t)bus, slot, func, 0x04, (uint32_t)command);
 
-                    xhci_force_usb2_routing((uint8_t)bus, slot, func, vendor_id);
-                    xhci_init(mmio_base);
+                    uint8_t revision_id = (uint8_t)(class_info & 0xFFu);
+                    const xhci_quirks_t *quirks =
+                        xhci_quirks_detect(vendor_id, device_id, revision_id);
+
+                    serial_print("[PCI] xHCI identity vendor=");
+                    print_hex(vendor_id);
+                    serial_print(" device=");
+                    print_hex(device_id);
+                    serial_print(" revision=");
+                    print_hex(revision_id);
+                    serial_print(" quirks=");
+                    serial_print(quirks->name);
+                    serial_print("\n");
+
+                    xhci_force_usb2_routing((uint8_t)bus, slot, func,
+                                            quirks->flags);
+                    xhci_init(mmio_base, vendor_id, device_id, revision_id);
                 }
 
                 // If not multi-function, don't check other functions.
