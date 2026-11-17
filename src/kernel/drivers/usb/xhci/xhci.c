@@ -1,5 +1,6 @@
 #include "usb/xhci.h"
 #include "xhci_internal.h"
+#include "xhci_quirks.h"
 #include "heap.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -1161,9 +1162,22 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
 /**
  * See xHCI Spec Section 4.2: Host Controller Initialization
  */
-void xhci_init(uint64_t mmio_phys) {
+void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
+               uint16_t device_id, uint8_t revision_id) {
+  const xhci_quirks_t *quirks =
+      xhci_quirks_detect(vendor_id, device_id, revision_id);
   serial_print("[xHCI] Initializing Controller at ");
   print_hex64(mmio_phys);
+  serial_print(" vendor=");
+  xhci_print_hex32(vendor_id);
+  serial_print(" device=");
+  xhci_print_hex32(device_id);
+  serial_print(" revision=");
+  xhci_print_hex32(revision_id);
+  serial_print(" quirks=");
+  serial_print(quirks->name);
+  serial_print(" flags=");
+  xhci_print_hex32(quirks->flags);
   serial_print("\n");
 
   // 1) Map MMIO space
