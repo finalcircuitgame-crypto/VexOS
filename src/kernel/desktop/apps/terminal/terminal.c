@@ -143,8 +143,19 @@ void terminal_draw(const terminal_render_context_t *context) {
 
   uint32_t tx = px + 12u;
   uint32_t ty = py + 12u;
-  uint32_t cols = pw > 24u ? (pw - 24u) / 8u : 0u;
-  uint32_t rows = ph > 20u ? (ph - 20u) / 10u : 0u;
+  gfx_font_family_t saved_family = gfx_get_font_family();
+  uint8_t saved_scale = gfx_get_font_scale();
+  uint8_t saved_bold = gfx_get_font_bold();
+  uint16_t saved_size = gfx_get_font_size();
+
+  gfx_set_font(GFX_FONT_DEJAVU_MONO, saved_scale, 0u);
+  gfx_set_font_size(14u);
+  uint32_t cell_width = gfx_measure_string("M");
+  uint32_t cell_height = gfx_get_font_line_height();
+  if (!cell_width) cell_width = 9u;
+  if (!cell_height) cell_height = 16u;
+  uint32_t cols = pw > 24u ? (pw - 24u) / cell_width : 0u;
+  uint32_t rows = ph > 20u ? (ph - 20u) / cell_height : 0u;
 
   if (cols && rows) {
     uint32_t capacity = cols * rows;
@@ -162,7 +173,7 @@ void terminal_draw(const terminal_render_context_t *context) {
       }
 
       if (cx < cols && value >= 32 && value <= 126)
-        gfx_draw_glyph(tx + cx * 8u, ty + cy * 10u,
+        gfx_draw_glyph(tx + cx * cell_width, ty + cy * cell_height,
                        (uint8_t)value, 0xD7E7F7u);
 
       cx++;
@@ -173,15 +184,28 @@ void terminal_draw(const terminal_render_context_t *context) {
     }
   }
 
+  gfx_set_font(saved_family, saved_scale, saved_bold);
+  gfx_set_font_size(14u);
+
   uint32_t input_y = (uint32_t)(y + h - 30);
   gfx_blend_round_rect((uint32_t)(x + 10), input_y, (uint32_t)(w - 20),
                        24u, 5u, 0x1A2C40u, 255);
   gfx_draw_rect((uint32_t)(x + 18), input_y + 1u,
                 (uint32_t)(w - 36), 1u, 0x35516Du);
-  gfx_draw_string((uint32_t)(x + 22), input_y + 8u, ">", 0x79E0B0u);
-  gfx_draw_string((uint32_t)(x + 38), input_y + 8u, g_line, 0xF1F6FCu);
+  uint32_t input_x = (uint32_t)(x + 22);
+  uint32_t input_text_y = input_y + 4u;
+  gfx_draw_string(input_x, input_text_y, ">", 0x79E0B0u);
+  uint32_t line_x = input_x + gfx_measure_string("> ");
+  gfx_draw_string(line_x, input_text_y, g_line, 0xF1F6FCu);
 
-  if (context->focused && ((context->tick / 30u) % 2u == 0u))
-    gfx_draw_rect((uint32_t)(x + 38) + g_line_length * 8u,
-                  input_y + 8u, 7u, 8u, 0x79E0B0u);
+  if (context->focused && ((context->tick / 30u) % 2u == 0u)) {
+    uint32_t cursor_x = line_x + gfx_measure_string(g_line);
+    uint32_t cursor_height = gfx_get_font_line_height();
+    if (cursor_height > 2u)
+      cursor_height -= 2u;
+    gfx_draw_rect(cursor_x, input_y + 5u, 2u, cursor_height, 0x79E0B0u);
+  }
+
+  gfx_set_font(saved_family, saved_scale, saved_bold);
+  gfx_set_font_size(saved_size);
 }
