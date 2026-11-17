@@ -1,5 +1,4 @@
 #include "usb/xhci.h"
-#include "bootlog.h"
 #include "xhci_internal.h"
 #include "heap.h"
 #include "pmm.h"
@@ -701,11 +700,10 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
    */
   if (speed_hint >= 4) {
     serial_print("[xHCI] Forcing warm reset (USB3)\n");
-    (void)bootlog_checkpoint();
+
     if (xhci_port_warm_reset(portsc, port_id, 100000u)) {
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
-      (void)bootlog_checkpoint();
 
       if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
         if (out_speed)
@@ -725,7 +723,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   }
 
   serial_print("[xHCI] Forcing cold reset\n");
-  (void)bootlog_checkpoint();
+
   if (!xhci_port_cold_reset(portsc, port_id, 100000u)) {
     serial_print("[xHCI] Cold reset timed out\n");
     ps = *portsc;
@@ -737,7 +735,6 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   ps = *portsc;
   xhci_port_clear_w1c(portsc, &ps);
   xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
-  (void)bootlog_checkpoint();
 
   if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
     if (out_speed)
@@ -1219,8 +1216,6 @@ void xhci_init(uint64_t mmio_phys) {
   serial_print("[xHCI] Resetting Controller...\n");
   op_regs->usb_cmd &= ~USB_CMD_RS;
   serial_print("[xHCI] Waiting for halt (timeout 1000 ms)...\n");
-  (void)bootlog_checkpoint();
-
 
   {
     uint64_t wait_start = xhci_time_now_ticks();
@@ -1233,7 +1228,7 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print("[xHCI] ERROR: controller did not halt; skipping this controller\n");
       xhci_log_controller_registers("halt-timeout");
       xhci_time_log_elapsed("controller_init", controller_init_start, "halt-timeout");
-      (void)bootlog_checkpoint();
+
       return;
     }
     xhci_time_log_elapsed("controller_halt", wait_start, "halted");
@@ -1241,8 +1236,6 @@ void xhci_init(uint64_t mmio_phys) {
   }
 
   serial_print("[xHCI] Issuing Reset...\n");
-  (void)bootlog_checkpoint();
-
 
   op_regs->usb_cmd |= USB_CMD_HCRST;
   {
@@ -1256,7 +1249,7 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print("[xHCI] ERROR: controller reset timed out; skipping this controller\n");
       xhci_log_controller_registers("reset-timeout");
       xhci_time_log_elapsed("controller_init", controller_init_start, "reset-timeout");
-      (void)bootlog_checkpoint();
+
       return;
     }
     xhci_time_log_elapsed("controller_reset", wait_start, "complete");
@@ -1264,8 +1257,6 @@ void xhci_init(uint64_t mmio_phys) {
   }
 
   serial_print("[xHCI] Waiting for CNR (timeout 1000 ms)...\n");
-  (void)bootlog_checkpoint();
-
 
   {
     const uint32_t USB_STS_CNR = 1u << 11;
@@ -1279,7 +1270,7 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print("[xHCI] ERROR: controller not ready after reset; skipping this controller\n");
       xhci_log_controller_registers("cnr-timeout");
       xhci_time_log_elapsed("controller_init", controller_init_start, "cnr-timeout");
-      (void)bootlog_checkpoint();
+
       return;
     }
     xhci_time_log_elapsed("controller_not_ready", wait_start, "ready");
@@ -1502,8 +1493,6 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print(" speed=");
       xhci_print_u32_dec(speed);
       serial_print("\n");
-      (void)bootlog_checkpoint();
-
 
       continue;
     }
@@ -1544,7 +1533,5 @@ void xhci_init(uint64_t mmio_phys) {
   xhci_time_log_elapsed("root_port_scan", port_scan_start, "finished");
   xhci_time_log_elapsed("controller_init", controller_init_start, "finished");
   xhci_log_controller_registers("init-complete");
-  (void)bootlog_checkpoint();
-
 
 }
