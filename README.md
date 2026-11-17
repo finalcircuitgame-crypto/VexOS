@@ -27,7 +27,7 @@ The kernel uses **stb_truetype** to parse and rasterize the original TTF faces
 at runtime. No Pillow package, generated bitmap atlas, or host-side font
 preprocessing step is required.
 
-Provide the eight static regular/bold TTF files listed in
+Provide the twelve static regular/bold TTF files listed in
 [`assets/fonts/README.md`](assets/fonts/README.md). The Makefile searches
 `assets/fonts/` recursively and also checks `/usr/share/fonts/` (useful for
 Ubuntu/WSL and CI). On Ubuntu/WSL, the matching distro fonts can be installed
