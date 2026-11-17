@@ -8,6 +8,7 @@ static uint32_t *g_backbuffer;
 static const uint8_t *g_font;
 static uint8_t g_font_family = GFX_FONT_INTER;
 static uint8_t g_font_scale = 1u;
+static uint16_t g_font_pixel_height = 16u;
 static uint8_t g_font_bold;
 static gfx_rect_t g_clip_stack[GFX_CLIP_STACK_MAX];
 static uint32_t g_clip_depth;
@@ -69,6 +70,7 @@ void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font) {
   g_font = font;
   g_font_family = GFX_FONT_INTER;
   g_font_scale = 1u;
+  g_font_pixel_height = 16u;
   g_font_bold = 0u;
   g_clip_depth = 0;
 }
@@ -370,9 +372,23 @@ void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold) {
     family = GFX_FONT_INTER;
   if (scale < 1u) scale = 1u;
   if (scale > 3u) scale = 3u;
+  static const uint16_t size_presets[3] = {16u, 20u, 24u};
   g_font_family = (uint8_t)family;
   g_font_scale = scale;
+  g_font_pixel_height = size_presets[scale - 1u];
   g_font_bold = bold ? 1u : 0u;
+}
+
+void gfx_set_font_size(uint16_t pixel_height) {
+  if (pixel_height < 6u)
+    pixel_height = 6u;
+  if (pixel_height > 96u)
+    pixel_height = 96u;
+  g_font_pixel_height = pixel_height;
+}
+
+uint16_t gfx_get_font_size(void) {
+  return g_font_pixel_height;
 }
 
 gfx_font_family_t gfx_get_font_family(void) {
@@ -443,7 +459,7 @@ static uint32_t gfx_decode_utf8(const char **text) {
 }
 
 static uint16_t gfx_font_pixel_height(void) {
-  return (uint16_t)(10u * (uint16_t)g_font_scale);
+  return g_font_pixel_height;
 }
 
 uint32_t gfx_get_font_line_height(void) {
@@ -517,10 +533,10 @@ void gfx_draw_codepoint(uint32_t x, uint32_t y, uint32_t codepoint,
   FontEngine_GetLineMetrics(g_font_family, g_font_bold, pixel_height,
                             &ascent, &descent, &line_gap);
 
+  /* TrueType glyphs are variable-width; clipping them to the old 8x10
+     bitmap cell cuts off wide letters such as M and W. Clip only to the
+     active screen/window region and let the font engine bound the glyph. */
   gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
-  gfx_rect_t cell = {x, y, 8u * (uint32_t)g_font_scale,
-                     10u * (uint32_t)g_font_scale};
-  clip = gfx_intersect(clip, cell);
   if (!clip.width || !clip.height)
     return;
 
