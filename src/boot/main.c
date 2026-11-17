@@ -225,6 +225,11 @@ static int CaptureRuntimeRegions(EFI_SYSTEM_TABLE *system_table,
                                  EFI_MEMORY_DESCRIPTOR *map,
                                  UINTN map_size, UINTN descriptor_size,
                                  BootInfo *boot_info) {
+    if (!boot_info)
+        return 0;
+    boot_info->RuntimeSetVariable = 0;
+    boot_info->RuntimeRegionCount = 0;
+
     if (!system_table || !system_table->RuntimeServices ||
         !system_table->RuntimeServices->SetVariable || !map || !boot_info ||
         descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR))
