@@ -82,6 +82,10 @@ uint64_t xhci_time_deadline_us(uint64_t timeout_us);
 int xhci_time_expired(uint64_t deadline);
 void xhci_time_delay_us(uint64_t duration_us);
 uint64_t xhci_time_frequency_hz(void);
+uint64_t xhci_time_now_ticks(void);
+void xhci_time_log_clock(void);
+void xhci_time_log_elapsed(const char *stage, uint64_t start_ticks,
+                           const char *result);
 
 /*
  * Publish DMA descriptors before updating a Link TRB or ringing an xHCI
