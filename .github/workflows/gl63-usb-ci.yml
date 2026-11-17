@@ -45,9 +45,40 @@ jobs:
           test -s dist/tiny64.img
           test -s dist/storage.img
 
-      - name: Prepare disposable USB mass-storage device
+      - name: Prepare SFS1 ATA fixture and disposable USB mass-storage device
         run: |
           mkdir -p artifacts
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+
+          # Match the kernel's packed SFS1 layout and the 700-byte CI payload.
+          image = Path("dist/storage.img")
+          payload = bytes((i * 37 + 11) & 0xFF for i in range(700))
+          superblock = struct.pack("<8I", 0x31465353, 1, 1, 8, 9, 11, 1, 0)
+          table = bytearray(8 * 512)
+          entry = struct.pack(
+              "<B32sIII", 1, b"ci.txt".ljust(32, b"\\0"), 9, len(payload), 0
+          )
+          table[:len(entry)] = entry
+
+          with image.open("r+b") as disk:
+              disk.seek(0)
+              disk.write(superblock)
+              disk.write(bytes(512 - len(superblock)))
+              disk.seek(512)
+              disk.write(table)
+              disk.seek(9 * 512)
+              disk.write(payload.ljust(1024, b"\\0"))
+
+          # Read back the key fixture fields before launching the guest.
+          with image.open("rb") as disk:
+              assert struct.unpack("<8I", disk.read(32)) == (
+                  0x31465353, 1, 1, 8, 9, 11, 1, 0
+              )
+              disk.seek(9 * 512)
+              assert disk.read(700) == payload
+          PY
           truncate -s 16M dist/usb-test.img
           cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/OVMF_VARS_GL63.fd
 
@@ -72,8 +103,11 @@ jobs:
             -device ich9-ahci,id=sata \
             -drive if=none,id=bootdisk,format=raw,file=dist/tiny64.img \
             -device ide-hd,drive=bootdisk,bus=sata.0 \
-            -drive if=none,id=storage,format=raw,file=dist/storage.img \
-            -device ide-hd,drive=storage,bus=sata.1 \
+            # Q35 normally exposes SATA/AHCI; add a legacy IDE channel so the \
+            # kernel's ATA PIO driver can probe its expected primary slave. \
+            -device piix3-ide,id=legacyide,bus=pci.0 \
+            -drive if=none,id=sfs1_disk,format=raw,file=dist/storage.img \
+            -device ide-hd,drive=sfs1_disk,bus=legacyide.0,unit=1 \
             -drive if=none,id=usb_disk,format=raw,file=dist/usb-test.img \
             -device qemu-xhci,id=xhci \
             -device usb-kbd,bus=xhci.0 \
