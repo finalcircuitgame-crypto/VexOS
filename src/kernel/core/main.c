@@ -1,4 +1,5 @@
 #include "bootinfo.h"
+#include "bootlog.h"
 #include "ahci.h"
 #include "desktop.h"
 #include "gdt.h"
@@ -71,6 +72,9 @@ void serial_print(const char *str) {
      single-core kernel by preserving the caller's interrupt-enable state. */
   uint64_t irq_flags;
   __asm__ volatile("pushfq; popq %0; cli" : "=r"(irq_flags) :: "memory");
+
+  /* Capture every serial message before attempting hardware output. */
+  bootlog_append(str);
 
   // Always print to COM1 as one indivisible message.
   const char *p = str;
