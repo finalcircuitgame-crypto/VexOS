@@ -540,6 +540,8 @@ class VexOSFlasher(tk.Tk):
                 if refresh_after:
                     self.refresh_devices()
 
+        threading.Thread(target=worker, daemon=True).start()
+
 
 def main():
     if os.name != "nt":
