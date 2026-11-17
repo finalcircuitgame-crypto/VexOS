@@ -169,6 +169,38 @@ static FontCacheEntry g_cache[FONT_CACHE_CAPACITY];
 static uint64_t g_cache_clock;
 static uint8_t g_engine_ready;
 
+/*
+ * Font rasterization uses scalar floating-point/SSE math. The kernel task
+ * switcher does not yet own per-task FPU contexts, so preserve the interrupted
+ * caller's complete legacy x87/MMX/SSE state around every floating-point
+ * engine operation. fxsave64/fxrstor64 require 16-byte-aligned storage.
+ */
+typedef struct __attribute__((aligned(16))) {
+    uint8_t bytes[512];
+} FontFpuState;
+
+static void font_fpu_save(FontFpuState *state) {
+    __asm__ volatile("fxsave64 %0"
+                     : "=m"(state->bytes)
+                     :
+                     : "memory");
+}
+
+static void font_fpu_restore(const FontFpuState *state) {
+    __asm__ volatile("fxrstor64 %0"
+                     :
+                     : "m"(state->bytes)
+                     : "memory",
+                       "st", "st(1)", "st(2)", "st(3)",
+                       "st(4)", "st(5)", "st(6)", "st(7)",
+                       "mm0", "mm1", "mm2", "mm3",
+                       "mm4", "mm5", "mm6", "mm7",
+                       "xmm0", "xmm1", "xmm2", "xmm3",
+                       "xmm4", "xmm5", "xmm6", "xmm7",
+                       "xmm8", "xmm9", "xmm10", "xmm11",
+                       "xmm12", "xmm13", "xmm14", "xmm15");
+}
+
 static const uint8_t *const g_font_data[FONT_FAMILY_COUNT][FONT_WEIGHT_COUNT] = {
     {
         _binary_font_inter_regular_ttf_start,
@@ -292,6 +324,10 @@ void FontEngine_GetLineMetrics(uint8_t family, uint8_t bold,
     if (!g_engine_ready)
         return;
 
+    uint64_t irq_flags = font_irq_lock();
+    FontFpuState fpu_state;
+    font_fpu_save(&fpu_state);
+
     family = (uint8_t)font_clamp_family(family);
     bold = (uint8_t)font_clamp_bold(bold);
     pixel_height = font_clamp_height(pixel_height);
@@ -302,6 +338,9 @@ void FontEngine_GetLineMetrics(uint8_t family, uint8_t bold,
     if (ascent) *ascent = (int32_t)(raw_ascent * scale + 0.5f);
     if (descent) *descent = (int32_t)(raw_descent * scale - 0.5f);
     if (line_gap) *line_gap = (int32_t)(raw_gap * scale + 0.5f);
+
+    font_fpu_restore(&fpu_state);
+    font_irq_unlock(irq_flags);
 }
 
 int32_t FontEngine_GetKerning(uint8_t family, uint8_t bold,
@@ -311,6 +350,10 @@ int32_t FontEngine_GetKerning(uint8_t family, uint8_t bold,
     if (!g_engine_ready || !left_codepoint || !right_codepoint)
         return 0;
 
+    uint64_t irq_flags = font_irq_lock();
+    FontFpuState fpu_state;
+    font_fpu_save(&fpu_state);
+
     family = (uint8_t)font_clamp_family(family);
     bold = (uint8_t)font_clamp_bold(bold);
     pixel_height = font_clamp_height(pixel_height);
@@ -319,8 +362,12 @@ int32_t FontEngine_GetKerning(uint8_t family, uint8_t bold,
                                                (int)right_codepoint);
     float scale = font_scale_for_height(family, bold, pixel_height);
     float result = (float)units * scale;
-    return result < 0.0f ? (int32_t)(result - 0.5f)
-                         : (int32_t)(result + 0.5f);
+    int32_t rounded = result < 0.0f ? (int32_t)(result - 0.5f)
+                                    : (int32_t)(result + 0.5f);
+
+    font_fpu_restore(&fpu_state);
+    font_irq_unlock(irq_flags);
+    return rounded;
 }
 
 static FontCacheEntry *font_cache_find(uint8_t family, uint8_t bold,
@@ -427,10 +474,14 @@ int32_t FontEngine_DrawGlyph(uint8_t family, uint8_t bold,
     pixel_height = font_clamp_height(pixel_height);
 
     uint64_t irq_flags = font_irq_lock();
+    FontFpuState fpu_state;
+    font_fpu_save(&fpu_state);
+
     FontCacheEntry *entry = font_cache_find(family, bold, pixel_height, codepoint);
     if (!entry)
         entry = font_cache_create(family, bold, pixel_height, codepoint);
     if (!entry) {
+        font_fpu_restore(&fpu_state);
         font_irq_unlock(irq_flags);
         return 0;
     }
@@ -489,6 +540,7 @@ int32_t FontEngine_DrawGlyph(uint8_t family, uint8_t bold,
     }
 
     int32_t result = entry->advance_x;
+    font_fpu_restore(&fpu_state);
     font_irq_unlock(irq_flags);
     return result;
 }
