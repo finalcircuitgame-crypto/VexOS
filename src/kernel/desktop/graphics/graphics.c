@@ -610,8 +610,14 @@ uint32_t gfx_measure_string(const char *text) {
   if (!text)
     return 0;
 
-  if (!FontEngine_IsReady())
-    return (uint32_t)(8u * g_font_scale) * (uint32_t)font_strlen(text);
+  if (!FontEngine_IsReady()) {
+    uint32_t count = 0;
+    while (*text) {
+      (void)gfx_decode_utf8(&text);
+      ++count;
+    }
+    return count * 8u * (uint32_t)g_font_scale;
+  }
 
   uint16_t pixel_height = gfx_font_pixel_height();
   int32_t current = 0;
