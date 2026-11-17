@@ -392,6 +392,7 @@ void notepad_draw(const notepad_render_context_t *context) {
   subtitle[n] = 0;
 
   context->draw_chrome(win, "Notepad", subtitle, context->focused, 0, 1);
+  uint16_t ui_font_size = gfx_get_font_size();
 
   /* Minimal toolbar: format on the left, bounded scroll controls on the right. */
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
@@ -401,7 +402,7 @@ void notepad_draw(const notepad_render_context_t *context) {
   gfx_set_font_size(12u);
   gfx_draw_string((uint32_t)(x + 112), (uint32_t)(y + 39),
                   "4096 BYTE LIMIT", 0x62758F);
-  gfx_set_font_size(gfx_get_font_size() < 16u ? 16u : gfx_get_font_size());
+  gfx_set_font_size(ui_font_size);
   gfx_blend_round_rect((uint32_t)(x + w - 66), (uint32_t)(y + 34),
                        24u, 22u, 5u, 0x27364B, 255u);
   gfx_blend_round_rect((uint32_t)(x + w - 40), (uint32_t)(y + 34),
@@ -409,7 +410,7 @@ void notepad_draw(const notepad_render_context_t *context) {
   gfx_set_font_size(12u);
   gfx_draw_string((uint32_t)(x + w - 58), (uint32_t)(y + 38), "^", 0xE1E8F4u);
   gfx_draw_string((uint32_t)(x + w - 32), (uint32_t)(y + 38), "v", 0xE1E8F4u);
-  gfx_set_font_size(16u);
+  gfx_set_font_size(ui_font_size);
 
   uint32_t editor_x = (uint32_t)x + 12u;
   uint32_t editor_y = (uint32_t)y + 64u;
