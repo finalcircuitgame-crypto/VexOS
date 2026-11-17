@@ -83,7 +83,7 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Partial — network-device layer, E1000 driver, and Ethernet II receive dispatch implemented**
+**Status: Partial — network-device layer, E1000 driver, Ethernet II receive dispatch, and ARP resolution implemented**
 
 Implemented on `feature/network-foundation`:
 - Generic network-device registration and bounded interface table.
@@ -95,19 +95,24 @@ Implemented on `feature/network-foundation`:
 - Ethernet header length and MTU validation, big-endian EtherType parsing, and drop accounting for malformed, unsupported, or unhandled frames.
 - Explicit borrowed-buffer contract: protocol handlers execute synchronously and must copy any packet data they need to retain.
 - Host-side tests for Ethernet II bounds, handler registration, EtherType dispatch, unsupported 802.3/VLAN frames, and receive-drop accounting.
+- ARP Ethernet/IPv4 packet parsing with strict hardware/protocol/length/opcode checks and Ethernet-source consistency validation.
+- A bounded 32-entry per-interface IPv4-to-MAC cache with 60-second tick-based expiry, same-MAC refresh, and conflict rejection rather than replacing a live mapping.
+- Solicited ARP reply validation and request handling; requests are answered only for a local source address currently represented by a pending IPv4 send.
+- A fixed eight-packet pending IPv4 queue. Cache misses trigger an ARP request, matching replies flush queued packets, and unresolved packets expire after five seconds.
+- An IPv4 send handoff API that validates the basic IPv4 header/total length and constructs Ethernet II frames after resolution. This is a handoff for a future IP layer, not a complete IPv4 implementation.
+- Host-side ARP tests for malformed packets, cache learning/conflicts/expiry, known-neighbor sending, request/reply resolution, and pending-queue capacity/timeout.
 - QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
-1. ARP with cache expiry, conflict-safe learning, and bounded pending queues.
-2. IPv4 validation, ICMP echo, and fragmentation policy.
-3. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
+1. IPv4 validation, local interface addressing, ICMP echo, and an explicit fragmentation policy.
+2. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
+3. DHCP and DNS clients.
 4. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
-5. DHCP and DNS clients.
-6. User-mode socket API and loopback/QEMU integration tests.
-7. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
+5. User-mode socket API and loopback/QEMU integration tests.
+6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
 
 Current limitations:
-- No ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, or Internet access yet.
+- ARP resolution is implemented, but there is no IPv4 stack or configured interface address yet; ICMP, DHCP, DNS, UDP, TCP, sockets, and Internet access remain unavailable.
 - The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
 - Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
 - Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
