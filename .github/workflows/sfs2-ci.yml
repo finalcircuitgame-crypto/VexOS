@@ -192,6 +192,8 @@ jobs:
 
           required_markers=(
             "[KERNEL] Entered kernel_main"
+            "[UEFI] Runtime Services memory identity-mapped"
+            "[BOOTLOG] UEFI NVRAM checkpoint is working"
             "[FONT] stb_truetype runtime initialized (6 families, regular/bold)"
             "[CI] TrueType font loading, metrics, and glyph rasterization passed"
             "[CI] SFS2 superblock, inode, and bitmap metadata passed"
@@ -234,13 +236,73 @@ jobs:
             fi
           done
 
-          # Keep a short, useful post-test capture of the successful boot.
+          # Stop the first guest so OVMF flushes its nonvolatile variable store.
+          kill -TERM "$qemu_pid" 2>/dev/null || true
+          wait "$qemu_pid" 2>/dev/null || true
+          qemu_pid=""
+
+          # On the next boot, the UEFI loader must export the prior checkpoint
+          # to the same FAT volume before the new kernel starts.
+          : > serial-second.log
+          qemu-system-x86_64 \
+            -machine pc \
+            -m 512M \
+            -vga std \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,unit=1,file=/tmp/OVMF_VARS.fd \
+            -drive if=ide,index=0,format=raw,file=dist/tiny64.img \
+            -drive if=ide,index=1,format=raw,file=dist/storage.img \
+            -device ahci,id=ahci \
+            -drive if=none,id=ahci-test-disk,format=raw,file=dist/ahci-test.img \
+            -device ide-hd,drive=ahci-test-disk,bus=ahci.0 \
+            -display none \
+            -monitor none \
+            -serial file:serial-second.log \
+            -no-reboot -no-shutdown >qemu-second.log 2>&1 &
+          qemu_pid=$!
+
+          second_deadline=$((SECONDS + 45))
+          while (( SECONDS < second_deadline )); do
+            if grep -Fq "[VexOS] Exported previous boot checkpoint to boot.log" serial-second.log \
+              && grep -Fq "[KERNEL] Entered kernel_main" serial-second.log; then
+              break
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "Second QEMU boot exited before exporting the previous log"
+              cat serial-second.log qemu-second.log
+              exit 1
+            fi
+            sleep 0.2
+          done
+
+          if ! grep -Fq "[VexOS] Exported previous boot checkpoint to boot.log" serial-second.log \
+            || ! grep -Fq "[KERNEL] Entered kernel_main" serial-second.log; then
+            echo "UEFI bootloader did not export the previous NVRAM checkpoint"
+            cat serial-second.log qemu-second.log
+            exit 1
+          fi
+
+          kill -TERM "$qemu_pid" 2>/dev/null || true
+          wait "$qemu_pid" 2>/dev/null || true
+          qemu_pid=""
+
+          mtype -i dist/tiny64.img ::/boot.log > uefi-exported-boot.log
+          if ! grep -Fq "[UEFI] Runtime Services memory identity-mapped" uefi-exported-boot.log; then
+            echo "Exported boot.log is missing the first boot's runtime checkpoint"
+            cat uefi-exported-boot.log
+            exit 1
+          fi
+
+          echo "PASS: UEFI Runtime Services checkpoint survived reboot and was exported to the FAT boot volume."
+          # Keep evidence from both boots in the CI artifact.
           sleep 3
           echo "PASS: UEFI booted VexOS with SFS2 and AHCI disks; SFS2, journal, VFS, persistent file I/O, and AHCI DMA markers observed."
-          printf '%s\n' "${required_markers[@]}" > artifacts/sfs2-required-markers.txt
+          printf '%s\n' "\${required_markers[@]}" > artifacts/sfs2-required-markers.txt
           cp serial.log artifacts/serial.log
           cp qemu.log artifacts/qemu.log
-
+          cp serial-second.log artifacts/serial-second.log
+          cp qemu-second.log artifacts/qemu-second.log
+          cp uefi-exported-boot.log artifacts/uefi-exported-boot.log
       - name: Upload SFS2 QEMU recording and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
