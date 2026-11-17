@@ -34,7 +34,7 @@ jobs:
       - name: Install build and emulation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf fonts-inter fonts-lato fonts-dejavu-core fonts-noto-core
 
       - name: Build CI-instrumented VexOS
         run: |
