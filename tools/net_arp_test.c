@@ -105,7 +105,7 @@ int main(void) {
     net_device_t device = {0};
     device.name[0] = 'e';
     device.name[1] = 't';
-    device.device_data = 0;
+    device.driver_data = 0;
     device.mtu = 1500u;
     device.flags = NETDEV_FLAG_ETHERNET | NETDEV_FLAG_BROADCAST;
     device.link_up = 1;
@@ -165,7 +165,6 @@ int main(void) {
     CHECK(read_be16(g_last_frame + 12u) == ETHERNET_TYPE_IPV4);
 
     /* A cache miss broadcasts one ARP request and queues a bounded packet copy. */
-    CHECK(arp_init());
     ethernet_init();
     /* Re-register after clearing the Ethernet protocol registry. */
     CHECK(arp_init());
@@ -198,7 +197,6 @@ int main(void) {
     CHECK(stats.cache_expired >= 1u);
 
     /* The pending queue has a hard capacity and expires unresolved packets. */
-    CHECK(arp_init());
     ethernet_init();
     CHECK(arp_init());
     g_ticks = 100u;
