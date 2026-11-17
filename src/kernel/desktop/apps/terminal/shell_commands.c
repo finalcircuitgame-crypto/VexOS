@@ -78,9 +78,9 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
       shell_command_u32_to_dec(buffer, gfx_get_font_size());
       terminal_append(buffer);
       terminal_append("px ");
-      terminal_append(gfx_get_font_bold() ? "bold\\n" : "regular\\n");
-      terminal_append("Families: inter, lato, dejavu, mono, noto-sans, noto-serif\\n");
-      terminal_append("Usage: font <family> [6-96] [bold|regular] | font reset\\n");
+      terminal_append(gfx_get_font_bold() ? "bold\n" : "regular\n");
+      terminal_append("Families: inter, lato, dejavu, mono, noto-sans, noto-serif\n");
+      terminal_append("Usage: font <family> [6-96] [bold|regular] | font reset\n");
       return 1;
     }
 
@@ -91,12 +91,12 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
     if (shell_command_matches(line + token_start, token_length, "reset", 5u)) {
       while (pos < length && line[pos] == ' ') pos++;
       if (pos != length) {
-        terminal_append("Usage: font reset\\n");
+        terminal_append("Usage: font reset\n");
         return 1;
       }
       gfx_set_font(GFX_FONT_INTER, 1u, 0u);
       gfx_set_font_size(16u);
-      terminal_append("Font reset to Inter 16px regular.\\n");
+      terminal_append("Font reset to Inter 16px regular.\n");
       return 1;
     }
 
@@ -120,7 +120,7 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
              shell_command_matches(line + token_start, token_length, "serif", 5u))
       family = GFX_FONT_NOTO_SERIF;
     else {
-      terminal_append("Unknown font. Use inter, lato, dejavu, mono, noto-sans, or noto-serif.\\n");
+      terminal_append("Unknown font. Use inter, lato, dejavu, mono, noto-sans, or noto-serif.\n");
       return 1;
     }
 
@@ -152,7 +152,7 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
           }
         }
         if (!numeric || parsed_size < 6u || parsed_size > 96u) {
-          terminal_append("Use a font size from 6 to 96, plus optional bold or regular.\\n");
+          terminal_append("Use a font size from 6 to 96, plus optional bold or regular.\n");
           return 1;
         }
         pixel_height = (uint16_t)parsed_size;
@@ -167,7 +167,7 @@ uint8_t shell_commands_execute(const char *line, uint32_t length,
     shell_command_u32_to_dec(buffer, pixel_height);
     terminal_append(buffer);
     terminal_append("px ");
-    terminal_append(bold ? "bold.\\n" : "regular.\\n");
+    terminal_append(bold ? "bold.\n" : "regular.\n");
     return 1;
   }
 
