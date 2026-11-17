@@ -1,43 +1,32 @@
-# VexOS built-in fonts
+# VexOS runtime TrueType fonts
 
-VexOS uses **real upstream font families**, not a newly invented typeface or
-custom-drawn glyphs:
+VexOS uses **stb_truetype v1.28** (public domain) as its freestanding
+TrueType/OpenType parser and grayscale glyph rasterizer. Font outlines are
+parsed by the kernel at boot; glyph bitmaps are rasterized on demand and kept
+in a small LRU cache.
 
-1. **Inter** — default UI font. SIL Open Font License 1.1.
-   https://github.com/rsms/inter/blob/master/LICENSE.txt
-2. **Lato** — alternative sans-serif. SIL Open Font License 1.1.
-   https://github.com/googlefonts/lato/blob/main/OFL.txt
-3. **DejaVu Sans** — alternative sans-serif and fallback. Bitstream Vera /
-   DejaVu font license.
-   https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE
-4. **DejaVu Sans Mono** — monospace face for terminal-style text. Bitstream Vera
-   / DejaVu font license.
-   https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE
+The renderer uses real font metrics (advance widths, ascenders, descenders,
+line gaps) and horizontal kerning. Desktop strings decode UTF-8 and are drawn
+with variable-width advances instead of fixed 8x8 cells. The old CGA bitmap
+font remains only as an early-boot fallback before the heap and font engine
+have initialized.
 
-The build rasterizes the original regular and bold font faces into a compact
-framebuffer atlas. The glyph outlines are not redesigned; only rasterization,
-antialiasing, and the existing compact cell metrics are adapted for VexOS.
-Coverage is stored at 4 bits per pixel (16 alpha levels), and bold uses the
-font's actual bold face instead of artificially thickening regular glyphs.
+## Required font faces
 
-The atlas is generated manually by `tools/prepare_font_atlas.py`.
-**The Makefile intentionally does not run this script.** It only embeds the
-prepared `assets/fonts/font_atlas.bin`, so normal builds do not require
-Pillow or access to the original TTF/OTF files. Generate the atlas before the
-first build and whenever the source fonts change.
+VexOS embeds these eight static TTF faces:
 
-The kernel embeds the atlas; it does not load TTF/OTF files at runtime or
-depend on a runtime font engine. The original CGA bitmap font remains available
-as a fallback for bytes outside the built-in ASCII atlas.
+| Family | Regular | Bold |
+|---|---|---|
+| Inter | `Inter-Regular.ttf` | `Inter-Bold.ttf` |
+| Lato | `Lato-Regular.ttf` | `Lato-Bold.ttf` |
+| DejaVu Sans | `DejaVuSans.ttf` | `DejaVuSans-Bold.ttf` |
+| DejaVu Sans Mono | `DejaVuSansMono.ttf` | `DejaVuSansMono-Bold.ttf` |
 
-## Recommended folder layout
-
-Keep only the faces used by the atlas generator and each family's license:
+Recommended layout:
 
 ```text
 assets/fonts/
   README.md
-  font_atlas.bin                 # generated locally; ignored by Git
   Inter/
     Inter-Regular.ttf
     Inter-Bold.ttf
@@ -54,47 +43,20 @@ assets/fonts/
     LICENSE
 ```
 
-`font_atlas.bin` is generated output, not a source font. The generator
-recursively searches the family folders, so this layout works without copying
-font files into the top-level `assets/fonts/` directory.
+The Makefile searches recursively under `assets/fonts/`, so subfolders are
+supported. It also searches `/usr/share/fonts/`, allowing CI and Linux
+developers to use distro-installed fonts. If a face is missing, the build
+prints the exact missing family/weight and stops.
 
-## Preparing the source fonts
+## Licenses
 
-Download the static **regular and bold** font files for all four families
-listed above, and place them anywhere underneath `assets/fonts/`. The
-generator searches this folder recursively, so keeping each family in its
-own subfolder is fine. Keep the upstream license files with the font
-downloads.
+- **Inter** — SIL Open Font License 1.1:
+  https://github.com/rsms/inter/blob/master/LICENSE.txt
+- **Lato** — SIL Open Font License 1.1:
+  https://github.com/googlefonts/lato/blob/main/OFL.txt
+- **DejaVu Sans / Mono** — Bitstream Vera / DejaVu font license:
+  https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE
+- **stb_truetype** — public domain; upstream source and notice are vendored in
+  `src/kernel/desktop/graphics/third_party/stb_truetype.h`.
 
-Install Pillow and the matching font families for your host.
-
-Windows PowerShell:
-
-```powershell
-py -m pip install Pillow
-```
-
-Ubuntu/WSL:
-
-```bash
-sudo apt install python3-pil fonts-inter fonts-lato fonts-dejavu-core
-```
-
-## Generate the atlas manually
-
-Run this from the repository root.
-
-Windows PowerShell:
-
-```powershell
-py tools\prepare_font_atlas.py --output assets\fonts\
-```
-
-Ubuntu/WSL:
-
-```bash
-python3 tools/prepare_font_atlas.py --font-dir /usr/share/fonts --output assets/fonts/
-```
-
-Both commands generate the ignored file `assets/fonts/font_atlas.bin`.
-Check that it is exactly 32,768 bytes, then run `make`.
+Keep the upstream license/notice files alongside the TTF downloads.
