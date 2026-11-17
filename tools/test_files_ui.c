@@ -6,6 +6,7 @@
 #include "../src/kernel/desktop/window_manager.h"
 #include "../src/kernel/desktop/apps/files/file_manager.h"
 #include "../src/kernel/desktop/apps/notepad/notepad.h"
+#include "../src/kernel/desktop/graphics/graphics.h"
 
 #define TEST_FILE_MAX 32u
 #define TEST_DATA_MAX 4096u
@@ -235,6 +236,47 @@ int gfx_push_clip(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
   return 1;
 }
 void gfx_pop_clip(void) {}
+
+/* The Files/Notepad host test exercises UI state and VFS behavior, not the
+   kernel rasterizer. Keep a tiny deterministic font-state shim here so the
+   test remains independent from the freestanding graphics/font engine. */
+static gfx_font_family_t g_test_font_family = GFX_FONT_INTER;
+static uint8_t g_test_font_scale = 1u;
+static uint8_t g_test_font_bold;
+static uint16_t g_test_font_size = 16u;
+
+void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold) {
+  if ((uint32_t)family > (uint32_t)GFX_FONT_NOTO_SERIF)
+    family = GFX_FONT_INTER;
+  if (scale < 1u) scale = 1u;
+  if (scale > 3u) scale = 3u;
+  static const uint16_t sizes[3] = {16u, 20u, 24u};
+  g_test_font_family = family;
+  g_test_font_scale = scale;
+  g_test_font_bold = bold ? 1u : 0u;
+  g_test_font_size = sizes[scale - 1u];
+}
+
+void gfx_set_font_size(uint16_t pixel_height) {
+  if (pixel_height < 6u) pixel_height = 6u;
+  if (pixel_height > 96u) pixel_height = 96u;
+  g_test_font_size = pixel_height;
+}
+
+uint16_t gfx_get_font_size(void) { return g_test_font_size; }
+gfx_font_family_t gfx_get_font_family(void) { return g_test_font_family; }
+uint8_t gfx_get_font_scale(void) { return g_test_font_scale; }
+uint8_t gfx_get_font_bold(void) { return g_test_font_bold; }
+
+uint32_t gfx_get_font_line_height(void) {
+  return (uint32_t)g_test_font_size + 3u;
+}
+
+uint32_t gfx_measure_string(const char *text) {
+  uint32_t length = 0;
+  while (text && text[length]) ++length;
+  return length * ((uint32_t)g_test_font_size / 2u);
+}
 
 static int record_open(const char *path) {
   strncpy(g_last_opened, path, sizeof(g_last_opened) - 1u);
