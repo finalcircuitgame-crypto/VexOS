@@ -1,4 +1,5 @@
 #include "usb/xhci.h"
+#include "bootlog.h"
 #include "xhci_internal.h"
 #include "heap.h"
 #include "pmm.h"
@@ -1095,14 +1096,17 @@ void xhci_init(uint64_t mmio_phys) {
   serial_print("[xHCI] Resetting Controller...\n");
   op_regs->usb_cmd &= ~USB_CMD_RS;
   serial_print("[xHCI] Waiting for halt...\n");
+  (void)bootlog_flush();
   while (!(op_regs->usb_sts & USB_STS_HCH))
     ;
 
   serial_print("[xHCI] Issuing Reset...\n");
+  (void)bootlog_flush();
   op_regs->usb_cmd |= USB_CMD_HCRST;
   while (op_regs->usb_cmd & USB_CMD_HCRST)
     ;
   serial_print("[xHCI] Waiting for CNR...\n");
+  (void)bootlog_flush();
   while (op_regs->usb_sts & (1 << 11))
     ;
 
@@ -1314,6 +1318,7 @@ void xhci_init(uint64_t mmio_phys) {
       serial_print(" speed=");
       xhci_print_u32_dec(speed);
       serial_print("\n");
+      (void)bootlog_flush();
       continue;
     }
 
@@ -1331,4 +1336,6 @@ void xhci_init(uint64_t mmio_phys) {
 
     serial_print("[xHCI] PORT SCAN END\n");
   }
+
+  (void)bootlog_flush();
 }
