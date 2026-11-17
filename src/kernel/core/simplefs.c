@@ -1255,3 +1255,16 @@ uint32_t simplefs_path_limit(void) {
 int simplefs_is_mounted(void) {
   return g_kind != STORAGE_FS_NONE;
 }
+
+/* Writable formats are journaled SFS2 and legacy SFS1. FAT32 and legacy
+   journal-less SFS2 volumes are intentionally mounted read-only. */
+int simplefs_is_writable(void) {
+  if (!g_storage_ready)
+    return 0;
+  if (g_kind == STORAGE_FS_SFS)
+    return 1;
+  if (g_kind == STORAGE_FS_SFS2)
+    return g_sfs2.superblock.journal_lba != 0 &&
+           g_sfs2.superblock.journal_sectors != 0;
+  return 0;
+}
