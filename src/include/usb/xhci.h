@@ -82,6 +82,7 @@ typedef struct {
 // USB Status Register Bits
 #define USB_STS_HCH   (1 << 0) // HCHalted
 
-void xhci_init(uint64_t mmio_base);
+void xhci_init(uint64_t mmio_base, uint16_t vendor_id,
+               uint16_t device_id, uint8_t revision_id);
 
 #endif
