@@ -92,6 +92,7 @@ static uint8_t g_rx_buffers[E1000_RING_COUNT][E1000_RX_BUFFER_SIZE]
     __attribute__((aligned(16)));
 static uint8_t g_tx_buffers[E1000_RING_COUNT][E1000_RX_BUFFER_SIZE]
     __attribute__((aligned(16)));
+static int g_initialized;
 
 static uint32_t e1000_read_reg(uint32_t offset) {
     return *(volatile uint32_t *)(g_e1000.registers + offset);
@@ -169,13 +170,17 @@ static int e1000_init_rings(void) {
     uint64_t tx_address = (uint64_t)(uintptr_t)&g_tx_ring[0];
 
     if ((rx_address & 0x0Fu) || (tx_address & 0x0Fu) ||
-        rx_address > UINT32_MAX || tx_address > UINT32_MAX)
+        rx_address > UINT32_MAX || tx_address > UINT32_MAX ||
+        rx_address + sizeof(g_rx_ring) - 1u > UINT32_MAX ||
+        tx_address + sizeof(g_tx_ring) - 1u > UINT32_MAX)
         return 0;
 
     for (uint16_t i = 0; i < E1000_RING_COUNT; ++i) {
         uint64_t buffer = (uint64_t)(uintptr_t)&g_rx_buffers[i][0];
-        if (buffer > UINT32_MAX ||
-            buffer + E1000_RX_BUFFER_SIZE - 1u > UINT32_MAX)
+        uint64_t tx_buffer = (uint64_t)(uintptr_t)&g_tx_buffers[i][0];
+        if (buffer > UINT32_MAX || tx_buffer > UINT32_MAX ||
+            buffer + E1000_RX_BUFFER_SIZE - 1u > UINT32_MAX ||
+            tx_buffer + E1000_RX_BUFFER_SIZE - 1u > UINT32_MAX)
             return 0;
 
         g_rx_ring[i].buffer_addr = buffer;
@@ -300,7 +305,7 @@ static const netdev_ops_t g_e1000_ops = {
 };
 
 int e1000_init(uint64_t mmio_base) {
-    if (g_e1000.registers)
+    if (g_initialized)
         return 1;
 
     serial_print("[E1000] Mapping controller registers at ");
