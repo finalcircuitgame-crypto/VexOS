@@ -34,7 +34,7 @@ Ubuntu/WSL and CI). On Ubuntu/WSL, the matching distro fonts can be installed
 with:
 
 ```bash
-sudo apt install fonts-inter fonts-lato fonts-dejavu-core
+sudo apt install fonts-inter fonts-lato fonts-dejavu-core fonts-noto-core
 ```
 
 Then build normally:
