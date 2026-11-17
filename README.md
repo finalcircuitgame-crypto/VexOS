@@ -22,7 +22,27 @@ SFS2 has checksummed metadata, VFS path/stat/directory/ranged-read support, and 
 - python3 for host-side image utilities and tests
 
 ## Build
-Run:
+
+Generate the font atlas manually before the first build, and again whenever
+the source fonts change. The generated `assets/fonts/font_atlas.bin` is
+ignored by Git; the Makefile only embeds it and does not run the Python
+generator.
+
+On Windows PowerShell:
+
+```powershell
+py -m pip install Pillow
+py tools\prepare_font_atlas.py --output assets\fonts\
+```
+
+On Ubuntu/WSL:
+
+```bash
+sudo apt install python3-pil fonts-inter fonts-lato fonts-dejavu-core
+python3 tools/prepare_font_atlas.py --font-dir /usr/share/fonts --output assets/fonts/
+```
+
+Then build:
 
     make
 
