@@ -83,7 +83,7 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Partial — network devices, E1000, Ethernet II, ARP, IPv4, and ICMPv4 echo implemented**
+**Status: Partial — network devices, E1000, Ethernet II, ARP, IPv4, ICMPv4 echo, and UDP implemented**
 
 Implemented on `feature/network-foundation`:
 - Generic network-device registration and bounded interface table.
@@ -111,6 +111,10 @@ Implemented on `feature/network-foundation`:
 - ICMP checksum validation over the complete message, echo-request handling, and echo-reply generation that preserves identifier, sequence, and payload.
 - Echo replies use the existing IPv4 routing/ARP path; limited and configured subnet broadcasts are not answered.
 - Host-side ICMP tests cover request/reply checksums, payload preservation, bad checksums, and unsupported message types.
+- UDP protocol registration with a bounded destination-port handler table and bind/unbind APIs.
+- UDP receive validation for header size, datagram length, and IPv4 pseudo-header checksum; zero checksums are accepted as permitted by IPv4 UDP.
+- UDP send builds checksummed datagrams and hands them to the existing IPv4 routing/ARP path.
+- Host-side UDP tests cover checksum validation, port dispatch, unbound ports, payload preservation, and outbound checksums.
 - QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
@@ -122,7 +126,7 @@ Next milestones:
 6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
 
 Current limitations:
-- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; ICMP error messages, DHCP, DNS, UDP, TCP, sockets, forwarding, and general Internet access remain unavailable.
+- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; ICMP error messages, DHCP, DNS, TCP, sockets, forwarding, and general Internet access remain unavailable.
 - The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
 - Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
 - Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
