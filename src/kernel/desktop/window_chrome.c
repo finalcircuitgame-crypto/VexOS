@@ -23,6 +23,11 @@ void window_chrome_draw(const desktop_window_t *win, const char *title,
   else if (title && title[0] == 'S')
     app = APP_SETUP;
 
+  gfx_font_family_t saved_family = gfx_get_font_family();
+  uint8_t saved_scale = gfx_get_font_scale();
+  uint8_t saved_bold = gfx_get_font_bold();
+  uint16_t saved_size = gfx_get_font_size();
+
   /* Deep frame, clear focused edge, and a separate title surface. */
   gfx_blend_round_rect((uint32_t)(x + 4), (uint32_t)(y + 7),
                        (uint32_t)w, (uint32_t)h, 11u, 0x03050Cu, 175u);
@@ -48,28 +53,32 @@ void window_chrome_draw(const desktop_window_t *win, const char *title,
 
   if (draw_icon)
     draw_icon((uint32_t)(x + 8), (uint32_t)(y + 6), 20u, app);
+
+  /* Use a stronger title and quieter, genuinely measured subtitle. */
+  gfx_set_font(saved_family, saved_scale, 1u);
+  gfx_set_font_size(18u);
+  uint32_t title_width = title ? gfx_measure_string(title) : 0u;
   if (title)
-    gfx_draw_string((uint32_t)(x + 36), (uint32_t)(y + 11), title,
+    gfx_draw_string((uint32_t)(x + 36), (uint32_t)(y + 7), title,
                     focused ? 0xF4F3FFu : 0xC6CBE0u);
 
+  gfx_set_font(saved_family, saved_scale, 0u);
+  gfx_set_font_size(12u);
   if (subtitle && subtitle[0]) {
-    uint32_t title_len = 0;
-    uint32_t subtitle_len = 0;
-    while (title && title[title_len])
-      ++title_len;
-    while (subtitle[subtitle_len])
-      ++subtitle_len;
-
-    uint32_t subtitle_x = (uint32_t)(x + 36) + title_len * 8u + 10u;
-    if (subtitle_x + subtitle_len * 8u < (uint32_t)(x + w - 100)) {
-      gfx_draw_rect(subtitle_x - 5u, (uint32_t)(y + 10), 1u, 10u,
+    uint32_t subtitle_width = gfx_measure_string(subtitle);
+    uint32_t subtitle_x = (uint32_t)(x + 36) + title_width + 12u;
+    uint32_t right_limit = (uint32_t)(x + w - 100);
+    if (subtitle_x < right_limit &&
+        subtitle_width <= right_limit - subtitle_x) {
+      gfx_draw_rect(subtitle_x - 6u, (uint32_t)(y + 9), 1u, 12u,
                     0x59617F);
-      gfx_draw_string(subtitle_x, (uint32_t)(y + 11), subtitle,
+      gfx_draw_string(subtitle_x, (uint32_t)(y + 9), subtitle,
                       0x929CB9u);
     }
   }
 
-  /* Keep the existing hit boxes; only the control treatment changes. */
+  /* Keep the existing hit boxes; control glyphs stay compact. */
+  gfx_set_font_size(12u);
   gfx_blend_round_rect((uint32_t)(x + w - 23), (uint32_t)(y + 6),
                        17u, 17u, 6u, 0x873B59u, 255u);
   gfx_draw_string((uint32_t)(x + w - 18), (uint32_t)(y + 10), "x",
@@ -89,7 +98,10 @@ void window_chrome_draw(const desktop_window_t *win, const char *title,
   if (has_save) {
     gfx_blend_round_rect((uint32_t)(x + w - 85), (uint32_t)(y + 6),
                          17u, 17u, 6u, 0x245D57u, 255u);
-    gfx_draw_string((uint32_t)(x + w - 80), (uint32_t)(y + 10), "S",
+    gfx_draw_string((uint32_t)(x + w - 80), (uint32_t)(y + 8), "S",
                     0xE9FFF9u);
   }
+
+  gfx_set_font(saved_family, saved_scale, saved_bold);
+  gfx_set_font_size(saved_size);
 }
