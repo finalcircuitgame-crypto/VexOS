@@ -6,6 +6,8 @@
 
 #include "../../../include/heap.h"
 
+extern void serial_print(const char *text);
+
 /*
  * stb_truetype is a compact TrueType/OpenType parser and grayscale rasterizer.
  * VexOS supplies its own allocator, memory helpers, assertions, and math
@@ -546,8 +548,10 @@ int32_t FontEngine_DrawGlyph(uint8_t family, uint8_t bold,
 }
 
 int FontEngine_SelfTest(void) {
-    if (!g_engine_ready)
+    if (!g_engine_ready) {
+        serial_print("[FONTTEST] engine was not ready\n");
         return 0;
+    }
 
     static uint32_t probe[64u * 64u];
     for (uint8_t family = 0; family < FONT_FAMILY_COUNT; ++family) {
@@ -556,8 +560,10 @@ int FontEngine_SelfTest(void) {
             int32_t ascent = 0, descent = 0, line_gap = 0;
             FontEngine_GetLineMetrics(family, bold, 24u,
                                       &ascent, &descent, &line_gap);
-            if (ascent <= 0 || descent > 0)
+            if (ascent <= 0 || descent > 0) {
+                serial_print("[FONTTEST] invalid ascent/descent metrics\n");
                 return 0;
+            }
 
             FontEngineGlyphMetrics metrics;
             int32_t advance = FontEngine_DrawGlyph(
@@ -565,16 +571,20 @@ int FontEngine_SelfTest(void) {
                 probe, 64u, 64u, 64u,
                 8, 40, 0, 0, 64u, 64u,
                 0x00FFFFFFu, &metrics);
-            if (advance <= 0 || !metrics.width || !metrics.height)
+            if (advance <= 0 || !metrics.width || !metrics.height) {
+                serial_print("[FONTTEST] glyph advance or bitmap bounds are empty\n");
                 return 0;
+            }
 
             uint32_t lit_pixels = 0;
             for (uint32_t i = 0; i < 64u * 64u; ++i) {
                 if (probe[i] & 0x00FFFFFFu)
                     ++lit_pixels;
             }
-            if (!lit_pixels)
+            if (!lit_pixels) {
+                serial_print("[FONTTEST] glyph bitmap contains no visible pixels\n");
                 return 0;
+            }
         }
     }
 
