@@ -47,6 +47,6 @@ py tools\prepare_font_atlas.py --output assets\fonts\
 ```
 
 The directory form of `--output` writes `assets/fonts/font_atlas.bin`.
-Alternatively, use `--font-dir "C:\\path\\to\\fonts"` to point at another
+Alternatively, use `--font-dir "C:\path\to\fonts"` to point at another
 folder. The generator also checks the normal Windows, macOS, and Linux font
 locations automatically.
