@@ -58,6 +58,11 @@ int main(void) {
     CHECK(!ethernet_register_handler(ETHERNET_TYPE_ARP, test_arp_handler));
     CHECK(!ethernet_register_handler(0x0006u, test_arp_handler));
     CHECK(!ethernet_register_handler(ETHERNET_TYPE_IPV4, 0));
+    for (uint16_t i = 0; i < ETHERNET_MAX_HANDLERS - 1u; ++i) {
+        CHECK(ethernet_register_handler((uint16_t)(0x9000u + i),
+                                        test_arp_handler));
+    }
+    CHECK(!ethernet_register_handler(0xA000u, test_arp_handler));
 
     CHECK(ethernet_dispatch_frame(&device, frame, sizeof(frame)) ==
           ETHERNET_DISPATCHED);
