@@ -963,59 +963,8 @@ static void ci_framebuffer_syscall_self_test(void) {
 #endif
 
 
-/*
- * The kernel installs its own CR3, so firmware runtime code/data must be
- * identity-mapped explicitly. SetVariable and its internal runtime state are
- * required to remain mapped for the UEFI ms_abi call after ExitBootServices.
- */
-static int map_uefi_runtime_regions(const BootInfo *boot_info) {
-  const uint64_t max_runtime_pages = 65536ull; /* Bound mapping work to 256 MiB. */
-  const uint64_t identity_limit = 0x0000800000000000ull;
-  if (!boot_info || !boot_info->RuntimeSetVariable ||
-      boot_info->RuntimeRegionCount == 0 ||
-      boot_info->RuntimeRegionCount > BOOTINFO_MAX_RUNTIME_REGIONS)
-    return 0;
-
-  uint64_t total_pages = 0;
-  int set_variable_is_mapped = 0;
-
-  for (uint32_t i = 0; i < boot_info->RuntimeRegionCount; ++i) {
-    uint64_t base = boot_info->RuntimeRegions[i].Base;
-    uint64_t pages = boot_info->RuntimeRegions[i].Pages;
-    if (!pages || (base & (PAGE_SIZE - 1ull)) ||
-        pages > max_runtime_pages - total_pages ||
-        pages > UINT64_MAX / PAGE_SIZE)
-      return 0;
-
-    uint64_t bytes = pages * PAGE_SIZE;
-    if (base >= identity_limit || bytes > identity_limit - base)
-      return 0;
-
-    uint64_t end = base + bytes;
-    if (boot_info->RuntimeSetVariable >= base &&
-        boot_info->RuntimeSetVariable < end)
-      set_variable_is_mapped = 1;
-    total_pages += pages;
-  }
-
-  if (!set_variable_is_mapped || total_pages == 0)
-    return 0;
-
-  for (uint32_t i = 0; i < boot_info->RuntimeRegionCount; ++i) {
-    uint64_t base = boot_info->RuntimeRegions[i].Base;
-    uint64_t end = base + boot_info->RuntimeRegions[i].Pages * PAGE_SIZE;
-    for (uint64_t address = base; address < end; address += PAGE_SIZE) {
-      if (!VMM_MapPage((void *)(uintptr_t)address,
-                       (void *)(uintptr_t)address, PAGE_WRITE))
-        return 0;
-    }
-  }
-  return 1;
-}
-
 void kernel_main(BootInfo *bootInfo) {
   uint64_t val;
-  bootlog_set_runtime(bootInfo ? bootInfo->RuntimeSetVariable : 0);
   serial_print("[KERNEL] Entered kernel_main\n");
   serial_print("[VexOS] Version " VEXOS_VERSION " | build " VEXOS_BUILD_ID "\n");
   serial_print("[KERNEL] BUILD: xhci-portscan-v2\n");
@@ -1172,23 +1121,9 @@ void kernel_main(BootInfo *bootInfo) {
     vmm_map_or_halt((void *)a, (void *)a, PAGE_WRITE);
   }
 
-  int uefi_runtime_mapped = map_uefi_runtime_regions(bootInfo);
-  if (uefi_runtime_mapped) {
-    serial_print("[UEFI] Runtime Services memory identity-mapped\n");
-  } else {
-    serial_print("[UEFI] Runtime Services unavailable; NVRAM boot-log checkpoints disabled\n");
-  }
-
   serial_print("[KERNEL] Activating VMM...\n");
   VMM_Activate();
   PrintString("VMM Initialized.\n", 0x00FF00);
-
-  if (uefi_runtime_mapped) {
-    if (bootlog_checkpoint())
-      serial_print("[BOOTLOG] UEFI NVRAM checkpoint is working\n");
-    else
-      serial_print("[BOOTLOG] UEFI NVRAM checkpoint failed; using other log backends\n");
-  }
 
   // Stack Check
   uint64_t stack_addr = (uint64_t)&val; // val is on the stack
