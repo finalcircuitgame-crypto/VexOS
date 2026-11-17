@@ -434,7 +434,7 @@ static FontCacheEntry *font_cache_create(uint8_t family, uint8_t bold,
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     int advance = 0, left_bearing = 0;
 
-    stbtt_GetCodepointBitmapBox(face, scale, scale, (int)codepoint,
+    stbtt_GetCodepointBitmapBox(face, (int)codepoint, scale, scale,
                                 &x0, &y0, &x1, &y1);
     stbtt_GetCodepointHMetrics(face, (int)codepoint,
                                &advance, &left_bearing);
