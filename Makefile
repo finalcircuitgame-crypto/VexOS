@@ -89,8 +89,12 @@ FONT_SOURCE_DEJAVU_SANS_REGULAR := $(call font_find,DejaVuSans.ttf)
 FONT_SOURCE_DEJAVU_SANS_BOLD := $(call font_find,DejaVuSans-Bold.ttf)
 FONT_SOURCE_DEJAVU_MONO_REGULAR := $(call font_find,DejaVuSansMono.ttf)
 FONT_SOURCE_DEJAVU_MONO_BOLD := $(call font_find,DejaVuSansMono-Bold.ttf)
+FONT_SOURCE_NOTO_SANS_REGULAR := $(call font_find,NotoSans-Regular.ttf)
+FONT_SOURCE_NOTO_SANS_BOLD := $(call font_find,NotoSans-Bold.ttf)
+FONT_SOURCE_NOTO_SERIF_REGULAR := $(call font_find,NotoSerif-Regular.ttf)
+FONT_SOURCE_NOTO_SERIF_BOLD := $(call font_find,NotoSerif-Bold.ttf)
 
-FONT_VARIANTS = inter_regular inter_bold lato_regular lato_bold dejavu_sans_regular dejavu_sans_bold dejavu_mono_regular dejavu_mono_bold
+FONT_VARIANTS = inter_regular inter_bold lato_regular lato_bold dejavu_sans_regular dejavu_sans_bold dejavu_mono_regular dejavu_mono_bold noto_sans_regular noto_sans_bold noto_serif_regular noto_serif_bold
 FONT_OBJS = $(addprefix $(OBJDIR)/font_,$(addsuffix .o,$(FONT_VARIANTS)))
 
 DESKTOP_ICON_SOURCES = $(addprefix assets/icons/,file-manager.png terminal.png settings.png notepad.png image-viewer.png doom.png)
@@ -226,6 +230,59 @@ else
 $(OBJDIR)/font_dejavu_mono_bold.o:
 	@echo "Missing required font face: DejaVu Sans Mono Bold" >&2
 	@echo "Place DejaVuSansMono-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
+
+
+ifneq ($(strip $(FONT_SOURCE_NOTO_SANS_REGULAR)),)
+$(OBJDIR)/font_noto_sans_regular.o: $(FONT_SOURCE_NOTO_SANS_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Noto Sans Regular: $<"
+	cp "$<" "$(OBJDIR)/font_noto_sans_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_noto_sans_regular.ttf font_noto_sans_regular.o
+else
+$(OBJDIR)/font_noto_sans_regular.o:
+	@echo "Missing required font face: Noto Sans Regular" >&2
+	@echo "Install fonts-noto-core or place NotoSans-Regular.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_NOTO_SANS_BOLD)),)
+$(OBJDIR)/font_noto_sans_bold.o: $(FONT_SOURCE_NOTO_SANS_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Noto Sans Bold: $<"
+	cp "$<" "$(OBJDIR)/font_noto_sans_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_noto_sans_bold.ttf font_noto_sans_bold.o
+else
+$(OBJDIR)/font_noto_sans_bold.o:
+	@echo "Missing required font face: Noto Sans Bold" >&2
+	@echo "Install fonts-noto-core or place NotoSans-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_NOTO_SERIF_REGULAR)),)
+$(OBJDIR)/font_noto_serif_regular.o: $(FONT_SOURCE_NOTO_SERIF_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Noto Serif Regular: $<"
+	cp "$<" "$(OBJDIR)/font_noto_serif_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_noto_serif_regular.ttf font_noto_serif_regular.o
+else
+$(OBJDIR)/font_noto_serif_regular.o:
+	@echo "Missing required font face: Noto Serif Regular" >&2
+	@echo "Install fonts-noto-core or place NotoSerif-Regular.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_NOTO_SERIF_BOLD)),)
+$(OBJDIR)/font_noto_serif_bold.o: $(FONT_SOURCE_NOTO_SERIF_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Noto Serif Bold: $<"
+	cp "$<" "$(OBJDIR)/font_noto_serif_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_noto_serif_bold.ttf font_noto_serif_bold.o
+else
+$(OBJDIR)/font_noto_serif_bold.o:
+	@echo "Missing required font face: Noto Serif Bold" >&2
+	@echo "Install fonts-noto-core or place NotoSerif-Bold.ttf under assets/fonts/." >&2
 	@false
 endif
 

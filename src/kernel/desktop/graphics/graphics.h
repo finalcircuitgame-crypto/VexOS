@@ -16,7 +16,9 @@ typedef enum {
   GFX_FONT_INTER = 0,
   GFX_FONT_LATO = 1,
   GFX_FONT_DEJAVU_SANS = 2,
-  GFX_FONT_DEJAVU_MONO = 3
+  GFX_FONT_DEJAVU_MONO = 3,
+  GFX_FONT_NOTO_SANS = 4,
+  GFX_FONT_NOTO_SERIF = 5
 } gfx_font_family_t;
 
 typedef struct {
@@ -29,8 +31,10 @@ typedef struct {
 void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font);
 void gfx_set_backbuffer(uint32_t *backbuffer);
 
-/* Embedded TrueType font families. Scale values map to 10, 20, and 30 px. */
+/* Embedded TrueType fonts. Scale presets map to 16, 20, and 24 px. */
 void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold);
+void gfx_set_font_size(uint16_t pixel_height);
+uint16_t gfx_get_font_size(void);
 gfx_font_family_t gfx_get_font_family(void);
 uint8_t gfx_get_font_scale(void);
 uint8_t gfx_get_font_bold(void);

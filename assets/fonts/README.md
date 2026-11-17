@@ -13,7 +13,7 @@ have initialized.
 
 ## Required font faces
 
-VexOS embeds these eight static TTF faces:
+VexOS embeds twelve static TTF faces:
 
 | Family | Regular | Bold |
 |---|---|---|
@@ -21,6 +21,8 @@ VexOS embeds these eight static TTF faces:
 | Lato | `Lato-Regular.ttf` | `Lato-Bold.ttf` |
 | DejaVu Sans | `DejaVuSans.ttf` | `DejaVuSans-Bold.ttf` |
 | DejaVu Sans Mono | `DejaVuSansMono.ttf` | `DejaVuSansMono-Bold.ttf` |
+| Noto Sans | `NotoSans-Regular.ttf` | `NotoSans-Bold.ttf` |
+| Noto Serif | `NotoSerif-Regular.ttf` | `NotoSerif-Bold.ttf` |
 
 Recommended layout:
 
@@ -41,6 +43,12 @@ assets/fonts/
     DejaVuSansMono.ttf
     DejaVuSansMono-Bold.ttf
     LICENSE
+  Noto/
+    NotoSans-Regular.ttf
+    NotoSans-Bold.ttf
+    NotoSerif-Regular.ttf
+    NotoSerif-Bold.ttf
+    OFL.txt
 ```
 
 The Makefile searches recursively under `assets/fonts/`, so subfolders are
@@ -54,6 +62,8 @@ prints the exact missing family/weight and stops.
   https://github.com/rsms/inter/blob/master/LICENSE.txt
 - **Lato** — SIL Open Font License 1.1:
   https://github.com/googlefonts/lato/blob/main/OFL.txt
+- **Noto Sans / Noto Serif** — SIL Open Font License 1.1:
+  https://github.com/notofonts/latin-greek-cyrillic/blob/main/OFL.txt
 - **DejaVu Sans / Mono** — Bitstream Vera / DejaVu font license:
   https://github.com/dejavu-fonts/dejavu-fonts/blob/master/LICENSE
 - **stb_truetype** — public domain; upstream source and notice are vendored in
