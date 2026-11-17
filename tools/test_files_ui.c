@@ -230,6 +230,11 @@ void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
                      uint32_t foreground) {
   (void)x; (void)y; (void)text; (void)foreground;
 }
+int gfx_push_clip(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+  (void)x; (void)y; (void)width; (void)height;
+  return 1;
+}
+void gfx_pop_clip(void) {}
 
 static int record_open(const char *path) {
   strncpy(g_last_opened, path, sizeof(g_last_opened) - 1u);
