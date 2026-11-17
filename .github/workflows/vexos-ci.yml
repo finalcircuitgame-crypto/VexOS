@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Check Windows USB flasher syntax
+        run: python3 -m py_compile tiny64_usb_flasher.py
       - name: Test SFS2 host image tools
         run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 
