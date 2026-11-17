@@ -1,6 +1,6 @@
 #include "graphics.h"
 
-extern const uint8_t _binary_font_atlas_bin_start[];
+#include "font_engine.h"
 
 static BootInfo *g_boot_info;
 static uint32_t *g_backbuffer;
@@ -381,107 +381,271 @@ gfx_font_family_t gfx_get_font_family(void) {
 uint8_t gfx_get_font_scale(void) { return g_font_scale; }
 uint8_t gfx_get_font_bold(void) { return g_font_bold; }
 
-static uint8_t gfx_font_coverage(uint8_t character, uint32_t x,
-                                 uint32_t y) {
-  if (character >= 128u || x >= 8u || y >= 8u)
+static uint32_t gfx_decode_utf8(const char **text) {
+  const uint8_t *s = (const uint8_t *)*text;
+  uint32_t codepoint;
+
+  if (!s || !s[0])
     return 0;
-  uint32_t face_index = (uint32_t)g_font_family * 2u +
-                       (g_font_bold ? 1u : 0u);
-  uint32_t glyph_index = face_index * 128u + character;
-  uint32_t pixel_index = glyph_index * 64u + y * 8u + x;
-  uint8_t packed = _binary_font_atlas_bin_start[pixel_index >> 1];
-  uint8_t shift = (pixel_index & 1u) ? 0u : 4u;
-  return (uint8_t)(((packed >> shift) & 15u) * 17u);
+
+  if (s[0] < 0x80u) {
+    *text += 1;
+    return s[0];
+  }
+
+  if (s[0] >= 0xC2u && s[0] <= 0xDFu) {
+    if (!s[1] || (s[1] & 0xC0u) != 0x80u) {
+      *text += 1;
+      return 0xFFFDu;
+    }
+    codepoint = ((uint32_t)(s[0] & 0x1Fu) << 6) |
+                (uint32_t)(s[1] & 0x3Fu);
+    *text += 2;
+    return codepoint;
+  }
+
+  if (s[0] >= 0xE0u && s[0] <= 0xEFu) {
+    if (!s[1] || !s[2] ||
+        (s[1] & 0xC0u) != 0x80u || (s[2] & 0xC0u) != 0x80u ||
+        (s[0] == 0xE0u && s[1] < 0xA0u) ||
+        (s[0] == 0xEDu && s[1] >= 0xA0u)) {
+      *text += 1;
+      return 0xFFFDu;
+    }
+    codepoint = ((uint32_t)(s[0] & 0x0Fu) << 12) |
+                ((uint32_t)(s[1] & 0x3Fu) << 6) |
+                (uint32_t)(s[2] & 0x3Fu);
+    *text += 3;
+    return codepoint;
+  }
+
+  if (s[0] >= 0xF0u && s[0] <= 0xF4u) {
+    if (!s[1] || !s[2] || !s[3] ||
+        (s[1] & 0xC0u) != 0x80u ||
+        (s[2] & 0xC0u) != 0x80u ||
+        (s[3] & 0xC0u) != 0x80u ||
+        (s[0] == 0xF0u && s[1] < 0x90u) ||
+        (s[0] == 0xF4u && s[1] >= 0x90u)) {
+      *text += 1;
+      return 0xFFFDu;
+    }
+    codepoint = ((uint32_t)(s[0] & 0x07u) << 18) |
+                ((uint32_t)(s[1] & 0x3Fu) << 12) |
+                ((uint32_t)(s[2] & 0x3Fu) << 6) |
+                (uint32_t)(s[3] & 0x3Fu);
+    *text += 4;
+    return codepoint;
+  }
+
+  *text += 1;
+  return 0xFFFDu;
+}
+
+static uint16_t gfx_font_pixel_height(void) {
+  return (uint16_t)(10u * (uint16_t)g_font_scale);
+}
+
+uint32_t gfx_get_font_line_height(void) {
+  if (!FontEngine_IsReady())
+    return 8u * (uint32_t)g_font_scale;
+
+  int32_t ascent = 0, descent = 0, line_gap = 0;
+  FontEngine_GetLineMetrics(g_font_family, g_font_bold,
+                            gfx_font_pixel_height(),
+                            &ascent, &descent, &line_gap);
+  int32_t height = ascent - descent + line_gap;
+  return height > 0 ? (uint32_t)height : gfx_font_pixel_height();
+}
+
+static void gfx_draw_legacy_codepoint(uint32_t x, uint32_t y,
+                                      uint32_t codepoint,
+                                      uint32_t foreground) {
+  if (!g_font)
+    return;
+  uint8_t character = codepoint <= 255u ? (uint8_t)codepoint : (uint8_t)'?';
+  uint32_t scale = g_font_scale;
+  gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
+  gfx_rect_t cell = {x, y, 8u * scale, 8u * scale};
+  clip = gfx_intersect(clip, cell);
+  if (!clip.width || !clip.height)
+    return;
+
+  uint32_t *dst = gfx_target();
+  if (!dst)
+    return;
+  uint32_t gx_start = clip.x > x ? (clip.x - x) / scale : 0u;
+  uint32_t gy_start = clip.y > y ? (clip.y - y) / scale : 0u;
+  uint32_t gx_end = (clip.x + clip.width - x + scale - 1u) / scale;
+  uint32_t gy_end = (clip.y + clip.height - y + scale - 1u) / scale;
+  if (gx_end > 8u) gx_end = 8u;
+  if (gy_end > 8u) gy_end = 8u;
+
+  const uint8_t *glyph = &g_font[(uint32_t)character * 8u];
+  foreground &= 0x00FFFFFFu;
+  for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
+    uint8_t bits = glyph[gy];
+    for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
+      if (!(bits & (uint8_t)(1u << (7u - gx))))
+        continue;
+      uint32_t px0 = x + gx * scale;
+      uint32_t py0 = y + gy * scale;
+      for (uint32_t sy = 0; sy < scale; ++sy) {
+        uint32_t py = py0 + sy;
+        uint32_t *row = &dst[py * g_boot_info->pitch];
+        for (uint32_t sx = 0; sx < scale; ++sx) {
+          uint32_t px = px0 + sx;
+          row[px] = foreground;
+        }
+      }
+    }
+  }
+}
+
+void gfx_draw_codepoint(uint32_t x, uint32_t y, uint32_t codepoint,
+                        uint32_t foreground) {
+  if (!g_boot_info)
+    return;
+
+  if (!FontEngine_IsReady()) {
+    gfx_draw_legacy_codepoint(x, y, codepoint, foreground);
+    return;
+  }
+
+  uint16_t pixel_height = gfx_font_pixel_height();
+  int32_t ascent = 0, descent = 0, line_gap = 0;
+  FontEngine_GetLineMetrics(g_font_family, g_font_bold, pixel_height,
+                            &ascent, &descent, &line_gap);
+
+  gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
+  gfx_rect_t cell = {x, y, 8u * (uint32_t)g_font_scale,
+                     10u * (uint32_t)g_font_scale};
+  clip = gfx_intersect(clip, cell);
+  if (!clip.width || !clip.height)
+    return;
+
+  FontEngine_DrawGlyph(g_font_family, g_font_bold, pixel_height, codepoint,
+                       gfx_target(), g_boot_info->pitch,
+                       g_boot_info->width, g_boot_info->height,
+                       (int32_t)x, (int32_t)(y + (uint32_t)ascent),
+                       clip.x, clip.y, clip.width, clip.height,
+                       foreground, NULL);
 }
 
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground) {
-  if (!g_boot_info)
+  gfx_draw_codepoint(x, y, (uint32_t)character, foreground);
+}
+
+void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
+                     uint32_t foreground) {
+  if (!text || !g_boot_info)
     return;
 
-  if (character < 128u) {
-    uint32_t scale = g_font_scale;
-    uint32_t width = 8u * scale;
-    uint32_t height = 8u * scale;
-    gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
-    uint32_t clip_right = clip.x + clip.width;
-    uint32_t clip_bottom = clip.y + clip.height;
-    if (x >= clip_right || y >= clip_bottom ||
-        clip.x >= x + width || clip.y >= y + height)
-      return;
-
-    uint32_t gx_start = clip.x > x ? (clip.x - x) / scale : 0u;
-    uint32_t gy_start = clip.y > y ? (clip.y - y) / scale : 0u;
-    uint32_t gx_end = clip_right > x ? (clip_right - x + scale - 1u) / scale : 0u;
-    uint32_t gy_end = clip_bottom > y ? (clip_bottom - y + scale - 1u) / scale : 0u;
-    if (gx_end > 8u) gx_end = 8u;
-    if (gy_end > 8u) gy_end = 8u;
-
-    uint32_t *dst = gfx_target();
-    if (!dst)
-      return;
-    foreground &= 0x00FFFFFFu;
-    for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
-      for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
-        uint8_t alpha = gfx_font_coverage(character, gx, gy);
-        if (!alpha)
-          continue;
-        uint32_t px0 = x + gx * scale;
-        uint32_t py0 = y + gy * scale;
-        for (uint32_t sy = 0; sy < scale; ++sy) {
-          uint32_t py = py0 + sy;
-          if (py < clip.y || py >= clip_bottom)
-            continue;
-          uint32_t *row = &dst[py * g_boot_info->pitch];
-          for (uint32_t sx = 0; sx < scale; ++sx) {
-            uint32_t px = px0 + sx;
-            if (px >= clip.x && px < clip_right)
-              row[px] = gfx_blend_rgb(row[px], foreground, alpha);
-          }
-        }
+  if (!FontEngine_IsReady()) {
+    uint32_t cx = x;
+    uint32_t line_height = 8u * (uint32_t)g_font_scale;
+    while (*text) {
+      uint32_t cp = gfx_decode_utf8(&text);
+      if (cp == '\n') {
+        cx = x;
+        y += line_height;
+      } else if (cp == '\t') {
+        cx += line_height * 4u;
+      } else {
+        gfx_draw_codepoint(cx, y, cp, foreground);
+        cx += line_height;
       }
     }
     return;
   }
 
-  if (!g_font)
-    return;
+  uint16_t pixel_height = gfx_font_pixel_height();
+  int32_t ascent = 0, descent = 0, line_gap = 0;
+  FontEngine_GetLineMetrics(g_font_family, g_font_bold, pixel_height,
+                            &ascent, &descent, &line_gap);
+  uint32_t line_height = gfx_get_font_line_height();
   gfx_rect_t clip = gfx_intersect(gfx_current_clip(), gfx_screen_rect());
-  uint32_t clip_right = clip.x + clip.width;
-  uint32_t clip_bottom = clip.y + clip.height;
-  if (x >= clip_right || y >= clip_bottom ||
-      clip.x >= x + 8u || clip.y >= y + 8u)
+  uint32_t *target = gfx_target();
+  if (!target)
     return;
-  uint32_t gx_start = clip.x > x ? clip.x - x : 0u;
-  uint32_t gy_start = clip.y > y ? clip.y - y : 0u;
-  uint32_t gx_end = clip_right > x ? clip_right - x : 0u;
-  uint32_t gy_end = clip_bottom > y ? clip_bottom - y : 0u;
-  if (gx_end > 8u) gx_end = 8u;
-  if (gy_end > 8u) gy_end = 8u;
-  uint32_t *dst = gfx_target();
-  if (!dst)
-    return;
-  const uint8_t *legacy_glyph = &g_font[(uint32_t)character * 8u];
-  foreground &= 0x00FFFFFFu;
-  for (uint32_t gy = gy_start; gy < gy_end; ++gy) {
-    uint8_t bits = legacy_glyph[gy];
-    uint32_t *out = &dst[(y + gy) * g_boot_info->pitch];
-    for (uint32_t gx = gx_start; gx < gx_end; ++gx) {
-      if (bits & (uint8_t)(1u << (7u - gx)))
-        out[x + gx] = foreground;
+
+  int32_t cx = (int32_t)x;
+  uint32_t line_top = y;
+  uint32_t previous_codepoint = 0;
+  while (*text) {
+    uint32_t cp = gfx_decode_utf8(&text);
+    if (cp == '\n') {
+      cx = (int32_t)x;
+      line_top += line_height;
+      previous_codepoint = 0;
+      continue;
     }
+    if (cp == '\t') {
+      int32_t space_advance = FontEngine_DrawGlyph(
+          g_font_family, g_font_bold, pixel_height, (uint32_t)' ',
+          NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+      if (space_advance <= 0)
+        space_advance = (int32_t)(pixel_height / 2u);
+      cx += space_advance * 4;
+      previous_codepoint = 0;
+      continue;
+    }
+
+    if (previous_codepoint)
+      cx += FontEngine_GetKerning(g_font_family, g_font_bold, pixel_height,
+                                  previous_codepoint, cp);
+    int32_t advance = FontEngine_DrawGlyph(
+        g_font_family, g_font_bold, pixel_height, cp,
+        target, g_boot_info->pitch, g_boot_info->width, g_boot_info->height,
+        cx, (int32_t)(line_top + (uint32_t)ascent),
+        clip.x, clip.y, clip.width, clip.height, foreground, NULL);
+    if (advance <= 0)
+      advance = (int32_t)(pixel_height / 2u);
+    cx += advance;
+    previous_codepoint = cp;
   }
 }
 
-void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
-                     uint32_t foreground) {
-  uint32_t cx = x;
-  uint32_t advance = 8u * g_font_scale;
-  while (text && *text) {
-    char ch = *text++;
-    if (ch == '\n') { y += advance; cx = x; continue; }
-    if (ch == '\t') { cx += advance * 4u; continue; }
-    gfx_draw_glyph(cx, y, (uint8_t)ch, foreground);
-    cx += advance;
+uint32_t gfx_measure_string(const char *text) {
+  if (!text)
+    return 0;
+
+  if (!FontEngine_IsReady())
+    return (uint32_t)(8u * g_font_scale) * (uint32_t)font_strlen(text);
+
+  uint16_t pixel_height = gfx_font_pixel_height();
+  int32_t current = 0;
+  uint32_t maximum = 0;
+  uint32_t previous_codepoint = 0;
+  while (*text) {
+    uint32_t cp = gfx_decode_utf8(&text);
+    if (cp == '\n') {
+      if ((uint32_t)(current > 0 ? current : 0) > maximum)
+        maximum = (uint32_t)current;
+      current = 0;
+      previous_codepoint = 0;
+      continue;
+    }
+    if (cp == '\t') {
+      int32_t space_advance = FontEngine_DrawGlyph(
+          g_font_family, g_font_bold, pixel_height, (uint32_t)' ',
+          NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+      if (space_advance <= 0)
+        space_advance = (int32_t)(pixel_height / 2u);
+      current += space_advance * 4;
+      previous_codepoint = 0;
+      continue;
+    }
+    if (previous_codepoint)
+      current += FontEngine_GetKerning(g_font_family, g_font_bold,
+                                       pixel_height, previous_codepoint, cp);
+    int32_t advance = FontEngine_DrawGlyph(
+        g_font_family, g_font_bold, pixel_height, cp,
+        NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+    current += advance > 0 ? advance : (int32_t)(pixel_height / 2u);
+    previous_codepoint = cp;
   }
+  if ((uint32_t)(current > 0 ? current : 0) > maximum)
+    maximum = (uint32_t)current;
+  return maximum;
 }
