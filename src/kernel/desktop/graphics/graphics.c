@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include "graphics.h"
 
 #include "font_engine.h"
