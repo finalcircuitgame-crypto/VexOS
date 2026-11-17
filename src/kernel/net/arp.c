@@ -431,7 +431,8 @@ int arp_send_ipv4(net_device_t *device, uint32_t next_hop,
                 free_slot = i;
             continue;
         }
-        if (entry->device == device && entry->next_hop == next_hop)
+        if (entry->device == device && entry->next_hop == next_hop &&
+            entry->source_address == source_address)
             request_already_pending = 1;
     }
 
