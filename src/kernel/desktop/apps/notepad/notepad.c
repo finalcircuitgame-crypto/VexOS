@@ -3,8 +3,9 @@
 #include "../../../../include/vfs.h"
 
 #define NOTEPAD_TEXT_CAPACITY 4096u
-#define NOTEPAD_LINE_GUTTER 42u
-#define NOTEPAD_LINE_HEIGHT 16u
+#define NOTEPAD_LINE_GUTTER 50u
+#define NOTEPAD_CELL_WIDTH 9u
+#define NOTEPAD_LINE_HEIGHT 19u
 
 static desktop_window_t g_window;
 static char g_filename[VFS_PATH_MAX];
@@ -60,7 +61,7 @@ static uint32_t notepad_visible_rows(void) {
 
 static uint32_t notepad_max_scroll(void) {
   uint32_t columns = g_window.w > 82 ?
-      ((uint32_t)g_window.w - 82u) / 8u : 1u;
+      ((uint32_t)g_window.w - 82u) / NOTEPAD_CELL_WIDTH : 1u;
   uint32_t rows = notepad_visual_row_count(columns);
   uint32_t visible = notepad_visible_rows();
   return rows > visible ? rows - visible : 0u;
@@ -298,7 +299,7 @@ static void draw_line_number(uint32_t x, uint32_t y, uint32_t number) {
   while (count) {
     char value[2] = { digits[--count], 0 };
     gfx_draw_string(x, y, value, 0x7888A2u);
-    x += 8u;
+    x += NOTEPAD_CELL_WIDTH;
   }
 }
 
@@ -307,12 +308,19 @@ static void draw_editor_rows(uint32_t text_x, uint32_t text_y,
   if (!columns || !rows)
     return;
 
+  gfx_font_family_t saved_family = gfx_get_font_family();
+  uint8_t saved_scale = gfx_get_font_scale();
+  uint8_t saved_bold = gfx_get_font_bold();
+  uint16_t saved_size = gfx_get_font_size();
+  gfx_set_font(GFX_FONT_DEJAVU_MONO, saved_scale, 0u);
+  gfx_set_font_size(14u);
+
   uint32_t visual_row = 0;
   uint32_t column = 0;
   uint32_t logical_line = 1;
   uint32_t row_end = g_scroll + rows;
 
-  draw_line_number(text_x - NOTEPAD_LINE_GUTTER + 6u, text_y,
+  draw_line_number(text_x - NOTEPAD_LINE_GUTTER + 4u, text_y,
                    logical_line);
 
   for (uint32_t i = 0; i < g_text_length && visual_row < row_end; ++i) {
@@ -324,7 +332,7 @@ static void draw_editor_rows(uint32_t text_x, uint32_t text_y,
       if (visual_row >= g_scroll && visual_row < row_end) {
         uint32_t row_y = text_y +
             (visual_row - g_scroll) * NOTEPAD_LINE_HEIGHT;
-        draw_line_number(text_x - NOTEPAD_LINE_GUTTER + 6u, row_y,
+        draw_line_number(text_x - NOTEPAD_LINE_GUTTER + 4u, row_y,
                          logical_line);
       }
       continue;
@@ -346,11 +354,14 @@ static void draw_editor_rows(uint32_t text_x, uint32_t text_y,
         uint32_t row_y = text_y +
             (visual_row - g_scroll) * NOTEPAD_LINE_HEIGHT;
         char glyph[2] = { value == '\t' ? ' ' : value, 0 };
-        gfx_draw_string(text_x + column * 8u, row_y, glyph, 0xD5DEECu);
+        gfx_draw_string(text_x + column * NOTEPAD_CELL_WIDTH, row_y, glyph, 0xD5DEECu);
       }
       ++column;
     }
   }
+
+  gfx_set_font(saved_family, saved_scale, saved_bold);
+  gfx_set_font_size(saved_size);
 }
 
 void notepad_draw(const notepad_render_context_t *context) {
@@ -385,16 +396,20 @@ void notepad_draw(const notepad_render_context_t *context) {
   /* Minimal toolbar: format on the left, bounded scroll controls on the right. */
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
                 (uint32_t)(w - 2), 28u, 0x151F30u);
-  gfx_draw_string((uint32_t)(x + 14), (uint32_t)(y + 41),
+  gfx_draw_string((uint32_t)(x + 14), (uint32_t)(y + 37),
                   "PLAIN TEXT", 0xAAB9CFu);
-  gfx_draw_string((uint32_t)(x + 112), (uint32_t)(y + 41),
+  gfx_set_font_size(12u);
+  gfx_draw_string((uint32_t)(x + 112), (uint32_t)(y + 39),
                   "4096 BYTE LIMIT", 0x62758F);
+  gfx_set_font_size(gfx_get_font_size() < 16u ? 16u : gfx_get_font_size());
   gfx_blend_round_rect((uint32_t)(x + w - 66), (uint32_t)(y + 34),
                        24u, 22u, 5u, 0x27364B, 255u);
   gfx_blend_round_rect((uint32_t)(x + w - 40), (uint32_t)(y + 34),
                        24u, 22u, 5u, 0x27364B, 255u);
-  gfx_draw_string((uint32_t)(x + w - 58), (uint32_t)(y + 41), "^", 0xE1E8F4u);
-  gfx_draw_string((uint32_t)(x + w - 32), (uint32_t)(y + 41), "v", 0xE1E8F4u);
+  gfx_set_font_size(12u);
+  gfx_draw_string((uint32_t)(x + w - 58), (uint32_t)(y + 38), "^", 0xE1E8F4u);
+  gfx_draw_string((uint32_t)(x + w - 32), (uint32_t)(y + 38), "v", 0xE1E8F4u);
+  gfx_set_font_size(16u);
 
   uint32_t editor_x = (uint32_t)x + 12u;
   uint32_t editor_y = (uint32_t)y + 64u;
@@ -408,7 +423,7 @@ void notepad_draw(const notepad_render_context_t *context) {
   uint32_t text_x = editor_x + NOTEPAD_LINE_GUTTER + 8u;
   uint32_t text_y = editor_y + 10u;
   uint32_t columns = editor_w > NOTEPAD_LINE_GUTTER + 16u ?
-      (editor_w - NOTEPAD_LINE_GUTTER - 16u) / 8u : 0u;
+      (editor_w - NOTEPAD_LINE_GUTTER - 16u) / NOTEPAD_CELL_WIDTH : 0u;
   uint32_t rows = editor_h > 20u ?
       (editor_h - 20u) / NOTEPAD_LINE_HEIGHT : 0u;
   draw_editor_rows(text_x, text_y, columns, rows);
@@ -431,9 +446,11 @@ void notepad_draw(const notepad_render_context_t *context) {
     count_text[i] = reverse[digits - i - 1u];
   count_text[digits] = 0;
 
-  gfx_draw_string((uint32_t)(x + 14), status_y + 9u, count_text, 0xAAB9CFu);
-  gfx_draw_string((uint32_t)(x + 14 + digits * 8u), status_y + 9u,
-                  " chars", 0x71829C);
+  uint32_t status_x_left = (uint32_t)(x + 14);
+  gfx_draw_string(status_x_left, status_y + 5u, count_text, 0xAAB9CFu);
+  status_x_left += gfx_measure_string(count_text) + 6u;
+  gfx_draw_string(status_x_left, status_y + 5u, "chars", 0x71829C);
+  status_x_left += gfx_measure_string("chars") + 14u;
   char line_text[12];
   uint32_t lines = notepad_line_count();
   uint32_t line_digits = 0;
@@ -445,17 +462,16 @@ void notepad_draw(const notepad_render_context_t *context) {
   for (uint32_t i = 0; i < line_digits; ++i)
     line_text[i] = line_reverse[line_digits - i - 1u];
   line_text[line_digits] = 0;
-  uint32_t line_x = (uint32_t)(x + 14u + digits * 8u + 56u);
-  gfx_draw_string(line_x, status_y + 9u, "|", 0x536781u);
-  gfx_draw_string(line_x + 12u, status_y + 9u, line_text, 0xAAB9CFu);
-  gfx_draw_string(line_x + 12u + line_digits * 8u, status_y + 9u,
-                  " lines", 0x71829C);
+  uint32_t line_x = status_x_left;
+  gfx_draw_string(line_x, status_y + 5u, "|", 0x536781u);
+  line_x += 12u;
+  gfx_draw_string(line_x, status_y + 5u, line_text, 0xAAB9CFu);
+  line_x += gfx_measure_string(line_text) + 6u;
+  gfx_draw_string(line_x, status_y + 5u, "lines", 0x71829C);
   const char *status = g_dirty ? "UNSAVED CHANGES" : "ALL CHANGES SAVED";
-  uint32_t status_len = 0;
-  while (status[status_len])
-    ++status_len;
-  uint32_t status_x = (uint32_t)(x + w) > status_len * 8u + 18u ?
-      (uint32_t)(x + w) - status_len * 8u - 18u : (uint32_t)(x + 14);
-  gfx_draw_string(status_x, status_y + 9u, status,
+  uint32_t status_width = gfx_measure_string(status);
+  uint32_t status_x = (uint32_t)(x + w) > status_width + 18u ?
+      (uint32_t)(x + w) - status_width - 18u : (uint32_t)(x + 14);
+  gfx_draw_string(status_x, status_y + 5u, status,
                   g_dirty ? 0xE8B96Fu : 0x73C9A8u);
 }
