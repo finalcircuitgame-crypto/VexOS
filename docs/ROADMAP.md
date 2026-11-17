@@ -83,7 +83,7 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Partial — network devices, E1000, Ethernet II, ARP, and an initial IPv4 layer implemented**
+**Status: Partial — network devices, E1000, Ethernet II, ARP, IPv4, and ICMPv4 echo implemented**
 
 Implemented on `feature/network-foundation`:
 - Generic network-device registration and bounded interface table.
@@ -107,18 +107,22 @@ Implemented on `feature/network-foundation`:
 - An explicit no-fragmentation policy: incoming fragments are dropped because reassembly is not implemented; outgoing datagrams set DF. IPv4 options are bounds/checksum validated but not interpreted.
 - Host-side IPv4 tests for malformed headers, checksum failures, non-local destinations, fragment rejection, interface configuration, protocol dispatch, outbound checksums, on-link/gateway routing, and broadcast transmission.
 - Host-side ARP tests for malformed packets, cache learning/conflicts/expiry, known-neighbor sending, request/reply resolution, and pending-queue capacity/timeout.
+- ICMPv4 protocol registration with the IPv4 dispatcher and bounded statistics.
+- ICMP checksum validation over the complete message, echo-request handling, and echo-reply generation that preserves identifier, sequence, and payload.
+- Echo replies use the existing IPv4 routing/ARP path; limited and configured subnet broadcasts are not answered.
+- Host-side ICMP tests cover request/reply checksums, payload preservation, bad checksums, and unsupported message types.
 - QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
-1. ICMP echo/reply over the new IPv4 layer, including bounded request/reply handling.
-2. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
-3. DHCP and DNS clients.
-4. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
-5. User-mode socket API and loopback/QEMU integration tests.
+1. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
+2. DHCP and DNS clients.
+3. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
+4. User-mode socket API and loopback/QEMU integration tests.
+5. ICMP error messages and broader network diagnostics.
 6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
 
 Current limitations:
-- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; DHCP, ICMP, DNS, UDP, TCP, sockets, forwarding, and general Internet access remain unavailable.
+- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; ICMP error messages, DHCP, DNS, UDP, TCP, sockets, forwarding, and general Internet access remain unavailable.
 - The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
 - Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
 - Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
