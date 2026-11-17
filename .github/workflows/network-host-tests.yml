@@ -47,3 +47,16 @@ jobs:
 
       - name: Test IPv4 validation, routing, and ARP handoff
         run: /tmp/vexos-ipv4-tests
+
+      
+      - name: Compile ICMPv4 tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \
+            src/kernel/net/ipv4.c src/kernel/net/icmp.c \
+            tools/net_icmp_test.c \
+            -o /tmp/vexos-icmp-tests
+
+      - name: Test ICMPv4 echo handling
+        run: /tmp/vexos-icmp-tests
