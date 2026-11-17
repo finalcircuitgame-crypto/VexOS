@@ -171,6 +171,35 @@ static FontCacheEntry g_cache[FONT_CACHE_CAPACITY];
 static uint64_t g_cache_clock;
 static uint8_t g_engine_ready;
 
+static void font_test_print_i32(const char *label, int32_t value) {
+    char digits[12];
+    uint32_t count = 0;
+    uint32_t magnitude = value < 0 ? (uint32_t)(-(int64_t)value)
+                                   : (uint32_t)value;
+    char prefix[64];
+    uint32_t p = 0;
+    while (label && label[p] && p < sizeof(prefix) - 2u) {
+        prefix[p] = label[p];
+        ++p;
+    }
+    prefix[p++] = '=';
+    prefix[p] = 0;
+    serial_print(prefix);
+    if (value < 0)
+        serial_print("-");
+    if (magnitude == 0)
+        digits[count++] = '0';
+    while (magnitude && count < sizeof(digits)) {
+        digits[count++] = (char)('0' + magnitude % 10u);
+        magnitude /= 10u;
+    }
+    while (count) {
+        char one[2] = {digits[--count], 0};
+        serial_print(one);
+    }
+    serial_print("\n");
+}
+
 /*
  * Font rasterization uses scalar floating-point/SSE math. The kernel task
  * switcher does not yet own per-task FPU contexts, so preserve the interrupted
@@ -572,10 +601,17 @@ int FontEngine_SelfTest(void) {
                 8, 40, 0, 0, 64u, 64u,
                 0x00FFFFFFu, &metrics);
             if (advance <= 0 || !metrics.width || !metrics.height) {
-                serial_print("[FONTTEST] glyph advance or bitmap bounds are empty\n");
+                serial_print("[FONTTEST] glyph advance or bitmap bounds are empty\\n");
+                font_test_print_i32("family", family);
+                font_test_print_i32("bold", bold);
+                font_test_print_i32("advance", advance);
+                font_test_print_i32("metric_advance", metrics.advance_x);
+                font_test_print_i32("metric_width", (int32_t)metrics.width);
+                font_test_print_i32("metric_height", (int32_t)metrics.height);
+                font_test_print_i32("glyph_index",
+                    stbtt_FindGlyphIndex(&g_faces[family][bold], (int)'A'));
                 return 0;
             }
-
             uint32_t lit_pixels = 0;
             for (uint32_t i = 0; i < 64u * 64u; ++i) {
                 if (probe[i] & 0x00FFFFFFu)
