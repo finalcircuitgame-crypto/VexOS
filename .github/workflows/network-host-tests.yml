@@ -26,3 +26,13 @@ jobs:
 
       - name: Test Ethernet II validation and dispatch
         run: /tmp/vexos-ethernet-tests
+
+      - name: Compile ARP resolution tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c tools/net_arp_test.c \
+            -o /tmp/vexos-arp-tests
+
+      - name: Test ARP parsing, cache, and pending resolution
+        run: /tmp/vexos-arp-tests
