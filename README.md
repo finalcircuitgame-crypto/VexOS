@@ -7,7 +7,7 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 - Kernel core (src/kernel/core): framebuffer console, PMM, VMM, heap, PCI enumeration and drivers, desktop UI, and setup wizard
 - Persistent SimpleFS storage with SFS1 compatibility and journaled SFS2 nested-file operations
 - Boot diagnostics: serial output is buffered in a 32 KiB RAM ring and flushed to `/boot.log` through the writable SFS1/SFS2 VFS backend; logging never formats a disk
-- Networking foundation: generic network-device registration plus a polling Intel E1000 driver with bounded RX/TX descriptor rings (QEMU 82540EM target)
+- Networking foundation: generic network-device registration, polling Intel E1000 driver (QEMU 82540EM target), and bounded Ethernet II EtherType dispatch
 
 ## Development roadmap
 
@@ -62,7 +62,7 @@ The flasher provides two operations:
 
 The utility only lists physical USB disks for whole-disk flashing, rechecks the disk identity immediately before repartitioning, refuses Windows boot/system disks, and verifies copied files with SHA-256. It does not install VexOS to internal drives. The separate `dist/storage.img` is not written by this boot-media utility; persistent storage over USB mass storage is not part of this USB boot workflow yet.
 
-Boot-log persistence uses the kernel's 32 KiB RAM ring and the writable SFS1/SFS2 `/boot.log` VFS backend. If storage is not available, diagnostics remain buffered in RAM; logging does not format or partition media. VexOS's first networking milestone is currently limited to raw Ethernet frames through the QEMU Intel E1000 device. ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, and physical laptop NIC qualification are not implemented yet.
+Boot-log persistence uses the kernel's 32 KiB RAM ring and the writable SFS1/SFS2 `/boot.log` VFS backend. If storage is not available, diagnostics remain buffered in RAM; logging does not format or partition media. VexOS currently receives untagged Ethernet II frames through the QEMU Intel E1000 device and dispatches registered EtherTypes synchronously. ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, VLAN parsing, and physical laptop NIC qualification are not implemented yet. Receive handlers borrow the NIC's packet buffer and must copy any bytes they need after the callback returns.
 
 A successful flash creates this boot layout:
 
