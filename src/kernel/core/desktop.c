@@ -134,7 +134,7 @@ static int viewer_load_file(const char *name) {
 
   vfs_stat_t file_info;
   if (!name || !vfs_init() || !vfs_stat(name, &file_info) ||
-      file_info.type != VFS_NODE_FILE || file_info.size == 0) {
+      file_info.type != VFS_NODE_FILE) {
     return 0;
   }
   file_size = file_info.size;
@@ -266,6 +266,17 @@ static int viewer_load_file(const char *name) {
   g_app_open[APP_VIEWER] = 1;
   wm_raise(APP_VIEWER);
   return 1;
+}
+
+/* Files opens editable text documents in Notepad (including empty files).
+   Images and other supported previews continue to use Viewer. */
+static int file_manager_open_document(const char *filename) {
+  if (vfs_is_writable() && notepad_open_file(filename)) {
+    g_app_open[APP_NOTEPAD] = 1;
+    wm_raise(APP_NOTEPAD);
+    return 1;
+  }
+  return viewer_load_file(filename);
 }
 
 // Setup Wizard state
@@ -2032,9 +2043,11 @@ void desktop_tick(void) {
     }
 
     // File Manager owns selection, search, sorting, and pointer drag state.
-    if (file_manager_is_open() && !g_doom_click_handled) {
+    if (file_manager_is_open() && !g_doom_click_handled &&
+        (wm_get_focus() == APP_EXPLORER ||
+         !focused_window_contains(p0.x, p0.y))) {
       file_manager_event_t event = file_manager_handle_click(
-          p0.x, p0.y, g_tick, viewer_load_file);
+          p0.x, p0.y, g_tick, file_manager_open_document);
       if (event == FILE_MANAGER_EVENT_CLOSED) {
         g_app_open[APP_EXPLORER] = 0;
         ui_changed = 1;

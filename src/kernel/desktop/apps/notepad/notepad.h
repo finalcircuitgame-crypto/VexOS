@@ -18,6 +18,8 @@ typedef struct {
 
 void notepad_draw(const notepad_render_context_t *context);
 void notepad_init(uint32_t screen_width, uint32_t screen_height);
+/* Load a text file from VFS, accepting empty files and saving dirty edits first. */
+int notepad_open_file(const char *filename);
 desktop_window_t *notepad_window(void);
 const char *notepad_filename(void);
 const char *notepad_text(void);

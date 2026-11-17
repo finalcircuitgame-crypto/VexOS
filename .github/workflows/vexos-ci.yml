@@ -20,6 +20,15 @@ jobs:
       - name: Test SFS2 host image tools
         run: python3 -m unittest discover -s tools -p 'test_sfs2_image.py' -v
 
+      - name: Test Files and Notepad interactions
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include -Isrc/kernel/desktop \
+            src/kernel/desktop/apps/files/file_manager.c \
+            src/kernel/desktop/apps/notepad/notepad.c \
+            tools/test_files_ui.c -o /tmp/files-ui-tests
+          /tmp/files-ui-tests
+
   build-and-boot:
     if: github.event_name != 'pull_request' || github.head_ref != 'feature/sfs2-foundation'
     runs-on: ubuntu-24.04

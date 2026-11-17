@@ -252,6 +252,10 @@ int vfs_is_mounted(void) {
     return g_root_mount.mounted != 0;
 }
 
+int vfs_is_writable(void) {
+    return vfs_init() && simplefs_is_writable();
+}
+
 int vfs_normalize_path(const char *path, char *out, uint32_t out_cap) {
     if (!path || !out || out_cap == 0 || !vfs_init())
         return 0;

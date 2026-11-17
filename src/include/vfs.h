@@ -37,6 +37,8 @@ typedef struct {
 /* Mount the existing persistent filesystem at /. Safe to call repeatedly. */
 int vfs_init(void);
 int vfs_is_mounted(void);
+/* False for read-only FAT32 or legacy journal-less SFS2 volumes. */
+int vfs_is_writable(void);
 
 /* Normalize absolute or root-relative paths. Parent traversal is rejected.
    Limits follow the mounted backend: SFS1 allows 31 total bytes; SFS2 allows
