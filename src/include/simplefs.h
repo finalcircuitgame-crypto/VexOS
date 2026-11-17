@@ -19,6 +19,7 @@ uint32_t simplefs_file_count(void);
 int simplefs_file_name_at(uint32_t index, char *out_name, uint32_t out_cap);
 uint32_t simplefs_list_to_buffer(char *out, uint32_t out_cap);
 int simplefs_is_mounted(void);
+int simplefs_is_writable(void);
 uint32_t simplefs_path_limit(void);
 int simplefs_is_directory(const char *name);
 
