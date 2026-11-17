@@ -94,8 +94,9 @@ jobs:
           # Q35 provides a PCIe-oriented Intel-style chipset topology.
           # QEMU's qemu-xhci is a generic emulated xHCI controller, not the
           # exact Intel HM370 controller found in some MSI GL63 variants.
-          # Q35 exposes SATA by default; this extra PIIX3 IDE channel provides
-          # the primary-slave device expected by the ATA PIO SFS1 fixture.
+          # Q35 uses the PCIe root bus (pcie.0), not the i440fx pci.0 bus.
+          # Attach this legacy PCI IDE controller as a root-complex endpoint;
+          # it exists only to provide the primary-slave ATA PIO SFS1 fixture.
           qemu-system-x86_64 \
             -machine q35 \
             -cpu max \
@@ -105,7 +106,7 @@ jobs:
             -device ich9-ahci,id=sata \
             -drive if=none,id=bootdisk,format=raw,file=dist/tiny64.img \
             -device ide-hd,drive=bootdisk,bus=sata.0 \
-            -device piix3-ide,id=legacyide,bus=pci.0 \
+            -device piix3-ide,id=legacyide,bus=pcie.0 \
             -drive if=none,id=sfs1_disk,format=raw,file=dist/storage.img \
             -device ide-hd,drive=sfs1_disk,bus=legacyide.0,unit=1 \
             -drive if=none,id=usb_disk,format=raw,file=dist/usb-test.img \
