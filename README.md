@@ -55,8 +55,8 @@ py .\tiny64_usb_flasher.py
 
 The flasher provides two operations:
 
-- **Update selected volume** copies the UEFI bootloader, `kernel.elf`, and the generated `startup.nsh` when present. It preserves unrelated files on that USB volume.
-- **Prepare + flash selected USB** creates a GPT partition table and FAT32 `VEXOS` volume, then copies the boot files. This erases every partition and file on the selected physical USB disk. Run the flasher as Administrator for this operation, verify the model and capacity, and complete both confirmation prompts.
+- **Quick Flash (no admin)** copies the UEFI bootloader, `kernel.elf`, and the generated `startup.nsh` when present to an existing FAT32 USB volume. It does not format the drive and preserves unrelated files.
+- **Full Flash (admin)** creates a GPT partition table and FAT32 `VEXOS` volume, then copies the boot files. This erases every partition and file on the selected physical USB disk. Only this operation requires running elevated; verify the model and capacity, and complete both confirmation prompts.
 
 The utility only lists physical USB disks for whole-disk flashing, rechecks the disk identity immediately before repartitioning, refuses Windows boot/system disks, and verifies copied files with SHA-256. It does not install VexOS to internal drives. The separate `dist/storage.img` is not written by this boot-media utility; persistent storage over USB mass storage is not part of this USB boot workflow yet.
 
