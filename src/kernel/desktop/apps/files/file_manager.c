@@ -518,6 +518,10 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   int32_t y = g_window.y;
   int32_t w = g_window.w;
   int32_t h = g_window.h;
+  gfx_font_family_t saved_family = gfx_get_font_family();
+  uint8_t saved_scale = gfx_get_font_scale();
+  uint8_t saved_bold = gfx_get_font_bold();
+  uint16_t saved_size = gfx_get_font_size();
 
   char count_text[24];
   fm_u32_to_text(count_text, g_visible_count);
@@ -536,6 +540,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   /* Breadcrumb and search toolbar */
   gfx_draw_rect((uint32_t)(x + 1), (uint32_t)(y + 31),
                 (uint32_t)(w - 2), 38u, 0x191F33u);
+  gfx_set_font_size(14u);
   gfx_blend_round_rect((uint32_t)(x + 12), (uint32_t)(y + 38),
                        (uint32_t)(w - 24), 24u, 6u, 0x101626u, 255u);
   gfx_draw_rect((uint32_t)(x + 22), (uint32_t)(y + 43), 1u, 14u,
@@ -548,17 +553,19 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   uint32_t search_x = (uint32_t)(x + w) - search_width - 22u;
   gfx_blend_round_rect(search_x - 30u, (uint32_t)(y + 38), 24u,
                        24u, 6u, 0x202B3Eu, 255u);
-  gfx_draw_string(search_x - 23u, (uint32_t)(y + 46), "R", 0x9EDCC5u);
+  gfx_set_font_size(12u);
+  gfx_draw_string(search_x - 23u, (uint32_t)(y + 44), "R", 0x9EDCC5u);
   gfx_blend_round_rect(search_x, (uint32_t)(y + 38), search_width,
                        24u, 6u, 0x101626u, 255u);
-  gfx_draw_string(search_x + 9u, (uint32_t)(y + 46),
+  gfx_draw_string(search_x + 9u, (uint32_t)(y + 44),
                   g_search[0] ? g_search : "Search files",
                   g_search_focused ? 0xF3F0FFu : 0x8490ADu);
   if (g_search_focused) {
-    uint32_t cursor_x = search_x + 9u + fm_name_length(g_search) * 8u;
+    uint32_t cursor_x = search_x + 9u + gfx_measure_string(g_search);
     if (cursor_x < search_x + search_width - 6u)
-      gfx_draw_rect(cursor_x, (uint32_t)(y + 44), 1u, 12u, 0xA99BFFu);
+      gfx_draw_rect(cursor_x, (uint32_t)(y + 43), 1u, 12u, 0xA99BFFu);
   }
+  gfx_set_font_size(saved_size);
 
   uint32_t body_y = (uint32_t)y + 70u;
   uint32_t body_h = h > 84 ? (uint32_t)h - 84u : 1u;
@@ -597,38 +604,41 @@ void file_manager_draw(const file_manager_render_context_t *context) {
                   "Saved on this VexOS volume", 0x8995B1u);
   if (list_w > 280u) {
     uint32_t action_y = body_y + 10u;
+    gfx_set_font_size(12u);
     uint32_t open_x = list_x + list_w - 266u;
     uint32_t new_x = list_x + list_w - 204u;
     uint32_t del_x = list_x + list_w - 130u;
     uint32_t refresh_x = list_x + list_w - 64u;
     gfx_blend_round_rect(open_x, action_y, 56u, 23u, 5u, 0x263A4Au, 255u);
-    gfx_draw_string(open_x + 9u, action_y + 8u, "Open", 0xB8E3D4u);
+    gfx_draw_string(open_x + 9u, action_y + 5u, "Open", 0xB8E3D4u);
     gfx_blend_round_rect(new_x, action_y, 68u, 23u, 5u,
                          g_writable ? 0x3A315Fu : 0x252B39u, 255u);
-    gfx_draw_string(new_x + 9u, action_y + 8u, "+ New",
+    gfx_draw_string(new_x + 9u, action_y + 5u, "+ New",
                     g_writable ? 0xE6E0FFu : 0x77839Au);
     gfx_blend_round_rect(del_x, action_y, 58u, 23u, 5u,
                          g_delete_armed ? 0x70404Bu : 0x283247u, 255u);
-    gfx_draw_string(del_x + 8u, action_y + 8u,
+    gfx_draw_string(del_x + 8u, action_y + 5u,
                     g_delete_armed ? "Confirm" : "Delete",
                     g_writable ? (g_delete_armed ? 0xFFE4E8u : 0xC6D0E5u)
                                : 0x77839Au);
     gfx_blend_round_rect(refresh_x, action_y, 54u, 23u, 5u, 0x202B3Eu, 255u);
-    gfx_draw_string(refresh_x + 8u, action_y + 8u, "Reload", 0xA9DCCBu);
+    gfx_draw_string(refresh_x + 8u, action_y + 5u, "Reload", 0xA9DCCBu);
   }
 
   uint32_t header_y = body_y + 50u;
+  gfx_set_font_size(12u);
   gfx_draw_rect(list_x + 2u, header_y, list_w - 4u, 23u, 0x1B263B);
-  gfx_draw_string(list_x + 14u, header_y + 8u,
+  gfx_draw_string(list_x + 14u, header_y + 5u,
                   g_sort_descending ? "NAME  v" : "NAME  ^",
                   0xC1B8FFu);
   uint32_t type_x = list_x + (list_w > 490u ? 330u : 210u);
   uint32_t size_x = list_x + (list_w > 490u ? 500u : 0u);
-  gfx_draw_string(type_x, header_y + 8u, "TYPE", 0xA1ABC4u);
+  gfx_draw_string(type_x, header_y + 5u, "TYPE", 0xA1ABC4u);
   if (list_w > 490u)
-    gfx_draw_string(size_x, header_y + 8u, "SIZE", 0xA1ABC4u);
+    gfx_draw_string(size_x, header_y + 5u, "SIZE", 0xA1ABC4u);
   gfx_draw_rect(list_x + 2u, header_y + 22u, list_w - 4u, 1u, 0x34405A);
 
+  gfx_set_font_size(saved_size);
   uint32_t rows_y = header_y + 24u;
   uint32_t available_h = h > 178 ? (uint32_t)h - 178u : 0u;
   uint32_t row_capacity = available_h / FILE_MANAGER_ROW_HEIGHT;
@@ -673,10 +683,11 @@ void file_manager_draw(const file_manager_render_context_t *context) {
       fm_draw_file_icon(list_x + 14u, row_y + 3u, name,
                         g_is_directory[storage_index]);
       uint32_t name_x = list_x + 42u;
-      uint32_t max_name_chars = type_x > name_x + 12u ?
-          (type_x - name_x - 12u) / 8u : 1u;
-      if (fm_name_length(name) > max_name_chars)
-        name[max_name_chars] = 0;
+      uint32_t name_width = type_x > name_x + 12u ?
+          type_x - name_x - 12u : 1u;
+      while (fm_name_length(name) > 1u &&
+             gfx_measure_string(name) > name_width)
+        name[fm_name_length(name) - 1u] = 0;
       gfx_draw_string(name_x, row_y + 9u, name,
                       storage_index == g_selected ? 0xFFFFFFu : 0xD7DDF0u);
       gfx_draw_string(type_x, row_y + 9u, kind, 0x929DB8u);
@@ -686,6 +697,7 @@ void file_manager_draw(const file_manager_render_context_t *context) {
     gfx_pop_clip();
   }
 
+  gfx_set_font_size(12u);
   gfx_draw_rect((uint32_t)(x + 160), (uint32_t)(y + h - 28),
                 list_w, 1u, 0x303A53u);
   if (g_selected != 0xFFFFFFFFu) {
@@ -703,6 +715,9 @@ void file_manager_draw(const file_manager_render_context_t *context) {
   else
     gfx_draw_string((uint32_t)(x + w - 150), (uint32_t)(y + h - 18),
                     "Double-click to open", 0x8995B1u);
+
+  gfx_set_font(saved_family, saved_scale, saved_bold);
+  gfx_set_font_size(saved_size);
 }
 
 file_manager_event_t file_manager_handle_click(
