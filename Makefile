@@ -40,6 +40,7 @@ $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
 # Keep window rendering and compositor hot paths optimized.
 $(OBJDIR)/desktop/%.o: CFLAGS_KERNEL += -O2
+$(OBJDIR)/desktop/graphics/font_engine.o: CFLAGS_KERNEL += -O2
 
 # CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
 ifeq ($(VEXOS_CI),1)
@@ -74,8 +75,23 @@ KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
 $(KERNEL_OBJS): Makefile
 
 FONT_OBJ = $(OBJDIR)/font.o
-FONT_ATLAS_BIN = assets/fonts/font_atlas.bin
-FONT_ATLAS_OBJ = $(OBJDIR)/font_atlas.o
+
+# Embed the original TrueType faces. Prefer project assets; CI may use the
+# equivalent distro-provided font files under /usr/share/fonts.
+FONT_SEARCH_ROOTS ?= assets/fonts /usr/share/fonts
+font_find = $(shell find $(FONT_SEARCH_ROOTS) -type f \\( $(foreach name,$(1),-iname '$(name)' -o ) -false \\) -print -quit 2>/dev/null)
+
+FONT_SOURCE_INTER_REGULAR := $(call font_find,Inter-Regular.ttf Inter_18pt-Regular.ttf)
+FONT_SOURCE_INTER_BOLD := $(call font_find,Inter-Bold.ttf Inter_18pt-Bold.ttf)
+FONT_SOURCE_LATO_REGULAR := $(call font_find,Lato-Regular.ttf)
+FONT_SOURCE_LATO_BOLD := $(call font_find,Lato-Bold.ttf)
+FONT_SOURCE_DEJAVU_SANS_REGULAR := $(call font_find,DejaVuSans.ttf)
+FONT_SOURCE_DEJAVU_SANS_BOLD := $(call font_find,DejaVuSans-Bold.ttf)
+FONT_SOURCE_DEJAVU_MONO_REGULAR := $(call font_find,DejaVuSansMono.ttf)
+FONT_SOURCE_DEJAVU_MONO_BOLD := $(call font_find,DejaVuSansMono-Bold.ttf)
+
+FONT_VARIANTS = inter_regular inter_bold lato_regular lato_bold dejavu_sans_regular dejavu_sans_bold dejavu_mono_regular dejavu_mono_bold
+FONT_OBJS = $(addprefix $(OBJDIR)/font_,$(addsuffix .o,$(FONT_VARIANTS)))
 
 DESKTOP_ICON_SOURCES = $(addprefix assets/icons/,file-manager.png terminal.png settings.png notepad.png image-viewer.png doom.png)
 DESKTOP_ICON_BIN = $(OBJDIR)/desktop_icons.bin
@@ -106,20 +122,34 @@ $(DESKTOP_ICON_BIN): tools/prepare_desktop_icons.py $(DESKTOP_ICON_SOURCES)
 $(DESKTOP_ICON_OBJ): $(DESKTOP_ICON_BIN)
 	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents desktop_icons.bin desktop_icons.o
 
-# The font atlas is generated manually; see assets/fonts/README.md.
-# Make only embeds the prepared asset and does not require Pillow or font files.
-$(FONT_ATLAS_BIN):
-	@echo "Missing $(FONT_ATLAS_BIN). Generate it manually; see assets/fonts/README.md."
+# Each TTF is embedded as a read-only binary object. The stb_truetype
+# runtime rasterizer consumes these bytes directly; no Pillow/atlas step exists.
+define FONT_EMBED_RULE
+ifeq ($(strip $(FONT_SOURCE_$(1))),)
+$(OBJDIR)/font_$(2).o:
+	@echo "Missing required font face: $(3)" >&2
+	@echo "Place the static TTF under assets/fonts/ (see assets/fonts/README.md)." >&2
 	@false
+else
+$(OBJDIR)/font_$(2).o: $(FONT_SOURCE_$(1))
+	@mkdir -p $(OBJDIR)
+	cp "$<" "$(OBJDIR)/font_$(2).ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_$(2).ttf font_$(2).o
+endif
+endef
 
-$(FONT_ATLAS_OBJ): $(FONT_ATLAS_BIN)
-	@mkdir -p $(dir $@)
-	cp $< $(OBJDIR)/font_atlas.bin
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_atlas.bin font_atlas.o
+$(eval $(call FONT_EMBED_RULE,INTER_REGULAR,inter_regular,Inter Regular))
+$(eval $(call FONT_EMBED_RULE,INTER_BOLD,inter_bold,Inter Bold))
+$(eval $(call FONT_EMBED_RULE,LATO_REGULAR,lato_regular,Lato Regular))
+$(eval $(call FONT_EMBED_RULE,LATO_BOLD,lato_bold,Lato Bold))
+$(eval $(call FONT_EMBED_RULE,DEJAVU_SANS_REGULAR,dejavu_sans_regular,DejaVu Sans Regular))
+$(eval $(call FONT_EMBED_RULE,DEJAVU_SANS_BOLD,dejavu_sans_bold,DejaVu Sans Bold))
+$(eval $(call FONT_EMBED_RULE,DEJAVU_MONO_REGULAR,dejavu_mono_regular,DejaVu Sans Mono Regular))
+$(eval $(call FONT_EMBED_RULE,DEJAVU_MONO_BOLD,dejavu_mono_bold,DejaVu Sans Mono Bold))
 
 # Build Kernel
-$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ)
-	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ) -o $@
+$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_OBJS) $(DESKTOP_ICON_OBJ)
+	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_OBJS) $(DESKTOP_ICON_OBJ) -o $@
 
 # Pattern rules for nested kernel directories
 $(OBJDIR)/%.o: $(KERNELDIR)/%.c
