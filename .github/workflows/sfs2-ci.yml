@@ -76,7 +76,7 @@ jobs:
       - name: Install UEFI build, QEMU, and recording dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm python3 fonts-inter fonts-lato fonts-dejavu-core
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm python3 fonts-inter fonts-lato fonts-dejavu-core fonts-noto-core
 
       - name: Build bootloader and CI-instrumented VexOS kernel (no Doom target)
         run: |
