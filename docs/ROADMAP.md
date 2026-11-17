@@ -83,16 +83,30 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Not started / foundational work required**
+**Status: Partial — network-device layer and first Ethernet driver implemented; protocol stack not started**
 
-Milestones:
-- Network-device abstraction and an Ethernet driver (begin with a QEMU-supported NIC).
-- Ethernet framing and ARP.
-- IPv4, ICMP, and packet-buffer ownership.
-- UDP and TCP with timeout/retransmission handling.
-- DHCP and DNS client.
-- Socket API for user applications.
-- Loopback tests and QEMU network integration tests.
+Implemented on `feature/network-foundation`:
+- Generic network-device registration and bounded interface table.
+- A transmit/receive callback contract with frame-length validation and per-device counters.
+- Polling-only Intel 82540EM-compatible E1000 driver for QEMU (`8086:100E`).
+- PCI BAR discovery, MMIO mapping, controller reset, MAC address discovery, RX/TX descriptor rings, and packet-buffer setup.
+- Kernel-loop polling with bounded receive work; interrupts remain disabled until general network IRQ routing is available.
+- QEMU CI integration planned to boot with an E1000 NIC and verify controller/ring initialization.
+
+Next milestones:
+1. Ethernet protocol dispatch and packet-buffer ownership rules.
+2. ARP with cache expiry and bounded pending queues.
+3. IPv4 validation, ICMP echo, and fragmentation policy.
+4. UDP and TCP with timeout/retransmission handling.
+5. DHCP and DNS clients.
+6. User-mode socket API and loopback/QEMU integration tests.
+7. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
+
+Current limitations:
+- No ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, or Internet access yet.
+- Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
+- Driver operation is polled in task context; no E1000 interrupts, MSI/MSI-X, APIC routing, or SMP support.
+- QEMU success is not physical hardware qualification.
 
 ## 6. Userland and system services
 
