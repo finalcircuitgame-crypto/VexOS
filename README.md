@@ -45,6 +45,32 @@ make
 
 The normal build produces `dist/BOOTX64.EFI`, `dist/kernel.elf`, the bootable FAT image `dist/tiny64.img`, and the separate persistent data image `dist/storage.img`.
 
+## Prepare a bootable USB drive (Windows)
+
+After building VexOS, launch the Windows flasher from the repository root:
+
+```powershell
+py .\tiny64_usb_flasher.py
+```
+
+The flasher provides two operations:
+
+- **Update selected volume** copies the UEFI bootloader, `kernel.elf`, and the generated `startup.nsh` when present. It preserves unrelated files on that USB volume.
+- **Prepare + flash selected USB** creates a GPT partition table and FAT32 `VEXOS` volume, then copies the boot files. This erases every partition and file on the selected physical USB disk. Run the flasher as Administrator for this operation, verify the model and capacity, and complete both confirmation prompts.
+
+The utility only lists physical USB disks for whole-disk flashing, rechecks the disk identity immediately before repartitioning, refuses Windows boot/system disks, and verifies copied files with SHA-256. It does not install VexOS to internal drives. The separate `dist/storage.img` is not written by this boot-media utility; persistent storage over USB mass storage is not part of this USB boot workflow yet.
+
+A successful flash creates this boot layout:
+
+```text
+USB:/
+├── EFI/
+│   └── BOOT/
+│       └── BOOTX64.EFI
+├── kernel.elf
+└── startup.nsh
+```
+
 DoomGeneric is kept in `src/doom` as a pinned upstream submodule. It is a separate user-mode ELF with a VexOS platform backend. To build the app and prepare storage with your own IWAD:
 
 ```sh
