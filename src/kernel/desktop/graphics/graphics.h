@@ -16,7 +16,9 @@ typedef enum {
   GFX_FONT_INTER = 0,
   GFX_FONT_LATO = 1,
   GFX_FONT_DEJAVU_SANS = 2,
-  GFX_FONT_DEJAVU_MONO = 3
+  GFX_FONT_DEJAVU_MONO = 3,
+  GFX_FONT_NOTO_SANS = 4,
+  GFX_FONT_NOTO_SERIF = 5
 } gfx_font_family_t;
 
 typedef struct {
