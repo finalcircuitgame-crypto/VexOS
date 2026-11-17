@@ -134,7 +134,7 @@ static int viewer_load_file(const char *name) {
 
   vfs_stat_t file_info;
   if (!name || !vfs_init() || !vfs_stat(name, &file_info) ||
-      file_info.type != VFS_NODE_FILE || file_info.size == 0) {
+      file_info.type != VFS_NODE_FILE) {
     return 0;
   }
   file_size = file_info.size;
@@ -271,7 +271,7 @@ static int viewer_load_file(const char *name) {
 /* Files opens editable text documents in Notepad (including empty files).
    Images and other supported previews continue to use Viewer. */
 static int file_manager_open_document(const char *filename) {
-  if (notepad_open_file(filename)) {
+  if (vfs_is_writable() && notepad_open_file(filename)) {
     g_app_open[APP_NOTEPAD] = 1;
     wm_raise(APP_NOTEPAD);
     return 1;
