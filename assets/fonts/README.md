@@ -25,3 +25,28 @@ and the matching font packages before building. The kernel embeds the atlas;
 it does not load TTF/OTF files at runtime or depend on a runtime font engine.
 The original CGA bitmap font remains available as a fallback for bytes outside
 the built-in ASCII atlas.
+
+
+## Generating the atlas on Windows
+
+Install Pillow once:
+
+```powershell
+py -m pip install Pillow
+```
+
+Download the static **regular and bold** font files for all four families listed
+above, and place them anywhere underneath `assets/fonts/`. The generator
+searches this folder recursively, so keeping each family in its own subfolder
+is fine. Keep the upstream license files with the font downloads.
+
+Then run:
+
+```powershell
+py tools\prepare_font_atlas.py --output assets\fonts\
+```
+
+The directory form of `--output` writes `assets/fonts/font_atlas.bin`.
+Alternatively, use `--font-dir "C:\\path\\to\\fonts"` to point at another
+folder. The generator also checks the normal Windows, macOS, and Linux font
+locations automatically.
