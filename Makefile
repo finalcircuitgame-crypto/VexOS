@@ -79,7 +79,7 @@ FONT_OBJ = $(OBJDIR)/font.o
 # Embed the original TrueType faces. Prefer project assets; CI may use the
 # equivalent distro-provided font files under /usr/share/fonts.
 FONT_SEARCH_ROOTS ?= assets/fonts /usr/share/fonts
-font_find = $(shell find $(FONT_SEARCH_ROOTS) -type f \\( $(foreach name,$(1),-iname '$(name)' -o ) -false \\) -print -quit 2>/dev/null)
+font_find = $(shell find $(FONT_SEARCH_ROOTS) -type f \( $(foreach name,$(1),-iname '$(name)' -o ) -false \) -print -quit 2>/dev/null)
 
 FONT_SOURCE_INTER_REGULAR := $(call font_find,Inter-Regular.ttf Inter_18pt-Regular.ttf)
 FONT_SOURCE_INTER_BOLD := $(call font_find,Inter-Bold.ttf Inter_18pt-Bold.ttf)
