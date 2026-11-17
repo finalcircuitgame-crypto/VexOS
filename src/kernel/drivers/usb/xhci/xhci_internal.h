@@ -76,6 +76,13 @@ typedef struct xhci_device_state {
 extern xhci_device_state_t g_devs[256];
 extern uint32_t g_ctx_size;
 
+/* Early-boot monotonic clock: independent of IRQ0/PIT tick interrupts. */
+void xhci_time_init(void);
+uint64_t xhci_time_deadline_us(uint64_t timeout_us);
+int xhci_time_expired(uint64_t deadline);
+void xhci_time_delay_us(uint64_t duration_us);
+uint64_t xhci_time_frequency_hz(void);
+
 /*
  * Publish DMA descriptors before updating a Link TRB or ringing an xHCI
  * doorbell. SFENCE orders prior stores and the memory clobber prevents the
