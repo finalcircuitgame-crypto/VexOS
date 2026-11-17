@@ -117,9 +117,13 @@ static float font_acos(float value) {
 #define STBTT_strlen(text)    font_strlen(text)
 #define STBTT_memcpy          font_memcpy
 #define STBTT_memset          font_memset
+#define memcpy               font_memcpy
+#define strlen               font_strlen
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "third_party/stb_truetype.h"
+#undef memcpy
+#undef strlen
 
 #define FONT_FAMILY_COUNT 4u
 #define FONT_WEIGHT_COUNT 2u
