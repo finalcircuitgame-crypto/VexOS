@@ -124,28 +124,110 @@ $(DESKTOP_ICON_OBJ): $(DESKTOP_ICON_BIN)
 
 # Each TTF is embedded as a read-only binary object. The stb_truetype
 # runtime rasterizer consumes these bytes directly; no Pillow/atlas step exists.
-define FONT_EMBED_RULE
-ifeq ($(strip $(FONT_SOURCE_$(1))),)
-$(OBJDIR)/font_$(2).o:
-	@echo "Missing required font face: $(3)" >&2
-	@echo "Place the static TTF under assets/fonts/ (see assets/fonts/README.md)." >&2
-	@false
-else
-$(OBJDIR)/font_$(2).o: $(FONT_SOURCE_$(1))
-	@mkdir -p $(OBJDIR)
-	cp "$<" "$(OBJDIR)/font_$(2).ttf"
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_$(2).ttf font_$(2).o
-endif
-endef
 
-$(eval $(call FONT_EMBED_RULE,INTER_REGULAR,inter_regular,Inter Regular))
-$(eval $(call FONT_EMBED_RULE,INTER_BOLD,inter_bold,Inter Bold))
-$(eval $(call FONT_EMBED_RULE,LATO_REGULAR,lato_regular,Lato Regular))
-$(eval $(call FONT_EMBED_RULE,LATO_BOLD,lato_bold,Lato Bold))
-$(eval $(call FONT_EMBED_RULE,DEJAVU_SANS_REGULAR,dejavu_sans_regular,DejaVu Sans Regular))
-$(eval $(call FONT_EMBED_RULE,DEJAVU_SANS_BOLD,dejavu_sans_bold,DejaVu Sans Bold))
-$(eval $(call FONT_EMBED_RULE,DEJAVU_MONO_REGULAR,dejavu_mono_regular,DejaVu Sans Mono Regular))
-$(eval $(call FONT_EMBED_RULE,DEJAVU_MONO_BOLD,dejavu_mono_bold,DejaVu Sans Mono Bold))
+ifneq ($(strip $(FONT_SOURCE_INTER_REGULAR)),)
+$(OBJDIR)/font_inter_regular.o: $(FONT_SOURCE_INTER_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Inter Regular: $<"
+	cp "$<" "$(OBJDIR)/font_inter_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_inter_regular.ttf font_inter_regular.o
+else
+$(OBJDIR)/font_inter_regular.o:
+	@echo "Missing required font face: Inter Regular" >&2
+	@echo "Place Inter-Regular.ttf or Inter-Regular.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_INTER_BOLD)),)
+$(OBJDIR)/font_inter_bold.o: $(FONT_SOURCE_INTER_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Inter Bold: $<"
+	cp "$<" "$(OBJDIR)/font_inter_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_inter_bold.ttf font_inter_bold.o
+else
+$(OBJDIR)/font_inter_bold.o:
+	@echo "Missing required font face: Inter Bold" >&2
+	@echo "Place Inter-Bold.ttf or Inter-Bold.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_LATO_REGULAR)),)
+$(OBJDIR)/font_lato_regular.o: $(FONT_SOURCE_LATO_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Lato Regular: $<"
+	cp "$<" "$(OBJDIR)/font_lato_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_lato_regular.ttf font_lato_regular.o
+else
+$(OBJDIR)/font_lato_regular.o:
+	@echo "Missing required font face: Lato Regular" >&2
+	@echo "Place Lato-Regular.ttf or Lato-Regular.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_LATO_BOLD)),)
+$(OBJDIR)/font_lato_bold.o: $(FONT_SOURCE_LATO_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Lato Bold: $<"
+	cp "$<" "$(OBJDIR)/font_lato_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_lato_bold.ttf font_lato_bold.o
+else
+$(OBJDIR)/font_lato_bold.o:
+	@echo "Missing required font face: Lato Bold" >&2
+	@echo "Place Lato-Bold.ttf or Lato-Bold.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_SANS_REGULAR)),)
+$(OBJDIR)/font_dejavu_sans_regular.o: $(FONT_SOURCE_DEJAVU_SANS_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Regular: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_sans_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_sans_regular.ttf font_dejavu_sans_regular.o
+else
+$(OBJDIR)/font_dejavu_sans_regular.o:
+	@echo "Missing required font face: DejaVu Sans Regular" >&2
+	@echo "Place DejaVuSans.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_SANS_BOLD)),)
+$(OBJDIR)/font_dejavu_sans_bold.o: $(FONT_SOURCE_DEJAVU_SANS_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Bold: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_sans_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_sans_bold.ttf font_dejavu_sans_bold.o
+else
+$(OBJDIR)/font_dejavu_sans_bold.o:
+	@echo "Missing required font face: DejaVu Sans Bold" >&2
+	@echo "Place DejaVuSans-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_MONO_REGULAR)),)
+$(OBJDIR)/font_dejavu_mono_regular.o: $(FONT_SOURCE_DEJAVU_MONO_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Mono Regular: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_mono_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_mono_regular.ttf font_dejavu_mono_regular.o
+else
+$(OBJDIR)/font_dejavu_mono_regular.o:
+	@echo "Missing required font face: DejaVu Sans Mono Regular" >&2
+	@echo "Place DejaVuSansMono.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_MONO_BOLD)),)
+$(OBJDIR)/font_dejavu_mono_bold.o: $(FONT_SOURCE_DEJAVU_MONO_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Mono Bold: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_mono_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_dejavu_mono_bold.ttf font_dejavu_mono_bold.o
+else
+$(OBJDIR)/font_dejavu_mono_bold.o:
+	@echo "Missing required font face: DejaVu Sans Mono Bold" >&2
+	@echo "Place DejaVuSansMono-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
 
 # Build Kernel
 $(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_OBJS) $(DESKTOP_ICON_OBJ)
