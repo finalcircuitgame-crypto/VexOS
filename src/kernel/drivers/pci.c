@@ -1,4 +1,5 @@
 #include "pci.h"
+#include "bootlog.h"
 #include "ahci.h"
 #include "usb/xhci.h"
 
@@ -104,6 +105,42 @@ static void pci_init_ahci(uint8_t bus, uint8_t slot, uint8_t func) {
     }
 }
 
+/*
+ * Probe storage controllers in a first pass. xHCI initialization can stall
+ * while recovering a port, so mount writable storage and prepare boot logging
+ * before touching any USB host controller.
+ */
+static void pci_probe_ahci_before_usb(void) {
+    for (uint16_t bus = 0; bus < 256; bus++) {
+        for (uint8_t slot = 0; slot < 32; slot++) {
+            for (uint8_t func = 0; func < 8; func++) {
+                uint32_t vendor_device =
+                    pci_config_read_dword((uint8_t)bus, slot, func, 0);
+                if ((uint16_t)vendor_device == 0xFFFFu)
+                    continue;
+
+                uint32_t class_info =
+                    pci_config_read_dword((uint8_t)bus, slot, func, 0x08);
+                uint8_t class_code = (uint8_t)(class_info >> 24);
+                uint8_t subclass = (uint8_t)(class_info >> 16);
+                uint8_t prog_if = (uint8_t)(class_info >> 8);
+
+                if (class_code == 0x01 && subclass == 0x06 &&
+                    prog_if == 0x01 && !ahci_is_ready()) {
+                    pci_init_ahci((uint8_t)bus, slot, func);
+                }
+
+                if (func == 0) {
+                    uint32_t header_type =
+                        pci_config_read_dword((uint8_t)bus, slot, func, 0x0C);
+                    if (!((header_type >> 16) & 0x80u))
+                        break;
+                }
+            }
+        }
+    }
+}
+
 static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
                                     uint16_t vendor_id) {
     uint32_t usb2pr = pci_config_read_dword(bus, slot, func, 0xD0);
@@ -136,6 +173,10 @@ static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
 }
 
 void pci_enumerate() {
+    serial_print("[PCI] Probing AHCI storage before USB initialization...\n");
+    pci_probe_ahci_before_usb();
+    (void)bootlog_prepare();
+
     serial_print("[PCI] Enumerating all buses...\n");
     for (uint16_t bus = 0; bus < 256; bus++) {
         for (uint8_t slot = 0; slot < 32; slot++) {
@@ -212,4 +253,5 @@ void pci_enumerate() {
         }
     }
     serial_print("[PCI] Enumeration Complete\n");
+    (void)bootlog_flush();
 }
