@@ -4,6 +4,10 @@
 #include "bootinfo.h"
 #include "uefi_bootlog.h"
 
+#ifndef EFI_MEMORY_RUNTIME
+#define EFI_MEMORY_RUNTIME 0x8000000000000000ull
+#endif
+
 #define ELF_MAX_LOAD_SEGMENTS 128u
 #define ELF_PF_X 1u
 #define ELF_PT_LOAD 1u
@@ -221,7 +225,6 @@ static int CaptureRuntimeRegions(EFI_SYSTEM_TABLE *system_table,
                                  EFI_MEMORY_DESCRIPTOR *map,
                                  UINTN map_size, UINTN descriptor_size,
                                  BootInfo *boot_info) {
-    const UINT64 EFI_MEMORY_RUNTIME_LOCAL = 0x8000000000000000ull;
     if (!system_table || !system_table->RuntimeServices ||
         !system_table->RuntimeServices->SetVariable || !map || !boot_info ||
         descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR))
@@ -266,7 +269,6 @@ static int CaptureRuntimeRegions(EFI_SYSTEM_TABLE *system_table,
 
     boot_info->RuntimeRegionCount = count;
     boot_info->RuntimeSetVariable = set_variable;
-    (void)EFI_MEMORY_RUNTIME_LOCAL;
     return 1;
 }
 
