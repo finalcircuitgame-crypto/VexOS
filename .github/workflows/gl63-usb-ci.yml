@@ -1,4 +1,4 @@
-name: MSI GL63-Inspired USB CI
+name: MSI GL63-Inspired USB + Ethernet NIC CI
 
 on:
   push:
@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   q35-xhci-compatibility:
-    name: Q35 laptop-style UEFI + xHCI smoke test
+    name: Q35 UEFI + xHCI + Ethernet NIC detection
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -92,6 +92,9 @@ jobs:
           : > qemu.log
 
           # Q35 provides a PCIe-oriented Intel-style chipset topology.
+          # QEMU e1000 supplies an emulated Intel 82540EM PCI Ethernet NIC.
+          # This currently tests PCI discovery only: VexOS has no Ethernet
+          # driver or network stack yet, so no packets/DHCP/ping are claimed.
           # QEMU's qemu-xhci is a generic emulated xHCI controller, not the
           # exact Intel HM370 controller found in some MSI GL63 variants.
           # Q35 uses the PCIe root bus (pcie.0), not the i440fx pci.0 bus.
@@ -114,6 +117,8 @@ jobs:
             -device usb-kbd,bus=xhci.0 \
             -device usb-tablet,bus=xhci.0 \
             -device usb-storage,drive=usb_disk,bus=xhci.0 \
+            -netdev user,id=net0 \
+            -device e1000,netdev=net0 \
             -display none \
             -monitor none \
             -serial file:serial.log \
@@ -243,6 +248,15 @@ jobs:
           echo "PASS: VexOS detected, addressed, and read descriptors for the three emulated USB devices."
           echo "PASS: Both emulated HID devices reached interrupt-IN endpoint setup."
           echo "NOTE: USB mass-storage data transfers and live HID input are not tested by this CI job."
+          echo "Checking emulated Ethernet NIC discovery..."
+          # QEMU e1000 is Intel 8086:100E (PCI class 02:00:00).
+          if ! grep -Fq "100E8086" serial.log || ! grep -Fq "class=00000002" serial.log; then
+            echo "FAIL: VexOS did not enumerate the emulated Intel e1000 Ethernet controller."
+            cat serial.log
+            exit 1
+          fi
+          echo "PASS: VexOS PCI enumeration detected the emulated Intel e1000 Ethernet controller (8086:100E)."
+          echo "NOTE: Ethernet link, packet TX/RX, ARP, DHCP, DNS, and ping are not tested; a network driver/stack is not implemented yet."
           grep -E "\\[PCI\\]|\\[xHCI\\]|\\[USB\\]|\\[HID\\]" serial.log || true
 
       - name: Upload boot diagnostics
