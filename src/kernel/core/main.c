@@ -15,6 +15,7 @@
 #include "vmm.h"
 #include "../desktop/graphics/font_engine.h"
 #include "pci.h"
+#include "netdev.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1226,8 +1227,13 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
 
+  // Network devices share the normal PCI discovery path. Start the
+  // device registry only after the kernel heap and VMM are ready.
+  netdev_init();
+  serial_print("[NET] Network-device registry initialized\\n");
+
   // PCI Enumeration (must happen before wizard for xHCI input)
-  serial_print("[KERNEL] Starting PCI Enumeration...\n");
+  serial_print("[KERNEL] Starting PCI Enumeration...\\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
 #ifdef VEXOS_CI_INPUT_TEST
@@ -1331,6 +1337,10 @@ void kernel_main(BootInfo *bootInfo) {
       ci_ring3_stress_reported = 1;
     }
 #endif
+    // Poll network rings in task context; this first driver does not enable
+    // device interrupts until VexOS has general IRQ routing.
+    netdev_poll_all(16u);
+
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
     xhci_poll_events_atomic();
 
@@ -1352,6 +1362,7 @@ void kernel_main(BootInfo *bootInfo) {
         // only once per rendered frame. This keeps input latency near 1 ms
         // while the desktop renderer remains frame-rate limited.
         xhci_poll_events_atomic();
+        netdev_poll_all(16u);
         // Desktop rendering stays on the frame cadence below. Calling
         // desktop_tick() here used to repaint the full scene on every PIT
         // wakeup (up to 1000 times/second), starving window interaction.
