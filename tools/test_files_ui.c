@@ -234,6 +234,7 @@ void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
 static int record_open(const char *path) {
   strncpy(g_last_opened, path, sizeof(g_last_opened) - 1u);
   g_last_opened[sizeof(g_last_opened) - 1u] = 0;
+  wm_raise(APP_NOTEPAD);
   return 1;
 }
 
@@ -275,7 +276,7 @@ int main(void) {
   click_at(window, 170, 144 + 28 + 5, 201u, record_open);
   CHECK(text_equal(g_last_opened, "docs/readme.txt"),
         "double-click opens the selected file");
-  CHECK(g_focus == APP_EXPLORER, "file callback can change focus");
+  CHECK(g_focus == APP_NOTEPAD, "opening a file transfers focus to Notepad");
 
   /* Return to root using the window's back control. */
   click_at(window, window->w - 43, 10, 220u, record_open);
