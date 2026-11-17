@@ -16,6 +16,7 @@
 #include "../desktop/graphics/font_engine.h"
 #include "pci.h"
 #include "netdev.h"
+#include "ethernet.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1230,7 +1231,9 @@ void kernel_main(BootInfo *bootInfo) {
   // Network devices share the normal PCI discovery path. Start the
   // device registry only after the kernel heap and VMM are ready.
   netdev_init();
-  serial_print("[NET] Network-device registry initialized\n");
+  ethernet_init();
+  netdev_set_receive_handler(ethernet_receive);
+  serial_print("[NET] Network-device registry and Ethernet II dispatcher initialized\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
