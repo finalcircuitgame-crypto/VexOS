@@ -83,7 +83,7 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Partial — network-device layer, E1000 driver, Ethernet II receive dispatch, and ARP resolution implemented**
+**Status: Partial — network devices, E1000, Ethernet II, ARP, and an initial IPv4 layer implemented**
 
 Implemented on `feature/network-foundation`:
 - Generic network-device registration and bounded interface table.
@@ -100,11 +100,17 @@ Implemented on `feature/network-foundation`:
 - Solicited ARP reply validation and request handling; requests are answered only for a local source address currently represented by a pending IPv4 send.
 - A fixed eight-packet pending IPv4 queue. Cache misses trigger an ARP request, matching replies flush queued packets, and unresolved packets expire after five seconds.
 - An IPv4 send handoff API that validates the basic IPv4 header/total length and constructs Ethernet II frames after resolution. This is a handoff for a future IP layer, not a complete IPv4 implementation.
+- A bounded per-interface IPv4 configuration table with configure/get/unconfigure APIs. Address, contiguous /1-/30 netmask, subnet host address, and same-subnet gateway validation are enforced; boot does not assume or hard-code an address.
+- IPv4 receive validation for version, IHL, total length, device MTU, TTL, reserved flags, and header checksum. Ethernet padding beyond the IPv4 total length is ignored, and only the configured local address or IPv4 broadcasts are delivered.
+- A bounded IPv4 protocol-number registry with a synchronous borrowed-buffer callback contract and packet metadata.
+- Outbound IPv4 packet construction with a valid header checksum, default TTL 64, DF set, direct-subnet or configured-gateway next-hop selection, ARP handoff, and direct Ethernet broadcast transmission.
+- An explicit no-fragmentation policy: incoming fragments are dropped because reassembly is not implemented; outgoing datagrams set DF. IPv4 options are bounds/checksum validated but not interpreted.
+- Host-side IPv4 tests for malformed headers, checksum failures, non-local destinations, fragment rejection, interface configuration, protocol dispatch, outbound checksums, on-link/gateway routing, and broadcast transmission.
 - Host-side ARP tests for malformed packets, cache learning/conflicts/expiry, known-neighbor sending, request/reply resolution, and pending-queue capacity/timeout.
 - QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
-1. IPv4 validation, local interface addressing, ICMP echo, and an explicit fragmentation policy.
+1. ICMP echo/reply over the new IPv4 layer, including bounded request/reply handling.
 2. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
 3. DHCP and DNS clients.
 4. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
@@ -112,7 +118,7 @@ Next milestones:
 6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
 
 Current limitations:
-- ARP resolution is implemented, but there is no IPv4 stack or configured interface address yet; ICMP, DHCP, DNS, UDP, TCP, sockets, and Internet access remain unavailable.
+- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; DHCP, ICMP, DNS, UDP, TCP, sockets, forwarding, and general Internet access remain unavailable.
 - The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
 - Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
 - Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.

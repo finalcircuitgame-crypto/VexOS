@@ -36,3 +36,14 @@ jobs:
 
       - name: Test ARP parsing, cache, and pending resolution
         run: /tmp/vexos-arp-tests
+
+      - name: Compile IPv4 tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \
+            src/kernel/net/ipv4.c tools/net_ipv4_test.c \
+            -o /tmp/vexos-ipv4-tests
+
+      - name: Test IPv4 validation, routing, and ARP handoff
+        run: /tmp/vexos-ipv4-tests
