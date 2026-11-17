@@ -397,5 +397,6 @@ int e1000_init(uint64_t mmio_base) {
     }
     serial_print(g_e1000.netdev.link_up ? " link=up\n" : " link=down\n");
     serial_print("[E1000] RX/TX descriptor rings online (polling mode)\n");
+    g_initialized = 1;
     return 1;
 }
