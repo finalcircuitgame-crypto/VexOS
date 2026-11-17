@@ -1,6 +1,7 @@
 #include "pci.h"
 #include "bootlog.h"
 #include "ahci.h"
+#include "e1000.h"
 #include "usb/xhci.h"
 #include "usb/xhci/xhci_quirks.h"
 
@@ -142,6 +143,44 @@ static void pci_probe_ahci_before_usb(void) {
     }
 }
 
+
+static void pci_init_e1000(uint8_t bus, uint8_t slot, uint8_t func) {
+    uint32_t bar0 = pci_config_read_dword(bus, slot, func, 0x10);
+    if (bar0 == 0 || bar0 == 0xFFFFFFFFu || (bar0 & 1u)) {
+        serial_print("[PCI] E1000 has no usable MMIO BAR0\\n");
+        return;
+    }
+
+    uint32_t memory_type = (bar0 >> 1) & 0x3u;
+    if (memory_type == 0x3u) {
+        serial_print("[PCI] E1000 BAR0 uses a reserved memory type\\n");
+        return;
+    }
+
+    uint64_t mmio_base = (uint64_t)(bar0 & 0xFFFFFFF0u);
+    if (memory_type == 0x2u) {
+        uint32_t bar1 = pci_config_read_dword(bus, slot, func, 0x14);
+        mmio_base |= ((uint64_t)bar1 << 32);
+    }
+
+    if (mmio_base == 0) {
+        serial_print("[PCI] E1000 BAR0 is unassigned\\n");
+        return;
+    }
+
+    uint32_t command_status =
+        pci_config_read_dword(bus, slot, func, 0x04);
+    uint16_t command = (uint16_t)command_status;
+    command |= (uint16_t)(0x0002u | 0x0004u | 0x0400u);
+    pci_config_write_dword(bus, slot, func, 0x04, (uint32_t)command);
+
+    serial_print("[PCI] Initializing Intel E1000 MMIO at ");
+    print_hex(mmio_base);
+    serial_print("\\n");
+    if (!e1000_init(mmio_base))
+        serial_print("[PCI] E1000 initialization failed\\n");
+}
+
 static void xhci_force_usb2_routing(uint8_t bus, uint8_t slot, uint8_t func,
                                     uint32_t quirk_flags) {
     uint32_t usb2pr = pci_config_read_dword(bus, slot, func, 0xD0);
@@ -215,6 +254,15 @@ void pci_enumerate() {
                 if (class_code == 0x01 && subclass == 0x06 && prog_if == 0x01) {
                     serial_print("[PCI] Found AHCI SATA controller!\n");
                     pci_init_ahci((uint8_t)bus, slot, func);
+                }
+
+
+                // First network target: Intel 82540EM-compatible E1000.
+                if (class_code == 0x02 && subclass == 0x00 &&
+                    vendor_id == E1000_VENDOR_INTEL &&
+                    device_id == E1000_DEVICE_82540EM) {
+                    serial_print("[PCI] Found supported Intel E1000 Ethernet controller\\n");
+                    pci_init_e1000((uint8_t)bus, slot, func);
                 }
 
                 if (class_code == 0x0C && subclass == 0x03) {
