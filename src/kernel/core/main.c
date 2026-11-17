@@ -20,6 +20,7 @@
 #include "arp.h"
 #include "ipv4.h"
 #include "icmp.h"
+#include "udp.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1239,8 +1240,12 @@ void kernel_main(BootInfo *bootInfo) {
     serial_print("[ARP] Failed to register ARP protocol handler\n");
   if (!ipv4_init())
     serial_print("[IPv4] Failed to register IPv4 protocol handler\n");
+  if (!icmp_init())
+    serial_print("[ICMP] Failed to register ICMPv4 protocol handler\n");
+  if (!udp_init())
+    serial_print("[UDP] Failed to register UDP protocol handler\n");
   netdev_set_receive_handler(ethernet_receive);
-  serial_print("[NET] Network-device registry, Ethernet II, ARP, IPv4, and ICMPv4 echo initialized (address configuration pending)\n");
+  serial_print("[NET] Network-device registry, Ethernet II, ARP, IPv4, ICMPv4, and UDP initialized (address configuration pending)\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
