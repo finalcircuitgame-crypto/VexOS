@@ -60,3 +60,15 @@ jobs:
 
       - name: Test ICMPv4 echo handling
         run: /tmp/vexos-icmp-tests
+
+      - name: Compile UDP tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \\
+            -Isrc/include \\
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \\
+            src/kernel/net/ipv4.c src/kernel/net/udp.c \\
+            tools/net_udp_test.c \\
+            -o /tmp/vexos-udp-tests
+
+      - name: Test UDP parsing, checksums, ports, and transmission
+        run: /tmp/vexos-udp-tests
