@@ -192,7 +192,7 @@ jobs:
 
           required_markers=(
             "[KERNEL] Entered kernel_main"
-            "[FONT] stb_truetype runtime initialized (4 families, regular/bold)"
+            "[FONT] stb_truetype runtime initialized (6 families, regular/bold)"
             "[CI] TrueType font loading, metrics, and glyph rasterization passed"
             "[CI] SFS2 superblock, inode, and bitmap metadata passed"
             "[CI] SFS2 mount, journal recovery, and file mutation passed"
