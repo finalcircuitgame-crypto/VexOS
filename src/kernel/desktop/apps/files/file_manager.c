@@ -805,9 +805,6 @@ file_manager_event_t file_manager_handle_click(
   if (list_panel_w > 280u &&
       fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
              (int32_t)(by + 10u), 54, 23)) {
-  if (list_panel_w > 280u &&
-      fm_hit(px, py, (int32_t)(list_panel_x + list_panel_w - 64u),
-             (int32_t)(by + 10u), 54, 23)) {
     g_search_focused = 0;
     g_delete_armed = 0;
     fm_refresh();
