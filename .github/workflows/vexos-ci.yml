@@ -2,7 +2,7 @@ name: VexOS CI
 
 on:
   push:
-    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework]
+    branches: [main, fix/filesystem-return-checks, refactor/desktop-framework, feature/network-foundation]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -265,6 +265,8 @@ jobs:
             -drive if=none,id=ahci_disk,format=raw,file=dist/ahci-test.img,cache=none \
             -device ide-hd,drive=ahci_disk,bus=ahci.0 \
             -device qemu-xhci,id=xhci \
+            -device e1000,netdev=vexnet \
+            -netdev user,id=vexnet \
             -device usb-kbd,bus=xhci.0 \
             -device usb-tablet,bus=xhci.0 \
             -display sdl \
@@ -312,6 +314,9 @@ jobs:
             "[CI] VFS independent open-file handles and descriptor offsets passed" \
             "[CI] SimpleFS multi-sector/empty-file persistence and syscall file I/O passed" \
             "[PCI] Enumeration Complete" \
+            "[PCI] Found supported Intel E1000 Ethernet controller" \
+            "[E1000] Controller initialized; interface eth0 MAC=" \
+            "[E1000] RX/TX descriptor rings online (polling mode)" \
             "[AHCI] SATA disk ready; sectors=" \
             "[PCI] AHCI storage initialized" \
             "[CI] AHCI SATA identify, two-sector DMA write/read, and bounds checks passed" \

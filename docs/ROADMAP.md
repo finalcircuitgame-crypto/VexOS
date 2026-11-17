@@ -83,16 +83,55 @@ Milestones:
 
 ## 5. Networking
 
-**Status: Not started / foundational work required**
+**Status: Partial — network devices, E1000, Ethernet II, ARP, IPv4, ICMPv4 echo, and UDP implemented**
 
-Milestones:
-- Network-device abstraction and an Ethernet driver (begin with a QEMU-supported NIC).
-- Ethernet framing and ARP.
-- IPv4, ICMP, and packet-buffer ownership.
-- UDP and TCP with timeout/retransmission handling.
-- DHCP and DNS client.
-- Socket API for user applications.
-- Loopback tests and QEMU network integration tests.
+Implemented on `feature/network-foundation`:
+- Generic network-device registration and bounded interface table.
+- A transmit/receive callback contract with frame-length validation and per-device counters.
+- Polling-only Intel 82540EM-compatible E1000 driver for QEMU (`8086:100E`).
+- PCI BAR discovery, MMIO mapping, controller reset, MAC address discovery, RX/TX descriptor rings, and packet-buffer setup.
+- Kernel-loop polling with bounded receive work; interrupts remain disabled until general network IRQ routing is available.
+- Bounded Ethernet II EtherType registry and receive dispatch for registered protocols.
+- Ethernet header length and MTU validation, big-endian EtherType parsing, and drop accounting for malformed, unsupported, or unhandled frames.
+- Explicit borrowed-buffer contract: protocol handlers execute synchronously and must copy any packet data they need to retain.
+- Host-side tests for Ethernet II bounds, handler registration, EtherType dispatch, unsupported 802.3/VLAN frames, and receive-drop accounting.
+- ARP Ethernet/IPv4 packet parsing with strict hardware/protocol/length/opcode checks and Ethernet-source consistency validation.
+- A bounded 32-entry per-interface IPv4-to-MAC cache with 60-second tick-based expiry, same-MAC refresh, and conflict rejection rather than replacing a live mapping.
+- Solicited ARP reply validation and request handling; requests are answered only for a local source address currently represented by a pending IPv4 send.
+- A fixed eight-packet pending IPv4 queue. Cache misses trigger an ARP request, matching replies flush queued packets, and unresolved packets expire after five seconds.
+- An IPv4 send handoff API that validates the basic IPv4 header/total length and constructs Ethernet II frames after resolution. This is a handoff for a future IP layer, not a complete IPv4 implementation.
+- A bounded per-interface IPv4 configuration table with configure/get/unconfigure APIs. Address, contiguous /1-/30 netmask, subnet host address, and same-subnet gateway validation are enforced; boot does not assume or hard-code an address.
+- IPv4 receive validation for version, IHL, total length, device MTU, TTL, reserved flags, and header checksum. Ethernet padding beyond the IPv4 total length is ignored, and only the configured local address or IPv4 broadcasts are delivered.
+- A bounded IPv4 protocol-number registry with a synchronous borrowed-buffer callback contract and packet metadata.
+- Outbound IPv4 packet construction with a valid header checksum, default TTL 64, DF set, direct-subnet or configured-gateway next-hop selection, ARP handoff, and direct Ethernet broadcast transmission.
+- An explicit no-fragmentation policy: incoming fragments are dropped because reassembly is not implemented; outgoing datagrams set DF. IPv4 options are bounds/checksum validated but not interpreted.
+- Host-side IPv4 tests for malformed headers, checksum failures, non-local destinations, fragment rejection, interface configuration, protocol dispatch, outbound checksums, on-link/gateway routing, and broadcast transmission.
+- Host-side ARP tests for malformed packets, cache learning/conflicts/expiry, known-neighbor sending, request/reply resolution, and pending-queue capacity/timeout.
+- ICMPv4 protocol registration with the IPv4 dispatcher and bounded statistics.
+- ICMP checksum validation over the complete message, echo-request handling, and echo-reply generation that preserves identifier, sequence, and payload.
+- Echo replies use the existing IPv4 routing/ARP path; limited and configured subnet broadcasts are not answered.
+- Host-side ICMP tests cover request/reply checksums, payload preservation, bad checksums, and unsupported message types.
+- UDP protocol registration with a bounded destination-port handler table and bind/unbind APIs.
+- UDP receive validation for header size, datagram length, and IPv4 pseudo-header checksum; zero checksums are accepted as permitted by IPv4 UDP.
+- UDP send builds checksummed datagrams and hands them to the existing IPv4 routing/ARP path.
+- Host-side UDP tests cover checksum validation, port dispatch, unbound ports, payload preservation, and outbound checksums.
+- QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
+
+Next milestones:
+1. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
+2. DHCP and DNS clients.
+3. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
+4. User-mode socket API and loopback/QEMU integration tests.
+5. ICMP error messages and broader network diagnostics.
+6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
+
+Current limitations:
+- IPv4 parsing, local delivery, static interface configuration APIs, routing, and ARP-backed transmission are implemented. No interface address is configured automatically yet; ICMP error messages, DHCP, DNS, TCP, sockets, forwarding, and general Internet access remain unavailable.
+- The Ethernet dispatcher currently accepts untagged Ethernet II frames only; IEEE 802.3 length-format frames and VLAN/QinQ encapsulation are rejected.
+- Protocol handlers are synchronous and receive borrowed pointers into the NIC RX buffer. Retained packets require a future explicit buffer-copy or ownership-transfer API.
+- Initial E1000 DMA storage relies on VexOS's current low identity-mapped kernel image and coherent x86 DMA assumptions.
+- Driver operation is polled in task context; no E1000 interrupts, MSI/MSI-X, APIC routing, or SMP support.
+- QEMU success is not physical hardware qualification.
 
 ## 6. Userland and system services
 

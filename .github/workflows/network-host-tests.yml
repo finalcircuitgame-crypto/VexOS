@@ -1,0 +1,74 @@
+name: VexOS Network Host Tests
+
+on:
+  push:
+    branches: [feature/network-foundation]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ethernet-dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Compile Ethernet dispatcher tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c tools/net_ethernet_test.c \
+            -o /tmp/vexos-ethernet-tests
+
+      - name: Test Ethernet II validation and dispatch
+        run: /tmp/vexos-ethernet-tests
+
+      - name: Compile ARP resolution tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c tools/net_arp_test.c \
+            -o /tmp/vexos-arp-tests
+
+      - name: Test ARP parsing, cache, and pending resolution
+        run: /tmp/vexos-arp-tests
+
+      - name: Compile IPv4 tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \
+            src/kernel/net/ipv4.c tools/net_ipv4_test.c \
+            -o /tmp/vexos-ipv4-tests
+
+      - name: Test IPv4 validation, routing, and ARP handoff
+        run: /tmp/vexos-ipv4-tests
+
+      
+      - name: Compile ICMPv4 tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \
+            src/kernel/net/ipv4.c src/kernel/net/icmp.c \
+            tools/net_icmp_test.c \
+            -o /tmp/vexos-icmp-tests
+
+      - name: Test ICMPv4 echo handling
+        run: /tmp/vexos-icmp-tests
+
+      - name: Compile UDP tests with strict warnings
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -Isrc/include \
+            src/kernel/net/ethernet.c src/kernel/net/arp.c \
+            src/kernel/net/ipv4.c src/kernel/net/udp.c \
+            tools/net_udp_test.c \
+            -o /tmp/vexos-udp-tests
+
+      - name: Test UDP parsing, checksums, ports, and transmission
+        run: /tmp/vexos-udp-tests
