@@ -23,12 +23,7 @@ jobs:
       - name: Install build and QEMU dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm unzip python3-pil fonts-inter fonts-lato fonts-dejavu-core
-
-      - name: Generate font atlas manually
-        run: |
-          python3 tools/prepare_font_atlas.py --font-dir /usr/share/fonts --output assets/fonts/
-          test "$(wc -c < assets/fonts/font_atlas.bin)" -eq 32768
+          sudo apt-get install -y build-essential binutils gcc gnu-efi mtools qemu-system-x86 ovmf xvfb ffmpeg xterm unzip fonts-inter fonts-lato fonts-dejavu-core
 
       - name: Build VexOS and Doom
         shell: bash

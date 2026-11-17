@@ -40,6 +40,7 @@ $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
 # Keep window rendering and compositor hot paths optimized.
 $(OBJDIR)/desktop/%.o: CFLAGS_KERNEL += -O2
+$(OBJDIR)/desktop/graphics/font_engine.o: CFLAGS_KERNEL += -O2
 
 # CI-only boot/input instrumentation. Normal builds keep the real first-boot wizard.
 ifeq ($(VEXOS_CI),1)
@@ -74,8 +75,23 @@ KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
 $(KERNEL_OBJS): Makefile
 
 FONT_OBJ = $(OBJDIR)/font.o
-FONT_ATLAS_BIN = assets/fonts/font_atlas.bin
-FONT_ATLAS_OBJ = $(OBJDIR)/font_atlas.o
+
+# Embed the original TrueType faces. Prefer project assets; CI may use the
+# equivalent distro-provided font files under /usr/share/fonts.
+FONT_SEARCH_ROOTS ?= assets/fonts /usr/share/fonts
+font_find = $(shell find $(FONT_SEARCH_ROOTS) \( -type f -o -type l \) \( $(foreach name,$(1),-iname '$(name)' -o ) -false \) -print -quit 2>/dev/null)
+
+FONT_SOURCE_INTER_REGULAR := $(call font_find,Inter-Regular.ttf Inter-Regular.otf Inter_18pt-Regular.ttf)
+FONT_SOURCE_INTER_BOLD := $(call font_find,Inter-Bold.ttf Inter-Bold.otf Inter_18pt-Bold.ttf)
+FONT_SOURCE_LATO_REGULAR := $(call font_find,Lato-Regular.ttf Lato-Regular.otf)
+FONT_SOURCE_LATO_BOLD := $(call font_find,Lato-Bold.ttf Lato-Bold.otf)
+FONT_SOURCE_DEJAVU_SANS_REGULAR := $(call font_find,DejaVuSans.ttf)
+FONT_SOURCE_DEJAVU_SANS_BOLD := $(call font_find,DejaVuSans-Bold.ttf)
+FONT_SOURCE_DEJAVU_MONO_REGULAR := $(call font_find,DejaVuSansMono.ttf)
+FONT_SOURCE_DEJAVU_MONO_BOLD := $(call font_find,DejaVuSansMono-Bold.ttf)
+
+FONT_VARIANTS = inter_regular inter_bold lato_regular lato_bold dejavu_sans_regular dejavu_sans_bold dejavu_mono_regular dejavu_mono_bold
+FONT_OBJS = $(addprefix $(OBJDIR)/font_,$(addsuffix .o,$(FONT_VARIANTS)))
 
 DESKTOP_ICON_SOURCES = $(addprefix assets/icons/,file-manager.png terminal.png settings.png notepad.png image-viewer.png doom.png)
 DESKTOP_ICON_BIN = $(OBJDIR)/desktop_icons.bin
@@ -106,20 +122,116 @@ $(DESKTOP_ICON_BIN): tools/prepare_desktop_icons.py $(DESKTOP_ICON_SOURCES)
 $(DESKTOP_ICON_OBJ): $(DESKTOP_ICON_BIN)
 	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents desktop_icons.bin desktop_icons.o
 
-# The font atlas is generated manually; see assets/fonts/README.md.
-# Make only embeds the prepared asset and does not require Pillow or font files.
-$(FONT_ATLAS_BIN):
-	@echo "Missing $(FONT_ATLAS_BIN). Generate it manually; see assets/fonts/README.md."
-	@false
+# Each TTF is embedded as a read-only binary object. The stb_truetype
+# runtime rasterizer consumes these bytes directly; no Pillow/atlas step exists.
 
-$(FONT_ATLAS_OBJ): $(FONT_ATLAS_BIN)
-	@mkdir -p $(dir $@)
-	cp $< $(OBJDIR)/font_atlas.bin
-	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_atlas.bin font_atlas.o
+ifneq ($(strip $(FONT_SOURCE_INTER_REGULAR)),)
+$(OBJDIR)/font_inter_regular.o: $(FONT_SOURCE_INTER_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Inter Regular: $<"
+	cp "$<" "$(OBJDIR)/font_inter_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_inter_regular.ttf font_inter_regular.o
+else
+$(OBJDIR)/font_inter_regular.o:
+	@echo "Missing required font face: Inter Regular" >&2
+	@echo "Place Inter-Regular.ttf or Inter-Regular.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_INTER_BOLD)),)
+$(OBJDIR)/font_inter_bold.o: $(FONT_SOURCE_INTER_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Inter Bold: $<"
+	cp "$<" "$(OBJDIR)/font_inter_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_inter_bold.ttf font_inter_bold.o
+else
+$(OBJDIR)/font_inter_bold.o:
+	@echo "Missing required font face: Inter Bold" >&2
+	@echo "Place Inter-Bold.ttf or Inter-Bold.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_LATO_REGULAR)),)
+$(OBJDIR)/font_lato_regular.o: $(FONT_SOURCE_LATO_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Lato Regular: $<"
+	cp "$<" "$(OBJDIR)/font_lato_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_lato_regular.ttf font_lato_regular.o
+else
+$(OBJDIR)/font_lato_regular.o:
+	@echo "Missing required font face: Lato Regular" >&2
+	@echo "Place Lato-Regular.ttf or Lato-Regular.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_LATO_BOLD)),)
+$(OBJDIR)/font_lato_bold.o: $(FONT_SOURCE_LATO_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding Lato Bold: $<"
+	cp "$<" "$(OBJDIR)/font_lato_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_lato_bold.ttf font_lato_bold.o
+else
+$(OBJDIR)/font_lato_bold.o:
+	@echo "Missing required font face: Lato Bold" >&2
+	@echo "Place Lato-Bold.ttf or Lato-Bold.otf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_SANS_REGULAR)),)
+$(OBJDIR)/font_dejavu_sans_regular.o: $(FONT_SOURCE_DEJAVU_SANS_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Regular: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_sans_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_sans_regular.ttf font_dejavu_sans_regular.o
+else
+$(OBJDIR)/font_dejavu_sans_regular.o:
+	@echo "Missing required font face: DejaVu Sans Regular" >&2
+	@echo "Place DejaVuSans.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_SANS_BOLD)),)
+$(OBJDIR)/font_dejavu_sans_bold.o: $(FONT_SOURCE_DEJAVU_SANS_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Bold: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_sans_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_sans_bold.ttf font_dejavu_sans_bold.o
+else
+$(OBJDIR)/font_dejavu_sans_bold.o:
+	@echo "Missing required font face: DejaVu Sans Bold" >&2
+	@echo "Place DejaVuSans-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_MONO_REGULAR)),)
+$(OBJDIR)/font_dejavu_mono_regular.o: $(FONT_SOURCE_DEJAVU_MONO_REGULAR)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Mono Regular: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_mono_regular.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_mono_regular.ttf font_dejavu_mono_regular.o
+else
+$(OBJDIR)/font_dejavu_mono_regular.o:
+	@echo "Missing required font face: DejaVu Sans Mono Regular" >&2
+	@echo "Place DejaVuSansMono.ttf under assets/fonts/." >&2
+	@false
+endif
+
+ifneq ($(strip $(FONT_SOURCE_DEJAVU_MONO_BOLD)),)
+$(OBJDIR)/font_dejavu_mono_bold.o: $(FONT_SOURCE_DEJAVU_MONO_BOLD)
+	@mkdir -p $(OBJDIR)
+	@echo "[FONT] Embedding DejaVu Sans Mono Bold: $<"
+	cp "$<" "$(OBJDIR)/font_dejavu_mono_bold.ttf"
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.font_assets,alloc,load,readonly,data,contents font_dejavu_mono_bold.ttf font_dejavu_mono_bold.o
+else
+$(OBJDIR)/font_dejavu_mono_bold.o:
+	@echo "Missing required font face: DejaVu Sans Mono Bold" >&2
+	@echo "Place DejaVuSansMono-Bold.ttf under assets/fonts/." >&2
+	@false
+endif
 
 # Build Kernel
-$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ)
-	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ) -o $@
+$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_OBJS) $(DESKTOP_ICON_OBJ)
+	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_OBJS) $(DESKTOP_ICON_OBJ) -o $@
 
 # Pattern rules for nested kernel directories
 $(OBJDIR)/%.o: $(KERNELDIR)/%.c
