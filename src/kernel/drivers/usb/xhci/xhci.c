@@ -83,8 +83,31 @@ xhci_trb_t *xhci_alloc_tr_ring(void);
 
 void xhci_cmd_ring_push(const xhci_trb_t *trb);
 
+static void xhci_log_ep0_request(const char *direction,
+                                const xhci_device_state_t *dev,
+                                uint64_t setup, uint32_t transfer_len) {
+  serial_print("[xHCI][EP0] ");
+  serial_print(direction);
+  serial_print(" slot=");
+  xhci_print_u32_dec(dev ? dev->slot_id : 0);
+  serial_print(" bmRequestType=");
+  xhci_print_hex32((uint32_t)(setup & 0xFFu));
+  serial_print(" request=");
+  xhci_print_hex32((uint32_t)((setup >> 8) & 0xFFu));
+  serial_print(" value=");
+  xhci_print_hex32((uint32_t)((setup >> 16) & 0xFFFFu));
+  serial_print(" index=");
+  xhci_print_hex32((uint32_t)((setup >> 32) & 0xFFFFu));
+  serial_print(" wLength=");
+  xhci_print_u32_dec((uint32_t)((setup >> 48) & 0xFFFFu));
+  serial_print(" transfer_len=");
+  xhci_print_u32_dec(transfer_len);
+  serial_print("\n");
+}
+
 int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup, void *buf,
                         uint32_t len) {
+  xhci_log_ep0_request("IN", dev, setup, len);
   xhci_trb_t setup_trb;
   setup_trb.data = setup;
   setup_trb.status = 8;
@@ -123,6 +146,7 @@ int xhci_ep0_control_in(xhci_device_state_t *dev, uint64_t setup, void *buf,
 }
 
 int xhci_ep0_control_no_data_out(xhci_device_state_t *dev, uint64_t setup) {
+  xhci_log_ep0_request("OUT", dev, setup, 0);
   xhci_trb_t setup_trb;
   setup_trb.data = setup;
   setup_trb.status = 8;
@@ -681,7 +705,6 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
     if (xhci_port_warm_reset(portsc, port_id, 100000u)) {
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
-      xhci_log_portsc(port_id, "[xHCI] After warm reset", ps);
       (void)bootlog_checkpoint();
 
       if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
@@ -1431,7 +1454,9 @@ void xhci_init(uint64_t mmio_phys) {
 
   if (powered_any_port) {
     serial_print("[xHCI] Waiting 100 ms for root-port power-good...\n");
+    uint64_t power_good_start = xhci_time_now_ticks();
     xhci_time_delay_us(100000u);
+    xhci_time_log_elapsed("root_port_power_good", power_good_start, "complete");
   }
 
   for (uint32_t i = 0; i < num_ports; i++) {
