@@ -91,7 +91,7 @@ Implemented on `feature/network-foundation`:
 - Polling-only Intel 82540EM-compatible E1000 driver for QEMU (`8086:100E`).
 - PCI BAR discovery, MMIO mapping, controller reset, MAC address discovery, RX/TX descriptor rings, and packet-buffer setup.
 - Kernel-loop polling with bounded receive work; interrupts remain disabled until general network IRQ routing is available.
-- QEMU CI integration planned to boot with an E1000 NIC and verify controller/ring initialization.
+- QEMU CI now boots with an E1000 NIC and checks controller discovery and descriptor-ring initialization; the first run is pending.
 
 Next milestones:
 1. Ethernet protocol dispatch and packet-buffer ownership rules.
