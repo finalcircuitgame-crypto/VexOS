@@ -2,7 +2,7 @@
 #include "bootlog.h"
 #include "ahci.h"
 #include "usb/xhci.h"
-#include "usb/xhci_quirks.h"
+#include "usb/xhci/xhci_quirks.h"
 
 // I/O ports for PCI
 static inline void outl(uint16_t port, uint32_t val) {
