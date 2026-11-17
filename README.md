@@ -6,7 +6,8 @@ VexOS is a small educational x86_64 operating system project that boots via an E
 - EFI bootloader (src/boot) that loads kernel.elf and passes a BootInfo struct
 - Kernel core (src/kernel/core): framebuffer console, PMM, VMM, heap, PCI enumeration and drivers, desktop UI, and setup wizard
 - Persistent SimpleFS storage with SFS1 compatibility and journaled SFS2 nested-file operations
-- Boot diagnostics: serial output is buffered in a 32 KiB RAM ring; bounded checkpoints are also written to a UEFI nonvolatile variable after `ExitBootServices()`, then exported by the bootloader to `boot.log` on the FAT boot volume during the next boot. The existing SFS1/SFS2 `/boot.log` backend remains available; logging never formats a disk
+- Boot diagnostics: serial output is buffered in a 32 KiB RAM ring and flushed to `/boot.log` through the writable SFS1/SFS2 VFS backend; logging never formats a disk
+- Networking foundation: generic network-device registration plus a polling Intel E1000 driver with bounded RX/TX descriptor rings (QEMU 82540EM target)
 
 ## Development roadmap
 
@@ -61,7 +62,7 @@ The flasher provides two operations:
 
 The utility only lists physical USB disks for whole-disk flashing, rechecks the disk identity immediately before repartitioning, refuses Windows boot/system disks, and verifies copied files with SHA-256. It does not install VexOS to internal drives. The separate `dist/storage.img` is not written by this boot-media utility; persistent storage over USB mass storage is not part of this USB boot workflow yet.
 
-Boot-log persistence has two independent paths. The kernel can write the full current 32 KiB log to a writable SFS1 or journal-enabled SFS2 volume through ATA PIO/AHCI. In addition, it can checkpoint up to 2 KiB of the latest log to a UEFI nonvolatile variable using Runtime Services after `ExitBootServices()`. On the next boot, the UEFI bootloader reads that variable and writes the checkpoint to `boot.log` on the FAT boot volume before starting the kernel, so the USB controller driver is not needed to export the previous boot's xHCI diagnostics. The UEFI path depends on firmware Runtime Services, available NVRAM variable capacity, identity mapping of all runtime memory regions, and writable UEFI filesystem support; it is best-effort and may be unavailable on some firmware. The exported file contains the last successful checkpoint, not necessarily every message from immediately before a sudden hang or power loss. Checkpoints are limited to 2 KiB and rate-limited to reduce NVRAM writes. VexOS still does not support USB mass storage or NVMe in its kernel.
+Boot-log persistence uses the kernel's 32 KiB RAM ring and the writable SFS1/SFS2 `/boot.log` VFS backend. If storage is not available, diagnostics remain buffered in RAM; logging does not format or partition media. VexOS's first networking milestone is currently limited to raw Ethernet frames through the QEMU Intel E1000 device. ARP, IPv4, ICMP, DHCP, DNS, UDP, TCP, sockets, and physical laptop NIC qualification are not implemented yet.
 
 A successful flash creates this boot layout:
 
