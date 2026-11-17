@@ -7,7 +7,7 @@
 #define NOTEPAD_LINE_HEIGHT 16u
 
 static desktop_window_t g_window;
-static char g_filename[64];
+static char g_filename[VFS_PATH_MAX];
 static char g_text[NOTEPAD_TEXT_CAPACITY];
 static uint32_t g_text_length;
 static uint32_t g_scroll;
@@ -94,6 +94,54 @@ static void notepad_load_saved_file(void) {
 
   g_text_length = bytes_read;
   g_text[g_text_length] = 0;
+}
+
+/* Open a VFS text file in the editor. Empty files are valid documents.
+   Keep the current document intact unless its pending edits can be saved. */
+int notepad_open_file(const char *filename) {
+  if (!filename || !filename[0] || !vfs_init())
+    return 0;
+
+  uint32_t name_length = 0;
+  while (name_length < VFS_PATH_MAX && filename[name_length])
+    ++name_length;
+  if (name_length == 0 || name_length >= VFS_PATH_MAX)
+    return 0;
+
+  vfs_stat_t info;
+  if (!vfs_stat(filename, &info) || info.type != VFS_NODE_FILE ||
+      info.size >= NOTEPAD_TEXT_CAPACITY)
+    return 0;
+
+  char loaded[NOTEPAD_TEXT_CAPACITY];
+  uint32_t bytes_read = 0;
+  if (info.size &&
+      (!vfs_read(filename, loaded, info.size, &bytes_read) ||
+       bytes_read != info.size))
+    return 0;
+
+  /* The editor currently accepts printable ASCII plus normal text controls. */
+  for (uint32_t i = 0; i < bytes_read; ++i) {
+    uint8_t ch = (uint8_t)loaded[i];
+    if (ch == 0 || (ch < 32u && ch != '\\n' &&
+                    ch != '\\r' && ch != '\\t') || ch > 126u)
+      return 0;
+  }
+  loaded[bytes_read] = 0;
+
+  if (g_dirty && g_filename[0] &&
+      !vfs_write(g_filename, g_text, g_text_length))
+    return 0;
+
+  for (uint32_t i = 0; i <= name_length; ++i)
+    g_filename[i] = filename[i];
+  for (uint32_t i = 0; i <= bytes_read; ++i)
+    g_text[i] = loaded[i];
+  g_text_length = bytes_read;
+  g_scroll = 0;
+  g_dirty = 0;
+  notepad_keep_caret_visible();
+  return 1;
 }
 
 void notepad_init(uint32_t screen_width, uint32_t screen_height) {
