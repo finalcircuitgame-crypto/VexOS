@@ -123,8 +123,8 @@ int notepad_open_file(const char *filename) {
   /* The editor currently accepts printable ASCII plus normal text controls. */
   for (uint32_t i = 0; i < bytes_read; ++i) {
     uint8_t ch = (uint8_t)loaded[i];
-    if (ch == 0 || (ch < 32u && ch != '\\n' &&
-                    ch != '\\r' && ch != '\\t') || ch > 126u)
+    if (ch == 0 || (ch < 32u && ch != '\n' &&
+                    ch != '\r' && ch != '\t') || ch > 126u)
       return 0;
   }
   loaded[bytes_read] = 0;
