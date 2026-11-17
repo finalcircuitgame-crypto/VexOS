@@ -429,6 +429,8 @@ static const uint32_t PORTSC_PLS_MASK = 0xFu << 5;
 static const uint32_t PORTSC_PP = 1u << 9; // Port Power
 static const uint32_t PORTSC_SPEED_MASK = 0xFu << 10;
 static const uint32_t PORTSC_LWS = 1u << 16; // Port Link State Write Strobe
+static const uint32_t PORTSC_PIC_MASK = 0x3u << 14;
+static const uint32_t PORTSC_WAKE_MASK = 0x7u << 25;
 // RW1C bits (write 1 to clear).
 static const uint32_t PORTSC_W1C = (1u << 17) | (1u << 18) | (1u << 19) |
                                   (1u << 20) | (1u << 21) | (1u << 22);
@@ -439,6 +441,14 @@ static uint32_t xhci_port_speed(uint32_t portsc) {
 }
 
 static uint32_t xhci_port_pls(uint32_t portsc) { return (portsc >> 5) & 0xFu; }
+
+// Only replay ordinary writable configuration fields when updating PORTSC.
+// PED is RW1C (writing 1 disables the port), while PR/WPR are write-one-to-set
+// commands and PLS is only changed when LWS is asserted. Never echo those bits
+// from a status read back into the register.
+static uint32_t xhci_portsc_rw_config(uint32_t ps) {
+  return ps & (PORTSC_PP | PORTSC_PIC_MASK | PORTSC_WAKE_MASK);
+}
 
 static const char *xhci_speed_name(uint32_t speed) {
   switch (speed) {
@@ -488,17 +498,18 @@ static int xhci_port_ready(uint32_t ps) {
 
 static void xhci_port_power_on(volatile uint32_t *portsc, uint32_t *ps) {
   if (!(*ps & PORTSC_PP)) {
-    uint32_t v = *ps;
-    v |= PORTSC_PP;
-    v &= ~PORTSC_W1C;
-    *portsc = v;
+    // Do not echo PED or reset-command bits from the read value.
+    *portsc = xhci_portsc_rw_config(*ps) | PORTSC_PP;
     *ps = *portsc;
   }
 }
 
 static void xhci_port_clear_w1c(volatile uint32_t *portsc, uint32_t *ps) {
-  if (*ps & PORTSC_W1C) {
-    *portsc = *ps | PORTSC_W1C;
+  uint32_t change_bits = *ps & PORTSC_W1C;
+  if (change_bits) {
+    // Clear only the observed RW1C change bits. In particular, do not write
+    // back PED=1: that would disable a port immediately after a successful reset.
+    *portsc = xhci_portsc_rw_config(*ps) | change_bits;
     *ps = *portsc;
   }
 }
@@ -525,18 +536,14 @@ static void xhci_port_force_u0(volatile uint32_t *portsc) {
   if (xhci_port_pls(ps) == 0)
     return;
 
-  uint32_t v = ps;
-  v &= ~PORTSC_PLS_MASK;
-  v |= PORTSC_LWS;
-  v &= ~PORTSC_W1C;
+  // Request U0 without echoing PED=1 (which would disable the port).
+  uint32_t v = xhci_portsc_rw_config(ps) | PORTSC_LWS;
   *portsc = v;
 }
 
 static void xhci_port_warm_reset(volatile uint32_t *portsc) {
   uint32_t ps = *portsc;
-  uint32_t v = ps;
-  v &= ~PORTSC_W1C;
-  v |= PORTSC_WPR;
+  uint32_t v = xhci_portsc_rw_config(ps) | PORTSC_WPR;
   *portsc = v;
 
   for (uint32_t spins = 0; spins < 20000000; spins++) {
@@ -548,9 +555,7 @@ static void xhci_port_warm_reset(volatile uint32_t *portsc) {
 
 static void xhci_port_cold_reset(volatile uint32_t *portsc) {
   uint32_t ps = *portsc;
-  uint32_t v = ps;
-  v &= ~PORTSC_W1C;
-  v |= PORTSC_PR;
+  uint32_t v = xhci_portsc_rw_config(ps) | PORTSC_PR;
   *portsc = v;
 
   for (uint32_t spins = 0; spins < 20000000; spins++) {
@@ -1251,7 +1256,7 @@ void xhci_init(uint64_t mmio_phys) {
     uint32_t ps = *portsc;
 
     if (!(ps & PORTSC_PP)) {
-      *portsc = (ps | PORTSC_PP) & ~PORTSC_W1C;
+      *portsc = xhci_portsc_rw_config(ps) | PORTSC_PP;
     }
   }
 
@@ -1267,7 +1272,7 @@ void xhci_init(uint64_t mmio_phys) {
       uint32_t ps = *portsc;
 
       if (!(ps & PORTSC_PP)) {
-        *portsc = (ps | PORTSC_PP) & ~PORTSC_W1C;
+        *portsc = xhci_portsc_rw_config(ps) | PORTSC_PP;
       }
     }
   }
