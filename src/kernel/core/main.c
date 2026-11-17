@@ -398,7 +398,7 @@ typedef struct {
 static void ci_install_ring3_elf_fixture(void) {
   static uint8_t image[0x1100];
   static const char message[] =
-      "[CI] Ring3 int80 syscall and exit passed\\n";
+      "[CI] Ring3 int80 syscall and exit passed\n";
   const uint32_t message_len = (uint32_t)sizeof(message) - 1u;
   const uint32_t data_offset = 0x20u;
   const uint32_t code_len = 31u;
@@ -457,7 +457,7 @@ static void ci_install_ring3_elf_fixture(void) {
 
   if (!simplefs_write_file("ci-ring3.elf", image, file_size))
     ci_memory_test_fail("write ring3 ELF fixture to SimpleFS");
-  serial_print("[CI] Valid ring3 ELF fixture installed in SimpleFS\\n");
+  serial_print("[CI] Valid ring3 ELF fixture installed in SimpleFS\n");
 }
 #endif
 
@@ -469,13 +469,13 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("SimpleFS fixture mount");
   if (!simplefs_ci_validate_metadata_self_test())
     ci_memory_test_fail("SFS1 metadata validation and extent safety");
-  serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\\n");
+  serial_print("[CI] SFS1 metadata names, path conflicts, and extent bounds passed\n");
   if (!sfs2_ci_metadata_self_test())
     ci_memory_test_fail("SFS2 superblock, inode, and bitmap metadata");
-  serial_print("[CI] SFS2 superblock, inode, and bitmap metadata passed\\n");
+  serial_print("[CI] SFS2 superblock, inode, and bitmap metadata passed\n");
   if (!sfs2_ci_mount_read_test())
     ci_memory_test_fail("SFS2 mount, journal recovery, and file mutation");
-  serial_print("[CI] SFS2 mount, journal recovery, and file mutation passed\\n");
+  serial_print("[CI] SFS2 mount, journal recovery, and file mutation passed\n");
   if (!vfs_init() || !vfs_is_mounted())
     ci_memory_test_fail("VFS root mount over existing SimpleFS");
 
@@ -583,9 +583,9 @@ static void ci_syscall_self_test(void) {
       entry_name[8] != 'x' || entry_name[9] != 't' ||
       entry_name[10] != '\0' || !vfs_dir_close(&retry_dir))
     ci_memory_test_fail("VFS directory buffer retry");
-  serial_print("[CI] VFS directory buffer retry passed\\n");
+  serial_print("[CI] VFS directory buffer retry passed\n");
 
-  serial_print("[CI] VFS hierarchical paths and directory iteration passed\\n");
+  serial_print("[CI] VFS hierarchical paths and directory iteration passed\n");
 
   vfs_file_t nested_file_a = {0};
   vfs_file_t nested_file_b = {0};
@@ -633,9 +633,9 @@ static void ci_syscall_self_test(void) {
     ci_memory_test_fail("VFS namespace parent/child type consistency");
   if (vfs_create("/"))
     ci_memory_test_fail("VFS rejects creating root directory as file");
-  serial_print("[CI] VFS create/unlink and open-node reference rules passed\\n");
+  serial_print("[CI] VFS create/unlink and open-node reference rules passed\n");
 
-  serial_print("[CI] VFS root mount/path/stat/read/write/ranged-read passed\\n");
+  serial_print("[CI] VFS root mount/path/stat/read/write/ranged-read passed\n");
 
   // Unknown syscall numbers and invalid user pointers must fail safely.
   frame.rax = 0xFFFFFFFFu;
@@ -782,7 +782,7 @@ static void ci_syscall_self_test(void) {
   if (frame.rax != 0)
     ci_memory_test_fail("VFS close second independent handle");
 
-  serial_print("[CI] VFS independent open-file handles and descriptor offsets passed\\n");
+  serial_print("[CI] VFS independent open-file handles and descriptor offsets passed\n");
 
   frame = (struct InterruptFrame){0};
   frame.rax = 6;
@@ -1230,10 +1230,10 @@ void kernel_main(BootInfo *bootInfo) {
   // Network devices share the normal PCI discovery path. Start the
   // device registry only after the kernel heap and VMM are ready.
   netdev_init();
-  serial_print("[NET] Network-device registry initialized\\n");
+  serial_print("[NET] Network-device registry initialized\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
-  serial_print("[KERNEL] Starting PCI Enumeration...\\n");
+  serial_print("[KERNEL] Starting PCI Enumeration...\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
 #ifdef VEXOS_CI_INPUT_TEST
