@@ -12,6 +12,13 @@
  */
 #define GFX_CLIP_STACK_MAX 8u
 
+typedef enum {
+  GFX_FONT_INTER = 0,
+  GFX_FONT_LATO = 1,
+  GFX_FONT_DEJAVU_SANS = 2,
+  GFX_FONT_DEJAVU_MONO = 3
+} gfx_font_family_t;
+
 typedef struct {
   uint32_t x;
   uint32_t y;
@@ -21,6 +28,12 @@ typedef struct {
 
 void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font);
 void gfx_set_backbuffer(uint32_t *backbuffer);
+
+/* Built-in antialiased font families. Scale values are 1x, 2x, and 3x. */
+void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold);
+gfx_font_family_t gfx_get_font_family(void);
+uint8_t gfx_get_font_scale(void);
+uint8_t gfx_get_font_bold(void);
 
 void gfx_reset_clip(void);
 int gfx_push_clip(uint32_t x, uint32_t y, uint32_t width, uint32_t height);

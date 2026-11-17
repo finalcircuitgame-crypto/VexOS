@@ -74,6 +74,8 @@ KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
 $(KERNEL_OBJS): Makefile
 
 FONT_OBJ = $(OBJDIR)/font.o
+FONT_ATLAS_BIN = $(OBJDIR)/font_atlas.bin
+FONT_ATLAS_OBJ = $(OBJDIR)/font_atlas.o
 
 DESKTOP_ICON_SOURCES = $(addprefix assets/icons/,file-manager.png terminal.png settings.png notepad.png image-viewer.png doom.png)
 DESKTOP_ICON_BIN = $(OBJDIR)/desktop_icons.bin
@@ -104,9 +106,19 @@ $(DESKTOP_ICON_BIN): tools/prepare_desktop_icons.py $(DESKTOP_ICON_SOURCES)
 $(DESKTOP_ICON_OBJ): $(DESKTOP_ICON_BIN)
 	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents desktop_icons.bin desktop_icons.o
 
+# Generate a compact 2-bit antialiased atlas for Inter, Lato, DejaVu Sans,
+# and DejaVu Sans Mono. Pillow is a build-time tool; the kernel uses no runtime
+# font library or filesystem font loading.
+$(FONT_ATLAS_BIN): tools/prepare_font_atlas.py
+	@mkdir -p $(dir $@)
+	python3 $< --output $@
+
+$(FONT_ATLAS_OBJ): $(FONT_ATLAS_BIN)
+	cd $(OBJDIR) && $(OBJCOPY) -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rodata,alloc,load,readonly,data,contents font_atlas.bin font_atlas.o
+
 # Build Kernel
-$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(DESKTOP_ICON_OBJ)
-	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(DESKTOP_ICON_OBJ) -o $@
+$(KERNEL_ELF): $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ)
+	$(LD) $(LDFLAGS_KERNEL) $(KERNEL_OBJS) $(FONT_OBJ) $(FONT_ATLAS_OBJ) $(DESKTOP_ICON_OBJ) -o $@
 
 # Pattern rules for nested kernel directories
 $(OBJDIR)/%.o: $(KERNELDIR)/%.c
