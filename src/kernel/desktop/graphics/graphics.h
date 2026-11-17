@@ -29,7 +29,7 @@ typedef struct {
 void gfx_init(BootInfo *boot_info, uint32_t *backbuffer, const uint8_t *font);
 void gfx_set_backbuffer(uint32_t *backbuffer);
 
-/* Built-in antialiased font families. Scale values are 1x, 2x, and 3x. */
+/* Embedded TrueType font families. Scale values map to 10, 20, and 30 px. */
 void gfx_set_font(gfx_font_family_t family, uint8_t scale, uint8_t bold);
 gfx_font_family_t gfx_get_font_family(void);
 uint8_t gfx_get_font_scale(void);
@@ -62,6 +62,10 @@ void gfx_blit_rgba_scaled(const uint8_t *source, uint32_t source_width,
 
 void gfx_draw_glyph(uint32_t x, uint32_t y, uint8_t character,
                     uint32_t foreground);
+void gfx_draw_codepoint(uint32_t x, uint32_t y, uint32_t codepoint,
+                        uint32_t foreground);
+uint32_t gfx_get_font_line_height(void);
+uint32_t gfx_measure_string(const char *text);
 void gfx_draw_string(uint32_t x, uint32_t y, const char *text,
                      uint32_t foreground);
 
