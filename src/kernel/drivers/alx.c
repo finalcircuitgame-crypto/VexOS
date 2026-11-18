@@ -344,29 +344,51 @@ static int alx_reset_phy(void) {
 static int alx_configure_phy(void) {
     const uint16_t advertise_10_100 = 0x01E1u; /* CSMA + 10/100 half/full. */
     const uint16_t advertise_1000_full = 0x0200u;
-
-    alx_write32(ALX_DRV, (1u << 28) | (1u << 27) |
-                         (1u << 26) | (1u << 25) | (1u << 24));
+    const uint32_t phy_field_mask = 0xFFu << 21;
 
     /*
-     * alx_reset_phy() already performed the hardware PHY reset and restored
-     * the ALX analog tuning registers. Do not assert BMCR_RESET here: a second
-     * MII reset would clear the advertisement we are setting and can undo
-     * the vendor-specific PHY setup. Program advertisements first, then
-     * enable/restart auto-negotiation without resetting the PHY again.
+     * Match the Linux ALX initialization sequence: clear the hardware PHY
+     * configuration field, select the normal debug page, program the
+     * advertisements, then issue BMCR_RESET | ANENABLE | ANRESTART.
      */
-    if (!alx_mdio_write(ALX_MII_ADVERTISE, advertise_10_100) ||
+    uint32_t driver_config = alx_read32(ALX_DRV);
+    driver_config &= ~phy_field_mask;
+    alx_write32(ALX_DRV, driver_config);
+
+    if (!alx_mdio_write(ALX_MII_DBG_ADDR, 0u) ||
+        !alx_mdio_write(ALX_MII_ADVERTISE, advertise_10_100) ||
         !alx_mdio_write(ALX_MII_CTRL1000, advertise_1000_full) ||
         !alx_mdio_write(ALX_MII_BMCR,
-                        ALX_BMCR_ANENABLE | ALX_BMCR_ANRESTART))
+                        ALX_BMCR_RESET | ALX_BMCR_ANENABLE |
+                        ALX_BMCR_ANRESTART))
         return 0;
 
+    /* BMCR reset is self-clearing. Wait for MDIO to report it completed. */
     uint16_t control = 0;
-    if (!alx_mdio_read(ALX_MII_BMCR, &control) ||
-        (control & ALX_BMCR_ANENABLE) == 0u) {
-        serial_print("[ALX] PHY did not retain auto-negotiation enable\n");
+    uint8_t reset_complete = 0;
+    for (uint32_t i = 0; i < 200000u; ++i) {
+        if (!alx_mdio_read(ALX_MII_BMCR, &control))
+            return 0;
+        if ((control & ALX_BMCR_RESET) == 0u) {
+            reset_complete = 1u;
+            break;
+        }
+        __asm__ volatile("pause");
+    }
+    if (!reset_complete) {
+        serial_print("[ALX] PHY BMCR reset timed out\n");
         return 0;
     }
+
+    /* Linux uses this debug-register marker to identify an initialized PHY. */
+    if (!alx_mdio_write(ALX_MII_DBG_ADDR, 0x003Fu))
+        return 0;
+
+    driver_config = alx_read32(ALX_DRV);
+    driver_config &= ~phy_field_mask;
+    driver_config |= (1u << 28) | (1u << 27) |
+                     (1u << 26) | (1u << 25) | (1u << 24);
+    alx_write32(ALX_DRV, driver_config);
 
     serial_print("[ALX] PHY auto-negotiation started (10/100/1000)\n");
     return 1;
@@ -623,16 +645,56 @@ static void alx_start_mac(uint8_t speed_code, uint8_t full_duplex) {
     serial_print(full_duplex ? " full duplex\n" : " half duplex\n");
 }
 
+static void alx_log_phy_status(uint16_t bmsr, uint16_t bmcr,
+                               uint16_t status) {
+    static uint16_t last_bmsr = 0xFFFFu;
+    static uint16_t last_bmcr = 0xFFFFu;
+    static uint16_t last_status = 0xFFFFu;
+    static const char hex[] = "0123456789ABCDEF";
+
+    if (bmsr == last_bmsr && bmcr == last_bmcr &&
+        status == last_status)
+        return;
+
+    last_bmsr = bmsr;
+    last_bmcr = bmcr;
+    last_status = status;
+
+    char value[7] = {'0', 'x', '0', '0', '0', '0', '\0'};
+    serial_print("[ALX] PHY BMSR=");
+    for (uint32_t i = 0; i < 4u; ++i)
+        value[2u + i] = hex[(bmsr >> ((3u - i) * 4u)) & 0x0Fu];
+    serial_print(value);
+
+    serial_print(" BMCR=");
+    for (uint32_t i = 0; i < 4u; ++i)
+        value[2u + i] = hex[(bmcr >> ((3u - i) * 4u)) & 0x0Fu];
+    serial_print(value);
+
+    serial_print(" PSSR=");
+    for (uint32_t i = 0; i < 4u; ++i)
+        value[2u + i] = hex[(status >> ((3u - i) * 4u)) & 0x0Fu];
+    serial_print(value);
+    serial_print("\n");
+}
+
 static void alx_update_link(void) {
     uint16_t bmsr = 0u;
+    uint16_t bmcr = 0u;
     uint16_t status = 0u;
 
     /* BMSR link state is latched low; read it twice. */
     if (!alx_mdio_read(ALX_MII_BMSR, &bmsr) ||
-        !alx_mdio_read(ALX_MII_BMSR, &bmsr)) {
+        !alx_mdio_read(ALX_MII_BMSR, &bmsr) ||
+        !alx_mdio_read(ALX_MII_BMCR, &bmcr) ||
+        !alx_mdio_read(ALX_MII_GIGA_PSSR, &status)) {
+        serial_print("[ALX] PHY MDIO status read failed\n");
         alx_stop_mac();
         return;
     }
+
+    alx_log_phy_status(bmsr, bmcr, status);
+
     if ((bmsr & ALX_BMSR_LSTATUS) == 0u) {
         if (g_mac_started)
             alx_stop_mac();
@@ -641,8 +703,7 @@ static void alx_update_link(void) {
         return;
     }
 
-    if (!alx_mdio_read(ALX_MII_GIGA_PSSR, &status) ||
-        (status & ALX_GIGA_PSSR_RESOLVED) == 0u) {
+    if ((status & ALX_GIGA_PSSR_RESOLVED) == 0u) {
         if (g_mac_started)
             alx_stop_mac();
         return;
@@ -862,7 +923,7 @@ void alx_poll(void) {
     if (!g_ready)
         return;
 
-    if (++g_link_poll_count >= 512u) {
+    if (++g_link_poll_count >= 64u) {
         g_link_poll_count = 0u;
         alx_update_link();
     }
