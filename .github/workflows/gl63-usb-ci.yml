@@ -197,6 +197,34 @@ jobs:
             exit 1
           fi
 
+          # PCI enumeration continues after the synchronous xHCI root-port scan.
+          # Wait for the kernel's completion marker before asserting on devices
+          # that may appear later in PCI slot order (including the NIC at slot 5).
+          pci_deadline=$((SECONDS + 30))
+          while (( SECONDS < pci_deadline )); do
+            if grep -Fq "[KERNEL] PCI enumeration returned" serial.log; then
+              break
+            fi
+            if grep -Fq "[KERNEL] FATAL:" serial.log; then
+              echo "Kernel fatal error during PCI driver initialization:"
+              cat serial.log
+              exit 1
+            fi
+            if ! kill -0 "$qemu_pid" 2>/dev/null; then
+              echo "QEMU exited before PCI enumeration completed."
+              cat qemu.log
+              cat serial.log
+              exit 1
+            fi
+            sleep 0.25
+          done
+
+          if ! grep -Fq "[KERNEL] PCI enumeration returned" serial.log; then
+            echo "Timed out waiting for PCI enumeration and driver initialization."
+            cat serial.log
+            exit 1
+          fi
+
           # QEMU attaches a USB keyboard, tablet (HID mouse), and mass-storage
           # device. Require all three to be connected, addressed, and described.
           # The current kernel does not implement a USB mass-storage class
