@@ -16,6 +16,14 @@
 #include "../desktop/graphics/font_engine.h"
 #include "pci.h"
 #include "e1000e.h"
+#include "e1000e_netdev.h"
+#include "netdev.h"
+#include "ethernet.h"
+#include "arp.h"
+#include "ipv4.h"
+#include "icmp.h"
+#include "udp.h"
+#include "netlog.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -76,6 +84,9 @@ void serial_print(const char *str) {
 
   /* Capture every serial message before attempting hardware output. */
   bootlog_append(str);
+#ifdef VEXOS_NETLOG
+  netlog_append(str);
+#endif
 
   // Always print to COM1 as one indivisible message.
   const char *p = str;
@@ -1227,10 +1238,28 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Heap Initialized Successfully.\n");
   PrintString("Heap Initialized.\n", 0x00FF00);
 
+  // Initialize the protocol stack before PCI drivers register interfaces.
+  netdev_init();
+  ethernet_init();
+  if (!arp_init())
+    serial_print("[ARP] Failed to register Ethernet ARP handler\\n");
+  if (!ipv4_init())
+    serial_print("[IPv4] Failed to register Ethernet IPv4 handler\\n");
+  if (!icmp_init())
+    serial_print("[ICMP] Failed to register ICMPv4 handler\\n");
+  if (!udp_init())
+    serial_print("[UDP] Failed to register UDP handler\\n");
+  netdev_set_receive_handler(ethernet_receive);
+  serial_print("[NET] Ethernet II, ARP, IPv4, ICMPv4, and UDP stack initialized\\n");
+
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
+  (void)e1000e_netdev_attach();
+#ifdef VEXOS_NETLOG
+  (void)netlog_init();
+#endif
 #ifdef VEXOS_CI_INPUT_TEST
   if (!e1000e_ci_transmit_test())
     ci_memory_test_fail("E1000e initialization or ARP frame transmission");
@@ -1334,6 +1363,13 @@ void kernel_main(BootInfo *bootInfo) {
       ci_ring3_stress_reported = 1;
     }
 #endif
+    // Poll network devices in task context; the E1000e driver is polling-only.
+    netdev_poll_all(16u);
+    arp_poll();
+#ifdef VEXOS_NETLOG
+    netlog_poll();
+#endif
+
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
     xhci_poll_events_atomic();
 
@@ -1355,6 +1391,11 @@ void kernel_main(BootInfo *bootInfo) {
         // only once per rendered frame. This keeps input latency near 1 ms
         // while the desktop renderer remains frame-rate limited.
         xhci_poll_events_atomic();
+        netdev_poll_all(16u);
+        arp_poll();
+#ifdef VEXOS_NETLOG
+        netlog_poll();
+#endif
         // Desktop rendering stays on the frame cadence below. Calling
         // desktop_tick() here used to repaint the full scene on every PIT
         // wakeup (up to 1000 times/second), starving window interaction.
