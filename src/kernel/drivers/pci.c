@@ -1,6 +1,7 @@
 #include "pci.h"
 #include "bootlog.h"
 #include "ahci.h"
+#include "e1000e.h"
 #include "usb/xhci.h"
 #include "usb/xhci/xhci_quirks.h"
 
@@ -209,6 +210,14 @@ void pci_enumerate() {
                 serial_print(" if=");
                 print_hex(prog_if);
                 serial_print("\n");
+
+                /* Intel 82574L PCIe Ethernet controller (QEMU e1000e). */
+                if (vendor_id == 0x8086u && device_id == 0x10D3u &&
+                    class_code == 0x02u) {
+                    serial_print("[PCI] Found Intel e1000e Ethernet controller\\n");
+                    if (!e1000e_init((uint8_t)bus, slot, func))
+                        serial_print("[PCI] e1000e driver initialization failed\\n");
+                }
 
                 // SATA controller in AHCI programming-interface mode:
                 // Base class 01h, subclass 06h, programming interface 01h.
