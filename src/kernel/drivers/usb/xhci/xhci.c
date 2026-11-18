@@ -4,6 +4,7 @@
 #include "heap.h"
 #include "pmm.h"
 #include "vmm.h"
+#include "netlog.h"
 #include <stddef.h>
 
 /**
@@ -12,9 +13,66 @@
  * - xHCI 1.1: 4.2 (init), 4.8/4.9 (rings), 6.4 (TRBs), 7 (commands/events)
  */
 
-#define XHCI_MMIO_MAP_SIZE 0x100000
+#define XHCI_MMIO_MAP_SIZE 0x100000 /* Upper bound for validated register offsets. */
 #define XHCI_CMD_RING_TRBS 256
 #define XHCI_EVT_RING_TRBS 256
+
+static uint64_t g_last_net_service_tsc;
+static uint8_t g_net_service_started;
+
+/* Map only the pages containing controller registers, not the full 1 MiB BAR. */
+static int xhci_map_mmio_range(uint64_t mmio_phys, uint64_t end_offset) {
+  if (end_offset == 0u || end_offset > XHCI_MMIO_MAP_SIZE ||
+      mmio_phys > UINT64_MAX - end_offset)
+    return 0;
+
+  uint64_t map_bytes = (end_offset + 0xFFFu) & ~0xFFFu;
+  if (map_bytes > XHCI_MMIO_MAP_SIZE)
+    return 0;
+
+  for (uint64_t offset = 0; offset < map_bytes; offset += 4096u) {
+    void *address = (void *)(uintptr_t)(mmio_phys + offset);
+    (void)VMM_MapPage(address, address, PAGE_WRITE | PAGE_PRESENT);
+  }
+  return 1;
+}
+
+static int xhci_map_mmio_page(uint64_t mmio_phys, uint64_t offset) {
+  uint64_t page_offset = offset & ~0xFFFu;
+  if (offset >= XHCI_MMIO_MAP_SIZE ||
+      mmio_phys > UINT64_MAX - page_offset)
+    return 0;
+
+  void *address = (void *)(uintptr_t)(mmio_phys + page_offset);
+  (void)VMM_MapPage(address, address, PAGE_WRITE | PAGE_PRESENT);
+  return 1;
+}
+
+/* Poll the Ethernet NIC and flush NetLog at most once per millisecond. */
+void xhci_service_background(void) {
+#ifdef VEXOS_NETLOG
+  uint64_t now = xhci_time_now_ticks();
+  uint64_t hz = xhci_time_frequency_hz();
+  uint64_t interval = hz / 1000u;
+  if (interval == 0u)
+    interval = 1u;
+
+  if (g_net_service_started && now - g_last_net_service_tsc < interval)
+    return;
+
+  g_net_service_started = 1u;
+  g_last_net_service_tsc = now;
+  netlog_service();
+#endif
+}
+
+static void xhci_delay_with_service(uint64_t duration_us) {
+  uint64_t deadline = xhci_time_deadline_us(duration_us);
+  while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
+    __asm__ volatile("pause");
+  }
+}
 
 // ERST entry is 16 bytes (xHCI 6.5)
 typedef struct {
@@ -595,6 +653,7 @@ static int xhci_port_wait_ready(volatile uint32_t *portsc,
   uint64_t start = xhci_time_now_ticks();
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
     uint32_t ps = *portsc;
     if (xhci_port_ready(ps)) {
       if (out_ps)
@@ -635,6 +694,7 @@ static int xhci_port_warm_reset(volatile uint32_t *portsc,
 
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
     ps = *portsc;
     if (!(ps & PORTSC_WPR)) {
       xhci_time_log_elapsed("port_warm_reset", start, "complete");
@@ -660,6 +720,7 @@ static int xhci_port_cold_reset(volatile uint32_t *portsc,
 
   uint64_t deadline = xhci_time_deadline_us(timeout_us);
   while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
     ps = *portsc;
     if (!(ps & PORTSC_PR)) {
       xhci_time_log_elapsed("port_cold_reset", start, "complete");
@@ -706,7 +767,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
       ps = *portsc;
       xhci_port_clear_w1c(portsc, &ps);
 
-      if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
+      if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 150000u, &ps)) {
         if (out_speed)
           *out_speed = xhci_port_speed(ps);
         return 1;
@@ -716,7 +777,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
     }
 
     xhci_port_force_u0(portsc);
-    if (xhci_port_wait_ready(portsc, port_id, "after_u0_request", 150000u, &ps)) {
+    if (xhci_port_wait_ready(portsc, port_id, "after_u0_request", 75000u, &ps)) {
       if (out_speed)
         *out_speed = xhci_port_speed(ps);
       return 1;
@@ -737,7 +798,7 @@ static int xhci_force_port_ready(volatile uint32_t *portsc, uint32_t port_id,
   xhci_port_clear_w1c(portsc, &ps);
   xhci_log_portsc(port_id, "[xHCI] After cold reset", ps);
 
-  if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 300000u, &ps)) {
+  if (xhci_port_wait_ready(portsc, port_id, "after_reset_ready", 150000u, &ps)) {
     if (out_speed)
       *out_speed = xhci_port_speed(ps);
     return 1;
@@ -761,6 +822,10 @@ static void xhci_bios_handoff(void) {
       return;
     }
 
+    if (!xhci_map_mmio_page((uint64_t)(uintptr_t)cap_regs, off)) {
+      serial_print("[xHCI] Extended capability page is outside the mapped BAR window\n");
+      return;
+    }
     volatile uint32_t *ext = (volatile uint32_t *)((uint64_t)cap_regs + off);
     uint32_t cap = ext[0];
     uint8_t cap_id = (uint8_t)(cap & 0xFFu);
@@ -772,6 +837,7 @@ static void xhci_bios_handoff(void) {
 
       uint64_t deadline = xhci_time_deadline_us(500000u);
       while (!xhci_time_expired(deadline)) {
+        xhci_service_background();
         if ((ext[0] & (1u << 16)) == 0) {
           serial_print("[xHCI] BIOS ownership released\n");
           return;
@@ -1164,6 +1230,11 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
  */
 void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
                uint16_t device_id, uint8_t revision_id) {
+  xhci_time_init();
+  xhci_time_log_clock();
+  uint64_t controller_init_start = xhci_time_now_ticks();
+  xhci_service_background();
+
   const xhci_quirks_t *quirks =
       xhci_quirks_detect(vendor_id, device_id, revision_id);
   serial_print("[xHCI] Initializing Controller at ");
@@ -1180,21 +1251,44 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   xhci_print_hex32(quirks->flags);
   serial_print("\n");
 
-  // 1) Map MMIO space
-  serial_print("[xHCI] Mapping MMIO...\n");
-  for (uint64_t i = 0; i < XHCI_MMIO_MAP_SIZE; i += 4096) {
-    VMM_MapPage((void *)(mmio_phys + i), (void *)(mmio_phys + i),
-                PAGE_WRITE | PAGE_PRESENT);
+  // 1) Map the capability page first, then map only operational, runtime,
+  // doorbell, and root-port pages actually addressed by this controller.
+  serial_print("[xHCI] Mapping required MMIO register pages...\n");
+  if (!xhci_map_mmio_range(mmio_phys, 4096u)) {
+    serial_print("[xHCI] ERROR: unable to map capability register page\n");
+    return;
   }
 
-  cap_regs = (xhci_cap_regs_t *)mmio_phys;
-  op_regs = (xhci_op_regs_t *)(mmio_phys + cap_regs->cap_length);
-
+  cap_regs = (xhci_cap_regs_t *)(uintptr_t)mmio_phys;
+  uint64_t cap_length = cap_regs->cap_length;
   uint32_t dboff = cap_regs->dboff & ~0x3u;
   uint32_t rtsoff = cap_regs->rtsoff & ~0x1Fu;
+  uint32_t max_slots_hint = cap_regs->hcs_params1 & 0xFFu;
+  uint32_t num_ports_hint = (cap_regs->hcs_params1 >> 24) & 0xFFu;
 
-  doorbell_regs = (uint32_t *)(mmio_phys + dboff);
-  runtime_regs = (xhci_runtime_regs_t *)(mmio_phys + rtsoff);
+  if (cap_length < 0x20u || cap_length >= XHCI_MMIO_MAP_SIZE ||
+      dboff == 0u || rtsoff == 0u || num_ports_hint == 0u) {
+    serial_print("[xHCI] ERROR: invalid capability register offsets\n");
+    return;
+  }
+
+  uint64_t op_end = cap_length + 0x400u +
+                    ((uint64_t)num_ports_hint * 0x10u);
+  uint64_t doorbell_end = (uint64_t)dboff +
+                          (((uint64_t)max_slots_hint + 1u) * 4u);
+  uint64_t runtime_end = (uint64_t)rtsoff + 0x40u;
+  uint64_t required_end = op_end;
+  if (doorbell_end > required_end) required_end = doorbell_end;
+  if (runtime_end > required_end) required_end = runtime_end;
+
+  if (!xhci_map_mmio_range(mmio_phys, required_end)) {
+    serial_print("[xHCI] ERROR: required MMIO registers exceed mapping limit\n");
+    return;
+  }
+
+  op_regs = (xhci_op_regs_t *)(uintptr_t)(mmio_phys + cap_length);
+  doorbell_regs = (uint32_t *)(uintptr_t)(mmio_phys + dboff);
+  runtime_regs = (xhci_runtime_regs_t *)(uintptr_t)(mmio_phys + rtsoff);
 
   serial_print("[xHCI] cap_length: ");
   {
@@ -1206,10 +1300,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   }
   serial_print("\n");
 
-  /* xHCI initializes before IRQ0 is enabled; prepare a standalone clock. */
-  xhci_time_init();
-  xhci_time_log_clock();
-  uint64_t controller_init_start = xhci_time_now_ticks();
+  /* xHCI initializes before IRQ0; all wait deadlines use the standalone TSC clock. */
   xhci_log_controller_registers("initial");
 
   // Real hardware often requires BIOS->OS ownership handoff.
@@ -1235,8 +1326,10 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
     uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while (!(op_regs->usb_sts & USB_STS_HCH) &&
-           !xhci_time_expired(deadline))
+           !xhci_time_expired(deadline)) {
+      xhci_service_background();
       __asm__ volatile("pause");
+    }
     if (!(op_regs->usb_sts & USB_STS_HCH)) {
       xhci_time_log_elapsed("controller_halt", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller did not halt; skipping this controller\n");
@@ -1256,8 +1349,10 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
     uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while ((op_regs->usb_cmd & USB_CMD_HCRST) &&
-           !xhci_time_expired(deadline))
+           !xhci_time_expired(deadline)) {
+      xhci_service_background();
       __asm__ volatile("pause");
+    }
     if (op_regs->usb_cmd & USB_CMD_HCRST) {
       xhci_time_log_elapsed("controller_reset", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller reset timed out; skipping this controller\n");
@@ -1277,8 +1372,10 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
     uint64_t wait_start = xhci_time_now_ticks();
     uint64_t deadline = xhci_time_deadline_us(1000000u);
     while ((op_regs->usb_sts & USB_STS_CNR) &&
-           !xhci_time_expired(deadline))
+           !xhci_time_expired(deadline)) {
+      xhci_service_background();
       __asm__ volatile("pause");
+    }
     if (op_regs->usb_sts & USB_STS_CNR) {
       xhci_time_log_elapsed("controller_not_ready", wait_start, "timeout");
       serial_print("[xHCI] ERROR: controller not ready after reset; skipping this controller\n");
@@ -1463,7 +1560,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   if (powered_any_port) {
     serial_print("[xHCI] Waiting 100 ms for root-port power-good...\n");
     uint64_t power_good_start = xhci_time_now_ticks();
-    xhci_time_delay_us(100000u);
+    xhci_delay_with_service(100000u);
     xhci_time_log_elapsed("root_port_power_good", power_good_start, "complete");
   }
 
@@ -1477,7 +1574,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
       ++connected_ports;
       xhci_log_portsc(port_id, "[xHCI] Device detected", ps);
     } else {
-      xhci_log_portsc(port_id, "[xHCI] Port", ps);
+      /* Disconnected ports need no boot-time reset or per-port serial dump. */
       continue;
     }
 
