@@ -126,13 +126,12 @@ static int dma_address_ok(const void *ptr, size_t bytes) {
 static void log_mac(void) {
     serial_print("[E1000E] MAC=");
     for (uint32_t i = 0; i < 6; ++i) {
-        char out[3];
         const char hex[] = "0123456789ABCDEF";
-        out[0] = hex[mac[i] >> 4];
-        out[1] = hex[mac[i] & 15u];
-        out[2] = (i == 5) ? '\n' : ':';
+        char out[2] = {hex[mac[i] >> 4], 0};
         serial_print(out);
-        if (i != 5) { char end[2] = {':', 0}; (void)end; }
+        out[0] = hex[mac[i] & 15u];
+        serial_print(out);
+        serial_print(i == 5 ? "\\n" : ":");
     }
 }
 
