@@ -2,7 +2,20 @@
 
 set -e
 
-if ! make all; then
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Python 3 is required to validate the NetLog destination IP."
+    exit 1
+fi
+
+# Default to QEMU's host endpoint. For Windows receiving through WSL, set
+# NETLOG_DESTINATION to the Windows host gateway shown by `ip route` in WSL.
+NETLOG_DESTINATION=${NETLOG_DESTINATION:-10.0.2.2}
+if ! NETLOG_DESTINATION_IPV4=$(python3 -c 'import ipaddress, sys; print("0x%08Xu" % int(ipaddress.IPv4Address(sys.argv[1])))' "$NETLOG_DESTINATION"); then
+    echo "Invalid NETLOG_DESTINATION IPv4 address: $NETLOG_DESTINATION"
+    exit 1
+fi
+
+if ! make all NETLOG_DESTINATION_IPV4="$NETLOG_DESTINATION_IPV4"; then
     echo "Build failed; not launching QEMU."
     exit 1
 fi
@@ -169,6 +182,6 @@ qemu-system-x86_64 \
     -device qemu-xhci \
     -device usb-kbd \
     -device usb-tablet \
-    -nic none \
+    -nic user,model=e1000e \
     -serial mon:stdio \
     -boot order=c,menu=off
