@@ -2,6 +2,7 @@
 #include "bootlog.h"
 #include "ahci.h"
 #include "e1000e.h"
+#include "alx.h"
 #include "usb/xhci.h"
 #include "usb/xhci/xhci_quirks.h"
 
@@ -217,6 +218,14 @@ void pci_enumerate() {
                     serial_print("[PCI] Found Intel e1000e Ethernet controller\n");
                     if (!e1000e_init((uint8_t)bus, slot, func))
                         serial_print("[PCI] e1000e driver initialization failed\n");
+                }
+
+                /* Qualcomm Atheros AR8171/AR8175 PCIe Ethernet controller. */
+                if (vendor_id == 0x1969u && device_id == 0x10A1u &&
+                    class_code == 0x02u) {
+                    serial_print("[PCI] Found Qualcomm Atheros AR8171 Ethernet controller\n");
+                    if (!alx_init((uint8_t)bus, slot, func))
+                        serial_print("[PCI] ALX AR8171 driver initialization failed\n");
                 }
 
                 // SATA controller in AHCI programming-interface mode:
