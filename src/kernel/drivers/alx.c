@@ -71,7 +71,38 @@ void serial_print(const char *str);
 #define ALX_MASTER_IRQMOD1_EN         (1u << 10)
 #define ALX_MASTER_IRQMOD2_EN         (1u << 11)
 #define ALX_MASTER_PCLKSEL_SRDS       (1u << 12)
+#define ALX_MASTER_WAKEN_25M          (1u << 5)
 #define ALX_MAC_STS_IDLE              0x0Fu
+
+/* ALX PCIe/power-management registers and fields (Linux alx parity). */
+#define ALX_UE_SVRT                   0x010Cu
+#define ALX_PDLL_TRNS1                0x1104u
+#define ALX_PMCTRL                    0x12F8u
+#define ALX_WOL0                      0x14A0u
+
+#define ALX_UE_SVRT_DLPROTERR         (1u << 4)
+#define ALX_UE_SVRT_FCPROTERR         (1u << 13)
+#define ALX_PDLL_TRNS1_D3PLLOFF_EN    (1u << 11)
+
+#define ALX_PMCTRL_HOTRST_WTEN        (1u << 31)
+#define ALX_PMCTRL_ASPM_FCEN          (1u << 30)
+#define ALX_PMCTRL_SADLY_EN           (1u << 29)
+#define ALX_PMCTRL_TXL1_AFTER_L0S     (1u << 19)
+#define ALX_PMCTRL_RCVR_WT_1US        (1u << 15)
+#define ALX_PMCTRL_L1_CLKSW_EN        (1u << 13)
+#define ALX_PMCTRL_L0S_EN             (1u << 12)
+#define ALX_PMCTRL_RXL1_AFTER_L0S     (1u << 11)
+#define ALX_PMCTRL_L1_BUFSRX_EN       (1u << 7)
+#define ALX_PMCTRL_L1_SRDSRX_PWD      (1u << 6)
+#define ALX_PMCTRL_L1_SRDSPLL_EN      (1u << 5)
+#define ALX_PMCTRL_L1_SRDS_EN         (1u << 4)
+#define ALX_PMCTRL_L1_EN              (1u << 3)
+#define ALX_PMCTRL_LCKDET_TIMER_SHIFT 24u
+#define ALX_PMCTRL_L1REQ_TO_SHIFT     20u
+#define ALX_PMCTRL_L1_TIMER_SHIFT     16u
+#define ALX_PMCTRL_LCKDET_TIMER_MASK  0x0Fu
+#define ALX_PMCTRL_L1REQ_TO_MASK      0x0Fu
+#define ALX_PMCTRL_L1_TIMER_MASK      0x07u
 
 #define ALX_PHY_CTRL_DSPRST_OUT       (1u << 0)
 #define ALX_PHY_CTRL_LED_MODE         (1u << 2)
@@ -197,6 +228,7 @@ static uint8_t g_mac_started;
 static uint8_t g_link_speed_code;
 static uint8_t g_link_full_duplex;
 static uint8_t g_revision;
+static uint8_t g_revision_cr;
 static uint16_t g_tx_next;
 static uint16_t g_rx_read;
 static uint16_t g_rx_write;
@@ -302,6 +334,85 @@ static int alx_phy_debug_read(uint16_t reg, uint16_t *value) {
     return value &&
            alx_mdio_write(ALX_MII_DBG_ADDR, reg) &&
            alx_mdio_read(ALX_MII_DBG_DATA, value);
+}
+
+/*
+ * Keep the PCIe clock and power state in the same known-good configuration
+ * used by the upstream ALX driver before touching the PHY. On some laptop
+ * chipsets the PHY can answer MDIO reads while its 25 MHz/PCIe clock policy
+ * is still wrong, leaving auto-negotiation enabled but never establishing
+ * carrier.
+ */
+static void alx_enable_aspm(uint8_t l0s_enable, uint8_t l1_enable) {
+    uint32_t value = alx_read32(ALX_PMCTRL);
+
+    value &= ~((uint32_t)ALX_PMCTRL_LCKDET_TIMER_MASK
+               << ALX_PMCTRL_LCKDET_TIMER_SHIFT);
+    value |= (0x0Cu << ALX_PMCTRL_LCKDET_TIMER_SHIFT);
+    value |= ALX_PMCTRL_RCVR_WT_1US | ALX_PMCTRL_L1_CLKSW_EN |
+             ALX_PMCTRL_L1_SRDSRX_PWD;
+
+    value &= ~((uint32_t)ALX_PMCTRL_L1REQ_TO_MASK
+               << ALX_PMCTRL_L1REQ_TO_SHIFT);
+    value |= (0x0Fu << ALX_PMCTRL_L1REQ_TO_SHIFT);
+    value &= ~((uint32_t)ALX_PMCTRL_L1_TIMER_MASK
+               << ALX_PMCTRL_L1_TIMER_SHIFT);
+    value |= (4u << ALX_PMCTRL_L1_TIMER_SHIFT);
+
+    value &= ~(ALX_PMCTRL_L1_SRDS_EN | ALX_PMCTRL_L1_SRDSPLL_EN |
+               ALX_PMCTRL_L1_BUFSRX_EN | ALX_PMCTRL_SADLY_EN |
+               ALX_PMCTRL_HOTRST_WTEN | ALX_PMCTRL_L0S_EN |
+               ALX_PMCTRL_L1_EN | ALX_PMCTRL_ASPM_FCEN |
+               ALX_PMCTRL_TXL1_AFTER_L0S | ALX_PMCTRL_RXL1_AFTER_L0S);
+
+    /* A0/A1 with CR silicon requires the SRDS L1 clock path. */
+    if (g_revision <= 1u && g_revision_cr)
+        value |= ALX_PMCTRL_L1_SRDS_EN | ALX_PMCTRL_L1_SRDSPLL_EN;
+
+    if (l0s_enable)
+        value |= ALX_PMCTRL_L0S_EN | ALX_PMCTRL_ASPM_FCEN;
+    if (l1_enable)
+        value |= ALX_PMCTRL_L1_EN | ALX_PMCTRL_ASPM_FCEN;
+
+    alx_write32(ALX_PMCTRL, value);
+}
+
+static void alx_reset_pcie(void) {
+    uint32_t value;
+
+    /* Clear stale wake state and prevent the PLL from powering off in D3. */
+    alx_write32(ALX_WOL0, 0u);
+    value = alx_read32(ALX_PDLL_TRNS1);
+    alx_write32(ALX_PDLL_TRNS1,
+                value & ~ALX_PDLL_TRNS1_D3PLLOFF_EN);
+
+    /* Mask the PCIe protocol errors covered by the upstream ALX workaround. */
+    value = alx_read32(ALX_UE_SVRT);
+    value &= ~(ALX_UE_SVRT_DLPROTERR | ALX_UE_SVRT_FCPROTERR);
+    alx_write32(ALX_UE_SVRT, value);
+
+    /*
+     * Keep the 25 MHz wake clock enabled. A0/A1 CR parts select the SRDS
+     * clock; later revisions use the non-SRDS PCLK source.
+     */
+    value = alx_read32(ALX_MASTER);
+    if (g_revision <= 1u && g_revision_cr) {
+        if ((value & ALX_MASTER_WAKEN_25M) == 0u ||
+            (value & ALX_MASTER_PCLKSEL_SRDS) == 0u) {
+            value |= ALX_MASTER_PCLKSEL_SRDS | ALX_MASTER_WAKEN_25M;
+            alx_write32(ALX_MASTER, value);
+        }
+    } else {
+        if ((value & ALX_MASTER_WAKEN_25M) == 0u ||
+            (value & ALX_MASTER_PCLKSEL_SRDS) != 0u) {
+            value &= ~ALX_MASTER_PCLKSEL_SRDS;
+            value |= ALX_MASTER_WAKEN_25M;
+            alx_write32(ALX_MASTER, value);
+        }
+    }
+
+    alx_enable_aspm(1u, 1u);
+    serial_print("[ALX] PCIe power and clock initialization complete\n");
 }
 
 static int alx_reset_phy(void) {
@@ -769,8 +880,8 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
     uint32_t command_status =
         pci_config_read_dword(bus, slot, function, 0x04u);
     uint16_t command = (uint16_t)command_status;
-    command |= 0x0006u;       /* PCI memory decoding + bus mastering. */
-    command &= (uint16_t)~0x0400u;
+    command |= 0x0007u;       /* PCI I/O, memory decoding + bus mastering. */
+    command &= (uint16_t)~0x0400u; /* Ensure INTx is not disabled. */
     pci_config_write_dword(bus, slot, function, 0x04u, command);
 
     const uint64_t map_flags = PAGE_PRESENT | PAGE_WRITE |
@@ -787,7 +898,9 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
 
     uint32_t class_revision =
         pci_config_read_dword(bus, slot, function, 0x08u);
-    g_revision = (uint8_t)class_revision >> 3;
+    uint8_t revision_id = (uint8_t)class_revision;
+    g_revision = revision_id >> 3;
+    g_revision_cr = revision_id & 1u;
     if (g_revision > 3u) {
         serial_print("[ALX] Unsupported ALX silicon revision\n");
         g_mmio = NULL;
@@ -797,6 +910,9 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
     serial_print("[ALX] Qualcomm Atheros AR8171 detected (1969:10A1)\n");
     alx_write32(ALX_IMR, 0u);
     alx_write32(ALX_MSIX_MASK, 0xFFFFFFFFu);
+
+    /* This must precede PHY reset/auto-negotiation, as in Linux alx. */
+    alx_reset_pcie();
 
     if (!alx_reset_phy()) {
         serial_print("[ALX] PHY reset/MDIO initialization failed\n");
