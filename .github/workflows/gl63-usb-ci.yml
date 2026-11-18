@@ -93,8 +93,8 @@ jobs:
 
           # Q35 provides a PCIe-oriented Intel-style chipset topology.
           # QEMU e1000e supplies an emulated Intel 82574L PCIe Ethernet NIC.
-          # This currently tests PCI discovery only: VexOS has no Ethernet
-          # driver or network stack yet, so no packets/DHCP/ping are claimed.
+          # VexOS initializes the polled e1000e driver and CI sends one ARP
+          # broadcast frame. This is not a DHCP/DNS/IP stack test.
           # QEMU's qemu-xhci is a generic emulated xHCI controller, not the
           # exact Intel HM370 controller found in some MSI GL63 variants.
           # Q35 uses the PCIe root bus (pcie.0), not the i440fx pci.0 bus.
@@ -256,7 +256,18 @@ jobs:
             exit 1
           fi
           echo "PASS: VexOS PCI enumeration detected the emulated Intel e1000e PCIe Ethernet controller (8086:10D3)."
-          echo "NOTE: Ethernet link, packet TX/RX, ARP, DHCP, DNS, and ping are not tested; a network driver/stack is not implemented yet."
+          if ! grep -Fq "[E1000E] Intel 82574L initialized; RX/TX DMA rings ready" serial.log; then
+            echo "FAIL: e1000e driver did not initialize its DMA rings."
+            cat serial.log
+            exit 1
+          fi
+          if ! grep -Fq "[E1000E] CI ARP broadcast frame transmitted (TX DD)" serial.log; then
+            echo "FAIL: e1000e did not complete the CI ARP frame transmission."
+            cat serial.log
+            exit 1
+          fi
+          echo "PASS: e1000e initialized RX/TX DMA rings and completed an Ethernet frame transmission."
+          echo "NOTE: RX polling is implemented, but DHCP, DNS, IPv4, sockets, and internet access are not yet implemented."
           grep -E "\\[PCI\\]|\\[xHCI\\]|\\[USB\\]|\\[HID\\]" serial.log || true
 
       - name: Upload boot diagnostics
