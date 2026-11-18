@@ -12,5 +12,7 @@
 void netlog_append(const char *text);
 int netlog_init(void);
 void netlog_poll(void);
+void netlog_flush_now(void);
+void netlog_service(void);
 
 #endif
