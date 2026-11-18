@@ -27,8 +27,11 @@ CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)
 CFLAGS_KERNEL += -MMD -MP
 
 # NetLog is a development transport; official release builds omit it.
+# Set NETLOG_DESTINATION_IPV4 to a 32-bit network-order IPv4 value when the
+# receiver is not running on QEMU's default host address (10.0.2.2).
+NETLOG_DESTINATION_IPV4 ?= 0x0A000202u
 ifneq ($(VEXOS_RELEASE),1)
-CFLAGS_KERNEL += -DVEXOS_NETLOG
+CFLAGS_KERNEL += -DVEXOS_NETLOG -DNETLOG_DESTINATION_IPV4=$(NETLOG_DESTINATION_IPV4)
 endif
 CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
 
