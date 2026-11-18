@@ -392,6 +392,14 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
     off += bLength;
   }
 
+  /* This kernel currently has HID input support only. Do not spend an
+     additional control transfer configuring storage/network/vendor devices
+     that have no class driver yet. */
+  if (dev->hid_ifnum == 0xFFu) {
+    serial_print("[USB] No supported HID interface; leaving device unconfigured\n");
+    return 1;
+  }
+
   if (cfg_value == 0)
     cfg_value = 1;
   uint64_t setcfg = 0;
