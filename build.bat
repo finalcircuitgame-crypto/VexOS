@@ -15,12 +15,15 @@ if not defined WSL_DIR (
     exit /b 1
 )
 
+REM Optional static IPv4 overrides; build.sh validates each address.
+set "NETLOG_ENV="
+if defined NETLOG_LOCAL_IP set "NETLOG_ENV=%NETLOG_ENV% NETLOG_LOCAL_IP=%NETLOG_LOCAL_IP%"
+if defined NETLOG_NETMASK set "NETLOG_ENV=%NETLOG_ENV% NETLOG_NETMASK=%NETLOG_NETMASK%"
+if defined NETLOG_GATEWAY set "NETLOG_ENV=%NETLOG_ENV% NETLOG_GATEWAY=%NETLOG_GATEWAY%"
+if defined NETLOG_DESTINATION set "NETLOG_ENV=%NETLOG_ENV% NETLOG_DESTINATION=%NETLOG_DESTINATION%"
+
 echo [BUILD] Running build.sh in WSL...
-if defined NETLOG_DESTINATION (
-    wsl.exe --cd "%WSL_DIR%" env NETLOG_DESTINATION="%NETLOG_DESTINATION%" bash ./build.sh
-) else (
-    wsl.exe --cd "%WSL_DIR%" bash ./build.sh
-)
+wsl.exe --cd "%WSL_DIR%" env %NETLOG_ENV% bash ./build.sh
 
 if errorlevel 1 (
     echo.
