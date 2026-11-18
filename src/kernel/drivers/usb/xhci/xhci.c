@@ -1205,9 +1205,11 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
     serial_print("[xHCI] Config descriptor / set config failed\n");
   }
 
-  // Basic HID bring-up: try parsing report descriptor first, then choose protocol.
+  // Basic HID bring-up. Boot keyboards already have a fixed 8-byte
+  // report format, so do not fetch a mouse report descriptor for them.
   if (dev->hid_ifnum != 0xFF) {
-    xhci_hid_try_parse_mouse_report_desc(dev);
+    if (!(dev->hid_subclass == 1 && dev->hid_proto == 1))
+      xhci_hid_try_parse_mouse_report_desc(dev);
 
     if (dev->hid_subclass == 1) {
       if (dev->hid_proto == 1) {
