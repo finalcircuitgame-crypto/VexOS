@@ -79,10 +79,11 @@ int xhci_poll_event(xhci_trb_t *out) {
 }
 
 int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
-  /* Command completion should normally be immediate; cap broken hardware at 250 ms. */
+  /* Commands normally complete quickly; keep a bounded 100 ms failure path. */
   uint64_t start = xhci_time_now_ticks();
-  uint64_t deadline = xhci_time_deadline_us(250000u);
+  uint64_t deadline = xhci_time_deadline_us(100000u);
   while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
       if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
@@ -136,8 +137,9 @@ int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
 int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
   /* Slow/absent USB devices must not stall boot for an unbounded spin budget. */
   uint64_t start = xhci_time_now_ticks();
-  uint64_t deadline = xhci_time_deadline_us(500000u);
+  uint64_t deadline = xhci_time_deadline_us(250000u);
   while (!xhci_time_expired(deadline)) {
+    xhci_service_background();
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
       if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT &&
