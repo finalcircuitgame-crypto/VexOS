@@ -25,6 +25,11 @@ VEXOS_BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown
 
 CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
 CFLAGS_KERNEL += -MMD -MP
+
+# NetLog is a development transport; official release builds omit it.
+ifneq ($(VEXOS_RELEASE),1)
+CFLAGS_KERNEL += -DVEXOS_NETLOG
+endif
 CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
 
 # Refresh the embedded Git build ID on every make invocation.
@@ -62,6 +67,9 @@ STORAGE_IMG = $(DISTDIR)/storage.img
 # Kernel Objects
 # Recursively find all C and S files
 KERNEL_SRCS := $(shell find $(KERNELDIR) -name "*.c")
+ifeq ($(VEXOS_RELEASE),1)
+KERNEL_SRCS := $(filter-out $(KERNELDIR)/net/netlog.c,$(KERNEL_SRCS))
+endif
 KERNEL_ASMS := $(shell find $(KERNELDIR) -name "*.s")
 
 # Map to object files in OBJDIR, maintaining directory structure
