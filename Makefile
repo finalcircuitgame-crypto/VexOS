@@ -27,8 +27,9 @@ CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)
 CFLAGS_KERNEL += -MMD -MP
 
 # NetLog is a development transport; official release builds omit it.
-# Set NETLOG_DESTINATION_IPV4 to a 32-bit network-order IPv4 value when the
-# receiver is not running on QEMU's default host address (10.0.2.2).
+# The build scripts convert dotted IPv4 values to these 32-bit network-order
+# constants. Defaults match QEMU user networking; physical-LAN builds should
+# set the local address, netmask, gateway, and receiver independently.
 NETLOG_LOCAL_IPV4 ?= 0x0A00020Fu
 NETLOG_NETMASK_IPV4 ?= 0xFFFFFF00u
 NETLOG_GATEWAY_IPV4 ?= 0x0A000202u
