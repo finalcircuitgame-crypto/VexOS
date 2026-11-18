@@ -100,12 +100,12 @@ int netlog_init(void) {
     return 1;
 }
 
-void netlog_poll(void) {
+static void netlog_flush_internal(int force) {
     if (!g_ready || !g_device || !g_device->link_up)
         return;
 
     const uint64_t now = Timer_Ticks();
-    if (now - g_last_send < NETLOG_SEND_INTERVAL_TICKS)
+    if (!force && now - g_last_send < NETLOG_SEND_INTERVAL_TICKS)
         return;
 
     uint8_t packet[NETLOG_MAX_PAYLOAD];
@@ -132,6 +132,10 @@ void netlog_poll(void) {
     if (length == 0u)
         return;
 
+    /*
+     * udp_send() succeeds when ARP accepts/queues the IPv4 packet. The service
+     * pump keeps polling the NIC until the ARP reply releases that queued frame.
+     */
     if (!udp_send(g_device, NETLOG_DESTINATION_IP, NETLOG_SOURCE_PORT,
                   NETLOG_DESTINATION_PORT, packet, length))
         return;
@@ -145,4 +149,19 @@ void netlog_poll(void) {
     }
     netlog_irq_restore(flags);
     g_last_send = now;
+}
+
+void netlog_flush_now(void) {
+    netlog_flush_internal(1);
+}
+
+void netlog_poll(void) {
+    netlog_flush_internal(0);
+}
+
+void netlog_service(void) {
+    /* Safe before PIT_Init: the tick-based ARP expiry clock has not advanced. */
+    netdev_poll_all(32u);
+    arp_poll();
+    netlog_flush_now();
 }
