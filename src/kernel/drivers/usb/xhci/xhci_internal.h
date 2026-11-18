@@ -86,6 +86,7 @@ uint64_t xhci_time_now_ticks(void);
 void xhci_time_log_clock(void);
 void xhci_time_log_elapsed(const char *stage, uint64_t start_ticks,
                            const char *result);
+void xhci_service_background(void);
 
 /*
  * Publish DMA descriptors before updating a Link TRB or ringing an xHCI
