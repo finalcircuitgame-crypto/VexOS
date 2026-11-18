@@ -178,6 +178,10 @@ jobs:
           fi
 
           touch serial.log
+          : > netlog.log
+          python3 tools/netlog_receiver.py --host 0.0.0.0 >netlog.log 2>&1 &
+          netlog_receiver_pid=$!
+          sleep 0.2
           # Put the serial console beside the 1280x800 guest display so kernel
           # initialization and boot diagnostics are visible in the MP4 itself.
           xterm -geometry 80x48+1280+0 -fa Monospace -fs 10 -e bash -lc 'tail -n +1 -F serial.log' >serial-viewer.log 2>&1 &
@@ -199,6 +203,7 @@ jobs:
           echo "Recording started: $recording"
 
           qemu_pid=""
+          netlog_receiver_pid="${netlog_receiver_pid:-}"
           finish_test_capture() {
             test_status=$?
             trap - EXIT
@@ -213,6 +218,10 @@ jobs:
               ffmpeg_status=1
             fi
             kill "$serial_viewer_pid" 2>/dev/null || true
+            if [ -n "$netlog_receiver_pid" ]; then
+              kill "$netlog_receiver_pid" 2>/dev/null || true
+              wait "$netlog_receiver_pid" 2>/dev/null || true
+            fi
             kill "$xvfb_pid" 2>/dev/null
             wait "$xvfb_pid" 2>/dev/null
             if [ "$test_status" -eq 0 ]; then
@@ -255,6 +264,8 @@ jobs:
 
           qemu-system-x86_64 \
             -machine pc \
+            -netdev user,id=net0 \
+            -device e1000e,netdev=net0 \
             -vga std \
             -m 512M \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$OVMF_CODE" \
@@ -289,6 +300,21 @@ jobs:
             fi
             sleep 0.1
           done
+
+          # Verify a real UDP log datagram reached the host-side receiver.
+          for i in $(seq 1 150); do
+            if grep -Fq "[NETLOG] UDP transport ready" netlog.log 2>/dev/null; then
+              break
+            fi
+            sleep 0.1
+          done
+          if ! grep -Fq "[NETLOG] UDP transport ready" netlog.log; then
+            echo "NetLog UDP packet did not reach the host receiver."
+            cat netlog.log || true
+            cat serial.log || true
+            exit 1
+          fi
+          echo "[CI] NetLog UDP packet reached host receiver"
 
           for marker in \
             "[KERNEL] Entered kernel_main" \
