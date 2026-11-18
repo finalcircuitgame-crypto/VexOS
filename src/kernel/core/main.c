@@ -17,6 +17,7 @@
 #include "pci.h"
 #include "e1000e.h"
 #include "e1000e_netdev.h"
+#include "alx_netdev.h"
 #include "netdev.h"
 #include "ethernet.h"
 #include "arp.h"
@@ -1257,6 +1258,7 @@ void kernel_main(BootInfo *bootInfo) {
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
   (void)e1000e_netdev_attach();
+  (void)alx_netdev_attach();
 #ifdef VEXOS_NETLOG
   (void)netlog_init();
 #endif
