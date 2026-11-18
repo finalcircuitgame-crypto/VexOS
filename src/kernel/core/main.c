@@ -15,6 +15,7 @@
 #include "vmm.h"
 #include "../desktop/graphics/font_engine.h"
 #include "pci.h"
+#include "e1000e.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1231,6 +1232,8 @@ void kernel_main(BootInfo *bootInfo) {
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
 #ifdef VEXOS_CI_INPUT_TEST
+  if (!e1000e_ci_transmit_test())
+    ci_memory_test_fail("E1000e initialization or ARP frame transmission");
   ci_ahci_self_test();
 #endif
   hw_profile_update_pci_gpu();
