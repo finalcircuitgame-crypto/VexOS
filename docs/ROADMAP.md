@@ -115,12 +115,12 @@ Implemented on `feature/network-foundation`:
 - UDP receive validation for header size, datagram length, and IPv4 pseudo-header checksum; zero checksums are accepted as permitted by IPv4 UDP.
 - UDP send builds checksummed datagrams and hands them to the existing IPv4 routing/ARP path.
 - Host-side UDP tests cover checksum validation, port dispatch, unbound ports, payload preservation, and outbound checksums.
+- Development-only NetLog streams the existing serial log through a bounded 8 KiB queue and checksummed UDP datagrams; it is disabled in release builds and includes a Windows-compatible receiver script.
 - QEMU CI booted the E1000 device successfully and completed descriptor-ring initialization checks.
 
 Next milestones:
-1. UDP transport and temporary development-only NetLog over UDP (disabled in official builds).
-2. DHCP and DNS clients.
-3. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
+1. DHCP and DNS clients.
+2. TCP with sequence tracking, acknowledgements, retransmission, flow control, and connection lifecycle.
 4. User-mode socket API and loopback/QEMU integration tests.
 5. ICMP error messages and broader network diagnostics.
 6. Add further device drivers based on physical hardware inventory; do not infer laptop NIC compatibility from QEMU tests.
