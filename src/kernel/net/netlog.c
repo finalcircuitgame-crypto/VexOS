@@ -1,12 +1,15 @@
 #include "netlog.h"
 
 #include "netdev.h"
+#include "arp.h"
 #include "ipv4.h"
 #include "udp.h"
 #include "interrupts.h"
 
 #include <stddef.h>
 #include <stdint.h>
+
+void serial_print(const char *str);
 
 /*
  * QEMU user-mode networking defaults:
@@ -108,8 +111,10 @@ void netlog_poll(void) {
 
     if (g_drop_notice_pending) {
         static const char notice[] = "[NETLOG] queue overflow: older log bytes were dropped\n";
-        while (length < sizeof(notice) - 1u)
-            packet[length++] = (uint8_t)notice[length];
+        while (length < sizeof(notice) - 1u) {
+            packet[length] = (uint8_t)notice[length];
+            ++length;
+        }
         send_drop_notice = 1;
     } else {
         while (length < NETLOG_MAX_PAYLOAD && length < g_used) {
