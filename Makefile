@@ -67,6 +67,9 @@ STORAGE_IMG = $(DISTDIR)/storage.img
 # Kernel Objects
 # Recursively find all C and S files
 KERNEL_SRCS := $(shell find $(KERNELDIR) -name "*.c")
+ifeq ($(VEXOS_RELEASE),1)
+KERNEL_SRCS := $(filter-out $(KERNELDIR)/net/netlog.c,$(KERNEL_SRCS))
+endif
 KERNEL_ASMS := $(shell find $(KERNELDIR) -name "*.s")
 
 # Map to object files in OBJDIR, maintaining directory structure
