@@ -295,6 +295,12 @@ static int alx_phy_debug_write(uint16_t reg, uint16_t value) {
            alx_mdio_write(ALX_MII_DBG_DATA, value);
 }
 
+static int alx_phy_debug_read(uint16_t reg, uint16_t *value) {
+    return value &&
+           alx_mdio_write(ALX_MII_DBG_ADDR, reg) &&
+           alx_mdio_read(ALX_MII_DBG_DATA, value);
+}
+
 static int alx_reset_phy(void) {
     uint32_t value = alx_read32(ALX_PHY_CTRL);
     value &= ~(ALX_PHY_CTRL_DSPRST_OUT | ALX_PHY_CTRL_IDDQ |
@@ -318,7 +324,7 @@ static int alx_reset_phy(void) {
         return 0;
 
     uint16_t green = 0;
-    if (!alx_mdio_read(ALX_MII_DBG_ADDR, &green))
+    if (!alx_phy_debug_read(0x3Du, &green))
         return 0;
     if (!alx_phy_debug_write(0x3Du, (uint16_t)(green & ~0x0080u)))
         return 0;
@@ -806,6 +812,7 @@ int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
 
     int valid = descriptor_count == 1u &&
                 descriptor_index < ALX_RING_COUNT &&
+                descriptor_index == g_rx_read &&
                 packet_length >= 18u &&
                 packet_length <= ALX_RX_BUFFER_BYTES &&
                 packet_length >= 4u &&
