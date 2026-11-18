@@ -562,7 +562,8 @@ static void alx_configure_basic(void) {
                            (5u << 8) | (5u << 4) | 5u);
 
     value = ALX_RXQ0_NUM_RFD_PREF | ALX_RXQ0_IDT_TBL_SIZE |
-            ALX_RXQ0_RSS_HSTYP_ALL | ALX_RXQ0_IPV6_PARSE_EN;
+            ALX_RXQ0_RSS_HSTYP_ALL | ALX_RXQ0_IPV6_PARSE_EN |
+            ALX_RXQ0_ASPM_THRESH_100M;
     alx_write32(ALX_RXQ0, value);
 
     uint32_t sram_bytes =
