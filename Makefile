@@ -81,9 +81,16 @@ KERNEL_OBJS := $(patsubst $(KERNELDIR)/%.c, $(OBJDIR)/%.o, $(KERNEL_SRCS)) \
 KERNEL_DEPS := $(KERNEL_OBJS:.o=.d)
 -include $(KERNEL_DEPS)
 
-# The Makefile controls compiler flags and dependency generation. Rebuild the
-# existing objects once so every kernel translation unit gains a .d file.
-$(KERNEL_OBJS): Makefile
+# Rebuild kernel objects only when their effective compiler flags change.
+# The forced check is cheap; the stamp timestamp changes only when flags differ.
+KERNEL_FLAGS_STAMP = $(OBJDIR)/.kernel-cflags
+.PHONY: FORCE_KERNEL_FLAGS
+FORCE_KERNEL_FLAGS:
+$(KERNEL_FLAGS_STAMP): FORCE_KERNEL_FLAGS
+	@mkdir -p $(dir $@)
+	@printf '%s\\n' '$(CFLAGS_KERNEL)' > $@.tmp
+	@if ! cmp -s $@.tmp $@ 2>/dev/null; then mv $@.tmp $@; else rm -f $@.tmp; fi
+$(KERNEL_OBJS): $(KERNEL_FLAGS_STAMP)
 
 FONT_OBJ = $(OBJDIR)/font.o
 
@@ -338,13 +345,23 @@ DOOM_OBJS = $(addprefix $(DOOMOBJDIR)/,$(addsuffix .o,$(DOOMCORE_NAMES))) \
             $(DOOMOBJDIR)/w_wad.o \
             $(DOOMOBJDIR)/doomgeneric_vexos.o $(DOOMOBJDIR)/libc.o $(DOOMOBJDIR)/doom_start.o $(DOOMOBJDIR)/doom_entry.o
 
-# Makefile changes alter Doom compile flags; rebuild stale objects (e.g. 640x400 -> 320x200).
-$(DOOM_OBJS): Makefile
 # Doom runs at 128 GiB, leaving the 256 GiB user heap/mmap region free, outside the kernel's low identity map.
 DOOM_CFLAGS = -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -mno-red-zone -mcmodel=large -O2 -DNORMALUNIX -D_DEFAULT_SOURCE -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -I$(DOOMDIR) -I$(SRCDIR)/usermode/libc
 ifeq ($(VEXOS_CI),1)
 DOOM_CFLAGS += -DVEXOS_CI_INPUT_TEST
 endif
+
+# Track the actual Doom compiler flags, not the Makefile timestamp. Editing an
+# unrelated Makefile rule therefore won't recompile the Doom submodule.
+DOOM_FLAGS_STAMP = $(DOOMOBJDIR)/.doom-cflags
+.PHONY: FORCE_DOOM_FLAGS
+FORCE_DOOM_FLAGS:
+$(DOOM_FLAGS_STAMP): FORCE_DOOM_FLAGS
+	@mkdir -p $(dir $@)
+	@printf '%s\\n' '$(DOOM_CFLAGS)' > $@.tmp
+	@if ! cmp -s $@.tmp $@ 2>/dev/null; then mv $@.tmp $@; else rm -f $@.tmp; fi
+$(DOOM_OBJS): $(DOOM_FLAGS_STAMP)
+
 DOOM_LDFLAGS = -nostdlib -static -no-pie -Wl,-T,$(SRCDIR)/usermode/doom/linker.ld -Wl,--build-id=none
 
 .PHONY: doom
@@ -357,13 +374,13 @@ $(DOOMDIST): $(DOOM_OBJS) $(SRCDIR)/usermode/doom/linker.ld
 
 
 # Patch upstream DoomGeneric input in a generated build copy. Do not modify the submodule.
-$(DOOMOBJDIR)/i_input.o: $(DOOMDIR)/i_input.c tools/patch_doom_input.py Makefile
+$(DOOMOBJDIR)/i_input.o: $(DOOMDIR)/i_input.c tools/patch_doom_input.py
 	@mkdir -p $(DOOMOBJDIR)
 	python3 tools/patch_doom_input.py --source $< --output $(DOOMOBJDIR)/i_input_vexos.c
 	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/i_input_vexos.c -o $@
 
 # Reconcile live USB arrow state immediately before Doom builds movement commands.
-$(DOOMOBJDIR)/g_game.o: $(DOOMDIR)/g_game.c tools/patch_doom_game_input.py Makefile
+$(DOOMOBJDIR)/g_game.o: $(DOOMDIR)/g_game.c tools/patch_doom_game_input.py
 	@mkdir -p $(DOOMOBJDIR)
 	python3 tools/patch_doom_game_input.py --source $< --output $(DOOMOBJDIR)/g_game_vexos.c
 	$(CC) $(DOOM_CFLAGS) -c $(DOOMOBJDIR)/g_game_vexos.c -o $@
@@ -373,10 +390,8 @@ $(DOOMOBJDIR)/%.o: $(DOOMDIR)/%.c
 	$(CC) $(DOOM_CFLAGS) -c $< -o $@
 
 # Instrument the WAD directory loader without modifying the upstream submodule.
-# FORCE ensures a stale pre-instrumentation object can never be linked silently.
-.PHONY: FORCE_DOOM_WAD_DIAG
-FORCE_DOOM_WAD_DIAG:
-$(DOOMOBJDIR)/w_wad.o: FORCE_DOOM_WAD_DIAG $(DOOMDIR)/w_wad.c tools/instrument_doom_wad.py
+# Re-run the instrumenter only when its source or instrumentation script changes.
+$(DOOMOBJDIR)/w_wad.o: $(DOOMDIR)/w_wad.c tools/instrument_doom_wad.py
 	@mkdir -p $(DOOMOBJDIR)
 	python3 tools/instrument_doom_wad.py --source $(DOOMDIR)/w_wad.c --output $(DOOMOBJDIR)/w_wad_instrumented.c
 	@grep -q 'VEXOS_WAD_DIAG_ASSIGN' $(DOOMOBJDIR)/w_wad_instrumented.c || (echo "[WADDBG] missing ASSIGN instrumentation" >&2; exit 1)
