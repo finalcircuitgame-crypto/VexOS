@@ -1242,15 +1242,15 @@ void kernel_main(BootInfo *bootInfo) {
   netdev_init();
   ethernet_init();
   if (!arp_init())
-    serial_print("[ARP] Failed to register Ethernet ARP handler\\n");
+    serial_print("[ARP] Failed to register Ethernet ARP handler\n");
   if (!ipv4_init())
-    serial_print("[IPv4] Failed to register Ethernet IPv4 handler\\n");
+    serial_print("[IPv4] Failed to register Ethernet IPv4 handler\n");
   if (!icmp_init())
-    serial_print("[ICMP] Failed to register ICMPv4 handler\\n");
+    serial_print("[ICMP] Failed to register ICMPv4 handler\n");
   if (!udp_init())
-    serial_print("[UDP] Failed to register UDP handler\\n");
+    serial_print("[UDP] Failed to register UDP handler\n");
   netdev_set_receive_handler(ethernet_receive);
-  serial_print("[NET] Ethernet II, ARP, IPv4, ICMPv4, and UDP stack initialized\\n");
+  serial_print("[NET] Ethernet II, ARP, IPv4, ICMPv4, and UDP stack initialized\n");
 
   // PCI Enumeration (must happen before wizard for xHCI input)
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
