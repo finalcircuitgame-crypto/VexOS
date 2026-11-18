@@ -104,6 +104,14 @@ void serial_print(const char *str);
 #define ALX_PMCTRL_L1REQ_TO_MASK      0x0Fu
 #define ALX_PMCTRL_L1_TIMER_MASK      0x07u
 
+#define ALX_MISC_INTNLOSC_OPEN        (1u << 3)
+#define ALX_MISC_ISO_EN               (1u << 12)
+#define ALX_MISC_PSW_OCP_MASK         (7u << 21)
+#define ALX_MISC_PSW_OCP_DEF          (7u << 21)
+#define ALX_MISC3_25M_BY_SW           (1u << 1)
+#define ALX_MISC3_25M_NOTO_INTNL      (1u << 0)
+#define ALX_MSIC2_CALB_START          (1u << 0)
+
 #define ALX_PHY_CTRL_DSPRST_OUT       (1u << 0)
 #define ALX_PHY_CTRL_LED_MODE         (1u << 2)
 #define ALX_PHY_CTRL_GATE_25M         (1u << 5)
@@ -506,6 +514,9 @@ static int alx_configure_phy(void) {
 }
 
 static int alx_reset_mac(void) {
+    uint32_t pmctrl_saved = 0u;
+    uint8_t a_cr = (g_revision <= 1u && g_revision_cr) ? 1u : 0u;
+
     alx_write32(ALX_IMR, 0u);
     alx_write32(ALX_MSIX_MASK, 0xFFFFFFFFu);
     alx_write32(ALX_ISR, ALX_ISR_DIS);
@@ -526,7 +537,20 @@ static int alx_reset_mac(void) {
         __asm__ volatile("pause");
     }
 
-    alx_write16(ALX_RFD_PIDX, 1u);
+    /*
+     * On A0/A1 CR silicon, temporarily leave ASPM while resetting the MAC.
+     * This is the same guard used by the upstream ALX reset path.
+     */
+    if (a_cr) {
+        pmctrl_saved = alx_read32(ALX_PMCTRL);
+        if (pmctrl_saved & (ALX_PMCTRL_L1_EN | ALX_PMCTRL_L0S_EN)) {
+            alx_write32(ALX_PMCTRL,
+                        pmctrl_saved & ~(ALX_PMCTRL_L1_EN |
+                                         ALX_PMCTRL_L0S_EN));
+        }
+    }
+
+    alx_write32(ALX_RFD_PIDX, 1u);
     uint32_t master = alx_read32(ALX_MASTER);
     alx_write32(ALX_MASTER, master | ALX_MASTER_DMA_MAC_RST |
                                   ALX_MASTER_OOB_DIS);
@@ -545,25 +569,48 @@ static int alx_reset_mac(void) {
         return 0;
     }
 
+    if (a_cr) {
+        master = alx_read32(ALX_MASTER);
+        alx_write32(ALX_MASTER, master | ALX_MASTER_PCLKSEL_SRDS);
+        if (pmctrl_saved & (ALX_PMCTRL_L1_EN | ALX_PMCTRL_L0S_EN))
+            alx_write32(ALX_PMCTRL, pmctrl_saved);
+    }
+
     /* Recalibrate the internal oscillator after the MAC reset. */
-    uint32_t misc3 = alx_read32(ALX_MISC3);
-    alx_write32(ALX_MISC3, (misc3 & ~(1u << 1)) | 1u);
     uint32_t misc = alx_read32(ALX_MISC);
     if (g_revision >= 2u) {
-        misc &= ~(1u << 3);
-        misc = (misc & ~(7u << 21)) | (7u << 21);
+        /* B0+: restore OCP default, toggle the internal oscillator, calibrate. */
+        misc &= ~ALX_MISC_INTNLOSC_OPEN;
+        misc = (misc & ~ALX_MISC_PSW_OCP_MASK) | ALX_MISC_PSW_OCP_DEF;
         alx_write32(ALX_MISC, misc);
-        alx_write32(ALX_MISC, misc | (1u << 3));
-        uint32_t misc2 = alx_read32(ALX_MSIC2) & ~1u;
+        alx_write32(ALX_MISC, misc | ALX_MISC_INTNLOSC_OPEN);
+
+        uint32_t misc2 = alx_read32(ALX_MSIC2) & ~ALX_MSIC2_CALB_START;
         alx_write32(ALX_MSIC2, misc2);
-        alx_write32(ALX_MSIC2, misc2 | 1u);
+        alx_write32(ALX_MSIC2, misc2 | ALX_MSIC2_CALB_START);
     } else {
-        misc &= ~(1u << 3);
+        /* A0/A1: pulse the internal oscillator open bit, then close it. */
+        misc &= ~ALX_MISC_INTNLOSC_OPEN;
         if (g_revision == 0u)
-            misc &= ~(1u << 12);
-        alx_write32(ALX_MISC, misc | (1u << 3));
+            misc &= ~ALX_MISC_ISO_EN;
+        alx_write32(ALX_MISC, misc | ALX_MISC_INTNLOSC_OPEN);
         alx_write32(ALX_MISC, misc);
     }
+
+    /*
+     * Common finalization from the hardware driver: select the internal
+     * 25 MHz source and ensure the oscillator-open bit is cleared. The
+     * previous B0+ path left this bit set after calibration.
+     */
+    uint32_t misc3 = alx_read32(ALX_MISC3);
+    alx_write32(ALX_MISC3,
+                (misc3 & ~ALX_MISC3_25M_BY_SW) | ALX_MISC3_25M_NOTO_INTNL);
+    misc = alx_read32(ALX_MISC);
+    misc &= ~ALX_MISC_INTNLOSC_OPEN;
+    if (g_revision <= 1u)
+        misc &= ~ALX_MISC_ISO_EN;
+    alx_write32(ALX_MISC, misc);
+
     alx_delay(5000u);
     return 1;
 }
