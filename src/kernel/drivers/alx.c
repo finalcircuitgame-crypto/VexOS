@@ -592,6 +592,8 @@ static void alx_configure_basic(void) {
 }
 
 static void alx_stop_mac(void) {
+    if (g_mac_started && g_link_up)
+        serial_print("[ALX] Physical Ethernet link lost; stopping MAC\n");
     alx_write32(ALX_RXQ0, alx_read32(ALX_RXQ0) & ~ALX_RXQ0_EN);
     alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) & ~ALX_TXQ0_EN);
     alx_write32(ALX_MAC_CTRL,
@@ -615,6 +617,10 @@ static void alx_start_mac(uint8_t speed_code, uint8_t full_duplex) {
     g_link_full_duplex = full_duplex;
     g_mac_started = 1u;
     g_link_up = 1u;
+
+    serial_print("[ALX] Ethernet link established at ");
+    serial_print(speed_code == 2u ? "1000 Mbps" : "100 Mbps");
+    serial_print(full_duplex ? " full duplex\n" : " half duplex\n");
 }
 
 static void alx_update_link(void) {
