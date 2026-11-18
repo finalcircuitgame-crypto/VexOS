@@ -65,8 +65,8 @@ typedef struct __attribute__((packed)) {
     uint64_t address;
     uint16_t length;
     uint16_t checksum_offset;
-    uint8_t status;
-    uint8_t errors;
+    volatile uint8_t status;
+    volatile uint8_t errors;
     uint16_t special;
 } e1000e_rx_desc_t;
 
@@ -75,7 +75,7 @@ typedef struct __attribute__((packed)) {
     uint16_t length;
     uint8_t checksum_offset;
     uint8_t command;
-    uint8_t status;
+    volatile uint8_t status;
     uint8_t checksum_start;
     uint16_t special;
 } e1000e_tx_desc_t;
