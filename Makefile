@@ -25,6 +25,11 @@ VEXOS_BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown
 
 CFLAGS_KERNEL = -ffreestanding -mno-red-zone -mcmodel=large -fno-pie -I$(SRCDIR)/include
 CFLAGS_KERNEL += -MMD -MP
+
+# Remote development logging is enabled in dev builds and omitted from releases.
+ifneq ($(VEXOS_RELEASE),1)
+CFLAGS_KERNEL += -DVEXOS_NETLOG
+endif
 CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
 
 # Refresh the embedded Git build ID on every make invocation.
