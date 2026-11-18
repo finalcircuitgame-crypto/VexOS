@@ -53,6 +53,8 @@ void xhci_service_background(void) {
 #ifdef VEXOS_NETLOG
   uint64_t now = xhci_time_now_ticks();
   uint64_t hz = xhci_time_frequency_hz();
+  if (hz == 0u)
+    hz = 1000000000ull; /* Match xhci_time.c's bounded fallback clock. */
   uint64_t interval = hz / 1000u;
   if (interval == 0u)
     interval = 1u;
@@ -1230,10 +1232,13 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
  */
 void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
                uint16_t device_id, uint8_t revision_id) {
+#ifdef VEXOS_NETLOG
+  /* Drain PCI/startup messages before clock calibration or controller access. */
+  netlog_service();
+#endif
   xhci_time_init();
   xhci_time_log_clock();
   uint64_t controller_init_start = xhci_time_now_ticks();
-  xhci_service_background();
 
   const xhci_quirks_t *quirks =
       xhci_quirks_detect(vendor_id, device_id, revision_id);
@@ -1250,6 +1255,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   serial_print(" flags=");
   xhci_print_hex32(quirks->flags);
   serial_print("\n");
+  xhci_service_background();
 
   // 1) Map the capability page first, then map only operational, runtime,
   // doorbell, and root-port pages actually addressed by this controller.
@@ -1302,6 +1308,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
 
   /* xHCI initializes before IRQ0; all wait deadlines use the standalone TSC clock. */
   xhci_log_controller_registers("initial");
+  xhci_service_background();
 
   // Real hardware often requires BIOS->OS ownership handoff.
   {
@@ -1565,6 +1572,7 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   }
 
   for (uint32_t i = 0; i < num_ports; i++) {
+    xhci_service_background();
     volatile uint32_t *portsc =
         (uint32_t *)((uint64_t)op_regs + 0x400 + (i * 0x10));
     uint32_t ps = *portsc;
@@ -1644,5 +1652,6 @@ void xhci_init(uint64_t mmio_phys, uint16_t vendor_id,
   xhci_time_log_elapsed("root_port_scan", port_scan_start, "finished");
   xhci_time_log_elapsed("controller_init", controller_init_start, "finished");
   xhci_log_controller_registers("init-complete");
+  xhci_service_background();
 
 }
