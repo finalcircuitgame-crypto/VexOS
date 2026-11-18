@@ -131,7 +131,7 @@ static void log_mac(void) {
         serial_print(out);
         out[0] = hex[mac[i] & 15u];
         serial_print(out);
-        serial_print(i == 5 ? "\\n" : ":");
+        serial_print(i == 5 ? "\n" : ":");
     }
 }
 
