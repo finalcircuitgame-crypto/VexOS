@@ -2,7 +2,7 @@ name: VexOS Network Host Tests
 
 on:
   push:
-    branches: [feature/network-foundation]
+    branches: [main, feature/network-foundation]
   pull_request:
     branches: [main]
   workflow_dispatch:
