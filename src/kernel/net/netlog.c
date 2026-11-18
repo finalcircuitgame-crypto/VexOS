@@ -63,10 +63,11 @@ void netlog_append(const char *text) {
     /* This function is called inside serial_print's existing IRQ-safe section. */
     while (*text) {
         if (g_used == NETLOG_QUEUE_BYTES) {
+            /* Preserve the newest diagnostics by evicting the oldest byte. */
+            g_tail = (g_tail + 1u) % NETLOG_QUEUE_BYTES;
+            --g_used;
             ++g_dropped;
             g_drop_notice_pending = 1;
-            ++text;
-            continue;
         }
         g_queue[g_head] = *text++;
         g_head = (g_head + 1u) % NETLOG_QUEUE_BYTES;
