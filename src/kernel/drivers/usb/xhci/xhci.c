@@ -1008,34 +1008,37 @@ static int xhci_cmd_evaluate_ctx_update_ep0_mps(xhci_device_state_t *dev,
 }
 
 static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
-  // USB Device Descriptor is 18 bytes
+  /*
+   * High-speed and SuperSpeed EP0 packet sizes are fixed by the negotiated
+   * speed (64 and 512 bytes). Only low/full-speed devices need the initial
+   * eight-byte descriptor request to discover bMaxPacketSize0.
+   */
   uint8_t *buf = (uint8_t *)PMM_AllocatePage();
-  for (uint32_t i = 0; i < 4096; i++)
-    buf[i] = 0;
-
-  // Setup packet (USB2.0 9.3): GET_DESCRIPTOR(Device)
-  // bmRequestType=0x80 (Device-to-host, Standard, Device)
-  // bRequest=6, wValue=(1<<8)|0, wIndex=0, wLength=18
-  uint64_t setup8 = 0;
-  setup8 |= 0x80ULL;
-  setup8 |= 0x06ULL << 8;
-  setup8 |= 0x0100ULL << 16;
-  setup8 |= 0x0000ULL << 32;
-  setup8 |= 8ULL << 48;
-
-  if (!xhci_ep0_control_in(dev, setup8, buf, 8)) {
-    serial_print("[xHCI] EP0 GET_DESCRIPTOR(8) failed\n");
+  if (!buf)
     return 0;
-  }
 
-  uint8_t mps0 = buf[7];
-  if (dev->speed_code == 1) {
-    if (mps0 == 8 || mps0 == 16 || mps0 == 32 || mps0 == 64) {
-      if (dev->ep0_mps != (uint32_t)mps0) {
-        if (!xhci_cmd_evaluate_ctx_update_ep0_mps(dev, (uint32_t)mps0)) {
-          serial_print("[xHCI] EP0 update MPS failed\n");
-          return 0;
-        }
+  if (dev->speed_code <= 2u) {
+    for (uint32_t i = 0; i < 4096; i++)
+      buf[i] = 0;
+
+    uint64_t setup8 = 0;
+    setup8 |= 0x80ULL;
+    setup8 |= 0x06ULL << 8;
+    setup8 |= 0x0100ULL << 16;
+    setup8 |= 8ULL << 48;
+
+    if (!xhci_ep0_control_in(dev, setup8, buf, 8)) {
+      serial_print("[xHCI] EP0 GET_DESCRIPTOR(8) failed\n");
+      return 0;
+    }
+
+    uint8_t mps0 = buf[7];
+    if (dev->speed_code == 1u &&
+        (mps0 == 8u || mps0 == 16u || mps0 == 32u || mps0 == 64u) &&
+        dev->ep0_mps != (uint32_t)mps0) {
+      if (!xhci_cmd_evaluate_ctx_update_ep0_mps(dev, (uint32_t)mps0)) {
+        serial_print("[xHCI] EP0 update MPS failed\n");
+        return 0;
       }
     }
   }
@@ -1047,7 +1050,6 @@ static int xhci_ep0_get_device_descriptor(xhci_device_state_t *dev) {
   setup18 |= 0x80ULL;
   setup18 |= 0x06ULL << 8;
   setup18 |= 0x0100ULL << 16;
-  setup18 |= 0x0000ULL << 32;
   setup18 |= 18ULL << 48;
 
   if (!xhci_ep0_control_in(dev, setup18, buf, 18)) {
