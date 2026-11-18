@@ -1253,7 +1253,8 @@ void kernel_main(BootInfo *bootInfo) {
   netdev_set_receive_handler(ethernet_receive);
   serial_print("[NET] Ethernet II, ARP, IPv4, ICMPv4, and UDP stack initialized\n");
 
-  // PCI Enumeration (must happen before wizard for xHCI input)
+  // Enumerate PCI devices and attach Ethernet first. xHCI is explicitly
+  // deferred so the remote logger is ready before any USB controller reset.
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
@@ -1261,6 +1262,7 @@ void kernel_main(BootInfo *bootInfo) {
   (void)alx_netdev_attach();
 #ifdef VEXOS_NETLOG
   (void)netlog_init();
+  netlog_service();
 #endif
 #ifdef VEXOS_CI_INPUT_TEST
   if (!e1000e_ci_transmit_test())
@@ -1268,7 +1270,12 @@ void kernel_main(BootInfo *bootInfo) {
   ci_ahci_self_test();
 #endif
   hw_profile_update_pci_gpu();
-  serial_print("[KERNEL] PCI enumeration returned\n");
+  serial_print("[KERNEL] PCI enumeration returned; preparing xHCI startup\n");
+#ifdef VEXOS_NETLOG
+  /* Send buffered pre-USB boot diagnostics before the first xHCI register access. */
+  netlog_service();
+#endif
+  pci_start_xhci();
 
 #ifdef VEXOS_CI_SKIP_WIZARD
   // CI-only path: bypass the interactive first-boot wizard for automated QEMU input.
