@@ -348,23 +348,28 @@ static int alx_configure_phy(void) {
     alx_write32(ALX_DRV, (1u << 28) | (1u << 27) |
                          (1u << 26) | (1u << 25) | (1u << 24));
 
+    /*
+     * alx_reset_phy() already performed the hardware PHY reset and restored
+     * the ALX analog tuning registers. Do not assert BMCR_RESET here: a second
+     * MII reset would clear the advertisement we are setting and can undo
+     * the vendor-specific PHY setup. Program advertisements first, then
+     * enable/restart auto-negotiation without resetting the PHY again.
+     */
     if (!alx_mdio_write(ALX_MII_ADVERTISE, advertise_10_100) ||
         !alx_mdio_write(ALX_MII_CTRL1000, advertise_1000_full) ||
         !alx_mdio_write(ALX_MII_BMCR,
-                        ALX_BMCR_RESET | ALX_BMCR_ANENABLE |
-                        ALX_BMCR_ANRESTART))
+                        ALX_BMCR_ANENABLE | ALX_BMCR_ANRESTART))
         return 0;
 
-    /* BMCR reset is self-clearing; do not proceed while MDIO is stuck. */
-    for (uint32_t i = 0; i < 200000u; ++i) {
-        uint16_t control = 0;
-        if (!alx_mdio_read(ALX_MII_BMCR, &control))
-            return 0;
-        if ((control & ALX_BMCR_RESET) == 0u)
-            return 1;
-        __asm__ volatile("pause");
+    uint16_t control = 0;
+    if (!alx_mdio_read(ALX_MII_BMCR, &control) ||
+        (control & ALX_BMCR_ANENABLE) == 0u) {
+        serial_print("[ALX] PHY did not retain auto-negotiation enable\n");
+        return 0;
     }
-    return 0;
+
+    serial_print("[ALX] PHY auto-negotiation started (10/100/1000)\n");
+    return 1;
 }
 
 static int alx_reset_mac(void) {
