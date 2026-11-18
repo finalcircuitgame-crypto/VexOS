@@ -6,6 +6,16 @@
 #include "usb/xhci.h"
 #include "usb/xhci/xhci_quirks.h"
 
+/* Current input state is global/single-controller; defer USB bring-up until NetLog is online. */
+typedef struct {
+    uint8_t bus, slot, func, revision_id;
+    uint16_t vendor_id, device_id;
+    uint64_t mmio_base;
+    uint32_t quirk_flags;
+} pci_pending_xhci_t;
+static pci_pending_xhci_t g_pending_xhci;
+static uint8_t g_pending_xhci_valid;
+
 // I/O ports for PCI
 static inline void outl(uint16_t port, uint32_t val) {
     __asm__ volatile ("outl %0, %1" : : "a"(val), "Nd"(port));
@@ -243,39 +253,38 @@ void pci_enumerate() {
                     else serial_print("[PCI] USB Controller: Unknown\n");
                 }
 
-                // xHCI is Class 0x0C (Serial Bus), Subclass 0x03, Prog IF 0x30.
+                // xHCI is deferred until Ethernet and NetLog are operational.
+                // Do not touch controller MMIO or issue USB resets in this scan.
                 if (class_code == 0x0C && subclass == 0x03 && prog_if == 0x30) {
-                    serial_print("[PCI] Found xHCI Controller!\n");
-                    uint32_t bar0 = pci_config_read_dword((uint8_t)bus, slot, func, 0x10);
-                    uint32_t bar1 = pci_config_read_dword((uint8_t)bus, slot, func, 0x14);
-                    uint64_t mmio_base = bar0 & 0xFFFFFFF0;
-                    if ((bar0 & 0x6) == 0x4) { // 64-bit BAR
-                        mmio_base |= ((uint64_t)bar1 << 32);
+                    serial_print("[PCI] Found xHCI Controller; deferring initialization\n");
+                    if (!g_pending_xhci_valid) {
+                        uint32_t bar0 = pci_config_read_dword((uint8_t)bus, slot, func, 0x10);
+                        uint32_t bar1 = pci_config_read_dword((uint8_t)bus, slot, func, 0x14);
+                        uint64_t mmio_base = (uint64_t)(bar0 & 0xFFFFFFF0u);
+                        if ((bar0 & 0x6u) == 0x4u)
+                            mmio_base |= ((uint64_t)bar1 << 32);
+
+                        if (bar0 != 0u && bar0 != 0xFFFFFFFFu && !(bar0 & 1u) &&
+                            mmio_base != 0u) {
+                            const xhci_quirks_t *quirks =
+                                xhci_quirks_detect(vendor_id, device_id,
+                                                   (uint8_t)class_info);
+                            g_pending_xhci.bus = (uint8_t)bus;
+                            g_pending_xhci.slot = slot;
+                            g_pending_xhci.func = func;
+                            g_pending_xhci.vendor_id = vendor_id;
+                            g_pending_xhci.device_id = device_id;
+                            g_pending_xhci.revision_id = (uint8_t)class_info;
+                            g_pending_xhci.mmio_base = mmio_base;
+                            g_pending_xhci.quirk_flags = quirks->flags;
+                            g_pending_xhci_valid = 1u;
+                            serial_print("[PCI] xHCI controller queued for post-NetLog startup\n");
+                        } else {
+                            serial_print("[PCI] xHCI BAR0 is invalid; controller skipped\n");
+                        }
+                    } else {
+                        serial_print("[PCI] Additional xHCI controller ignored; one active controller is supported\n");
                     }
-
-                    // Enable bus mastering and MMIO for xHCI.
-                    uint32_t command_status = pci_config_read_dword((uint8_t)bus, slot, func, 0x04);
-                    uint16_t command = (uint16_t)command_status;
-                    command |= (uint16_t)0x0006u;
-                    pci_config_write_dword((uint8_t)bus, slot, func, 0x04, (uint32_t)command);
-
-                    uint8_t revision_id = (uint8_t)(class_info & 0xFFu);
-                    const xhci_quirks_t *quirks =
-                        xhci_quirks_detect(vendor_id, device_id, revision_id);
-
-                    serial_print("[PCI] xHCI identity vendor=");
-                    print_hex(vendor_id);
-                    serial_print(" device=");
-                    print_hex(device_id);
-                    serial_print(" revision=");
-                    print_hex(revision_id);
-                    serial_print(" quirks=");
-                    serial_print(quirks->name);
-                    serial_print("\n");
-
-                    xhci_force_usb2_routing((uint8_t)bus, slot, func,
-                                            quirks->flags);
-                    xhci_init(mmio_base, vendor_id, device_id, revision_id);
                 }
 
                 // If not multi-function, don't check other functions.
@@ -288,4 +297,31 @@ void pci_enumerate() {
     }
     serial_print("[PCI] Enumeration Complete\n");
     (void)bootlog_flush();
+}
+
+/*
+ * Start USB only after the kernel has attached Ethernet and initialized
+ * NetLog. This keeps the first xHCI reset/port wait visible to the host logger.
+ */
+void pci_start_xhci(void) {
+    if (!g_pending_xhci_valid) {
+        serial_print("[PCI] No deferred xHCI controller to start\n");
+        return;
+    }
+
+    pci_pending_xhci_t *xhci = &g_pending_xhci;
+    serial_print("[PCI] Starting deferred xHCI controller now\n");
+
+    /* Enable PCI memory decoding and bus mastering immediately before MMIO. */
+    uint32_t command_status =
+        pci_config_read_dword(xhci->bus, xhci->slot, xhci->func, 0x04u);
+    uint16_t command = (uint16_t)command_status;
+    command |= 0x0006u;
+    pci_config_write_dword(xhci->bus, xhci->slot, xhci->func, 0x04u,
+                           (uint32_t)command);
+
+    xhci_force_usb2_routing(xhci->bus, xhci->slot, xhci->func,
+                            xhci->quirk_flags);
+    xhci_init(xhci->mmio_base, xhci->vendor_id, xhci->device_id,
+              xhci->revision_id);
 }
