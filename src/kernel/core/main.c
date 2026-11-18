@@ -21,6 +21,7 @@
 #include "ipv4.h"
 #include "icmp.h"
 #include "udp.h"
+#include "netlog.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -81,6 +82,9 @@ void serial_print(const char *str) {
 
   /* Capture every serial message before attempting hardware output. */
   bootlog_append(str);
+#ifdef VEXOS_NETLOG
+  netlog_append(str);
+#endif
 
   // Always print to COM1 as one indivisible message.
   const char *p = str;
@@ -1251,6 +1255,9 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] Starting PCI Enumeration...\n");
   PrintString("Scanning PCI Bus...\n", 0xFFFFFF);
   pci_enumerate();
+#ifdef VEXOS_NETLOG
+  (void)netlog_init();
+#endif
 #ifdef VEXOS_CI_INPUT_TEST
   ci_ahci_self_test();
 #endif
@@ -1356,6 +1363,9 @@ void kernel_main(BootInfo *bootInfo) {
     // device interrupts until VexOS has general IRQ routing.
     netdev_poll_all(16u);
     arp_poll();
+#ifdef VEXOS_NETLOG
+    netlog_poll();
+#endif
 
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
     xhci_poll_events_atomic();
@@ -1380,6 +1390,9 @@ void kernel_main(BootInfo *bootInfo) {
         xhci_poll_events_atomic();
         netdev_poll_all(16u);
         arp_poll();
+#ifdef VEXOS_NETLOG
+        netlog_poll();
+#endif
         // Desktop rendering stays on the frame cadence below. Calling
         // desktop_tick() here used to repaint the full scene on every PIT
         // wakeup (up to 1000 times/second), starving window interaction.
