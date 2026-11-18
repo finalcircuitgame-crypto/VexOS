@@ -96,7 +96,7 @@ int netlog_init(void) {
     }
 
     g_ready = 1;
-    serial_print("[NETLOG] UDP transport ready; destination 10.0.2.2:5140 (QEMU user networking defaults)\n");
+    serial_print("[NETLOG] UDP transport ready; remote logging enabled\n");
     return 1;
 }
 
