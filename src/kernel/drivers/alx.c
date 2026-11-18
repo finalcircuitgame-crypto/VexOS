@@ -19,6 +19,8 @@ void serial_print(const char *str);
 
 /* ALX register offsets. */
 #define ALX_MSIX_MASK                 0x0090u
+#define ALX_ISR_DIS                   (1u << 31)
+#define ALX_INT_RETRIG                0x1608u
 #define ALX_MASTER                    0x1400u
 #define ALX_IRQ_MODU_TIMER            0x1408u
 #define ALX_PHY_CTRL                  0x140Cu
@@ -119,6 +121,7 @@ void serial_print(const char *str);
 #define ALX_RXQ0_IDT_TBL_SIZE         (0x100u << 8)
 #define ALX_RXQ0_RSS_HSTYP_ALL        0x3Cu
 #define ALX_RXQ0_IPV6_PARSE_EN        (1u << 7)
+#define ALX_RXQ0_ASPM_THRESH_100M      3u
 #define ALX_TXQ1_ERRLGPKT_DROP_EN     (1u << 11)
 #define ALX_HQTPD_BURST_EN            (1u << 31)
 #define ALX_CLK_GATE_ALL              0x3Fu
@@ -329,8 +332,11 @@ static int alx_reset_phy(void) {
     if (!alx_phy_debug_write(0x3Du, (uint16_t)(green & ~0x0080u)))
         return 0;
 
-    /* Disable Energy Efficient Ethernet advertisement for this first driver. */
+    /* PHY analog and link-pulse settings used by the ALX hardware driver. */
+    (void)alx_mdio_write_ext(3u, 0x8062u, 0x0003u);
     (void)alx_mdio_write_ext(7u, 0x003Cu, 0u);
+    (void)alx_mdio_write_ext(7u, 0x8027u, 0x8A05u);
+    (void)alx_mdio_write_ext(7u, 0x8023u, 0x0000u);
     alx_write32(ALX_LPI_CTRL, alx_read32(ALX_LPI_CTRL) & ~1u);
     return 1;
 }
@@ -364,7 +370,7 @@ static int alx_configure_phy(void) {
 static int alx_reset_mac(void) {
     alx_write32(ALX_IMR, 0u);
     alx_write32(ALX_MSIX_MASK, 0xFFFFFFFFu);
-    alx_write32(ALX_ISR, 0xFFFFFFFFu);
+    alx_write32(ALX_ISR, ALX_ISR_DIS);
 
     alx_write32(ALX_RXQ0, alx_read32(ALX_RXQ0) & ~ALX_RXQ0_EN);
     alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) & ~ALX_TXQ0_EN);
@@ -540,6 +546,7 @@ static void alx_configure_basic(void) {
              ALX_MASTER_SYSALVTIMER_EN;
     alx_write32(ALX_MASTER, value);
     alx_write32(ALX_IRQ_MODU_TIMER, 100u);
+    alx_write32(ALX_INT_RETRIG, 20000u);
     alx_write32(ALX_SMB_TIMER, 400u * 500u);
     alx_write32(ALX_TINT_TPD_THRSHLD, ALX_RING_COUNT / 3u);
     alx_write32(ALX_TINT_TIMER, 200u);
