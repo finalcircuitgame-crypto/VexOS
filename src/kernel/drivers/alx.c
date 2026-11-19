@@ -8,7 +8,6 @@
 
 void serial_print(const char *str);
 extern void desktop_debug_set_network_status(const char *status);
-void ConsoleDebugPrint(const char *str);
 
 #define ALX_VENDOR_ID                 0x1969u
 #define ALX_DEVICE_ID_AR8171          0x10A1u
