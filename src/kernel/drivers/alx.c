@@ -310,7 +310,7 @@ static int alx_configure_pcie_read_request(uint8_t bus, uint8_t slot,
         pci_config_read_dword(bus, slot, function, 0x04u);
     uint16_t status = (uint16_t)(command_status >> 16);
     if ((status & ALX_PCI_STATUS_CAP_LIST) == 0u) {
-        serial_print("[ALX] PCI capability list is unavailable\\n");
+        serial_print("[ALX] PCI capability list is unavailable\n");
         return 0;
     }
 
@@ -318,7 +318,7 @@ static int alx_configure_pcie_read_request(uint8_t bus, uint8_t slot,
         (uint8_t)pci_config_read_dword(bus, slot, function, 0x34u);
     for (uint32_t i = 0; i < 48u; ++i) {
         capability &= 0xFCu;
-        if (capability < 0x40u || capability > 0xFCu)
+        if (capability < 0x40u || capability > 0xF4u)
             break;
 
         uint32_t header =
@@ -354,11 +354,11 @@ static int alx_configure_pcie_read_request(uint8_t bus, uint8_t slot,
                     ((uint16_t)control_status & ALX_PCIE_DEVCTL_MRRS_MASK) >>
                     ALX_PCIE_DEVCTL_MRRS_SHIFT);
                 if (verified_mrrs < ALX_PCIE_DEVCTL_MRRS_MIN) {
-                    serial_print("[ALX] Failed to raise PCIe MRRS to 512 bytes\\n");
+                    serial_print("[ALX] Failed to raise PCIe MRRS to 512 bytes\n");
                     return 0;
                 }
 
-                serial_print("[ALX] PCIe MRRS raised to 512 bytes\\n");
+                serial_print("[ALX] PCIe MRRS raised to 512 bytes\n");
             }
             return 1;
         }
@@ -368,7 +368,7 @@ static int alx_configure_pcie_read_request(uint8_t bus, uint8_t slot,
         capability = next;
     }
 
-    serial_print("[ALX] PCIe capability was not found\\n");
+    serial_print("[ALX] PCIe capability was not found\n");
     return 0;
 }
 
