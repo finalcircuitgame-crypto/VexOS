@@ -68,7 +68,8 @@ def main() -> int:
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Do not enable SO_REUSEADDR for this UDP listener: on Windows that
+        # can let another process bind the same port and split packet delivery.
         sock.bind((args.host, args.port))
         sock.settimeout(1.0)
     except OSError as exc:
@@ -105,14 +106,17 @@ def main() -> int:
         print(f"[FILE]     Appending received packets to: {args.output}")
     if args.self_test:
         destination = args.host if args.host not in ("0.0.0.0", "") else "127.0.0.1"
+        test_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.sendto(
+            test_socket.sendto(
                 b"[NETLOG RECEIVER SELF-TEST] Local UDP receive path is working.\n",
                 (destination, args.port),
             )
             print("[TEST]     Sent a local test datagram. This checks the receiver only.")
         except OSError as exc:
             print(f"[TEST]     Local test could not be sent: {exc}")
+        finally:
+            test_socket.close()
     print("[EXIT]     Press Ctrl+C to stop.")
     print()
 
