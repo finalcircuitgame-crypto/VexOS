@@ -398,21 +398,28 @@ class VexOSFlasher(tk.Tk):
         )
 
     def _button(self, parent, text, command, bg, fg="#FFFFFF", **kwargs):
+        # Allow individual buttons to request compact or roomy padding without
+        # passing duplicate padx/pady keyword arguments to tkinter.Button.
+        button_padx = kwargs.pop("padx", 14)
+        button_pady = kwargs.pop("pady", 10)
+        button_active_bg = kwargs.pop("activebackground", bg)
+        button_font = kwargs.pop("font", ("Segoe UI", 10, "bold"))
+
         return tk.Button(
             parent,
             text=text,
             command=command,
             bg=bg,
             fg=fg,
-            activebackground=kwargs.pop("activebackground", bg),
+            activebackground=button_active_bg,
             activeforeground=fg,
             disabledforeground="#68758B",
             relief=tk.FLAT,
             bd=0,
-            padx=14,
-            pady=10,
+            padx=button_padx,
+            pady=button_pady,
             cursor="hand2",
-            font=("Segoe UI", 10, "bold"),
+            font=button_font,
             **kwargs,
         )
 
