@@ -103,7 +103,7 @@ static uint64_t *dcbaa;
 // Forward declarations for printing
 void PrintString(const char *str, uint32_t color);
 void serial_print(const char *str);
-extern void desktop_debug_set_input_status(const char *status);
+extern void desktop_debug_set_usb_status(const char *status);
 
 static void print_hex64(uint64_t val) {
   for (int i = 15; i >= 0; i--) {
@@ -1291,8 +1291,8 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
       serial_print("[HID] Interrupt IN armed\n");
       xhci_hid_start_polling(dev);
       if (dev->hid_proto == 2u || dev->hid_mouse_valid) {
-        desktop_debug_set_input_status(
-            "USB mouse endpoint armed; waiting for interrupt reports");
+        desktop_debug_set_usb_status(
+            "M65/HID endpoint armed; waiting for interrupt reports");
       }
     }
   }
