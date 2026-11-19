@@ -46,6 +46,16 @@ make
 
 The normal build produces `dist/BOOTX64.EFI`, `dist/kernel.elf`, the bootable FAT image `dist/tiny64.img`, and the separate persistent data image `dist/storage.img`.
 
+Use `build.sh` to select the boot profile:
+
+```bash
+./build.sh --debug                 # default: verbose framebuffer and COM1 diagnostics
+./build.sh --release               # branded splash and quiet release boot
+./build.sh --release --serial-log  # release boot with full COM1 diagnostics
+```
+
+Release mode keeps the normal hardware support and first-boot setup flow. It replaces the early text console with a framebuffer splash, suppresses routine boot logging and development diagnostic overlays, omits NetLog and synchronous boot-log writes, and builds the kernel entry, PCI, and VMM paths with `-O2`. Critical error messages remain available on COM1. Boot-time improvement still needs to be measured on physical hardware; this profile removes known avoidable work but does not skip required device initialization.
+
 ## Prepare a bootable USB drive (Windows)
 
 After building VexOS, launch the Windows flasher from the repository root:
