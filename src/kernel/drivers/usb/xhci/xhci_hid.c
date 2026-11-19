@@ -373,7 +373,14 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
 
   uint32_t interval = xhci_hid_context_interval(dev);
   ep->dword0 = (interval & 0xFFu) << 16;
-  ep->dword4 = (uint32_t)8u | ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16);
+  /*
+   * This driver's interrupt TDs request one full endpoint packet. Match the
+   * Average TRB Length to that actual transfer size; 8 is the special
+   * control-endpoint value and under-reports larger HID packets (e.g. M65's
+   * 64-byte interrupt-IN endpoint).
+   */
+  uint32_t avg_trb_len = (uint32_t)(dev->intr_mps & 0xFFFFu);
+  ep->dword4 = avg_trb_len | (avg_trb_len << 16);
 
   xhci_trb_t cmd;
   cmd.data = (uint64_t)(uintptr_t)input_ctx;
