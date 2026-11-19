@@ -10,6 +10,7 @@
 #include "../../include/png.h"
 #include "../../include/jpeg.h"
 #include "../../include/interrupts.h"
+#include "../../include/ps2_mouse.h"
 #include <stdint.h>
 #include "../desktop/window_manager.h"
 #include "../desktop/window_chrome.h"
@@ -1791,6 +1792,8 @@ void desktop_init(BootInfo *bootInfo) {
   g_fallback_scene_dirty = 1;
 
   input_init(bootInfo->width, bootInfo->height);
+  if (ps2_mouse_init())
+    desktop_debug_set_input_status("PS/2 touchpad enabled; waiting for pointer movement");
   terminal_init(g_bi->width, g_bi->height);
   shell_append("> ");
 
@@ -2531,6 +2534,7 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
 
   while (running) {
     xhci_poll_events();
+    ps2_mouse_poll();
     input_pointer_state_t p = input_pointer_get();
 
     if (needs_redraw || p.x != last_p.x || p.y != last_p.y || p.buttons != last_p.buttons) {
