@@ -26,6 +26,7 @@
 #include "icmp.h"
 #include "udp.h"
 #include "netlog.h"
+#include "ps2_mouse.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1525,8 +1526,9 @@ void kernel_main(BootInfo *bootInfo) {
       last_bootlog_flush_ticks = bootlog_now;
     }
 
-    // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
+    // Keep USB and PS/2 pointer polling frequent and independent of frame rate.
     xhci_poll_events_atomic();
+    ps2_mouse_poll();
 
     // Run desktop tick
     desktop_tick();
@@ -1553,6 +1555,7 @@ void kernel_main(BootInfo *bootInfo) {
         // only once per rendered frame. This keeps input latency near 1 ms
         // while the desktop renderer remains frame-rate limited.
         xhci_poll_events_atomic();
+        ps2_mouse_poll();
         netdev_poll_all(16u);
         arp_poll();
 #ifdef VEXOS_NETLOG
