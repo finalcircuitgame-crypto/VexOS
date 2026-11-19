@@ -98,6 +98,11 @@ static inline void xhci_dma_write_barrier(void) {
   __asm__ volatile("sfence" ::: "memory");
 }
 
+/* Acquire data written by the xHCI controller through DMA. */
+static inline void xhci_dma_read_barrier(void) {
+  __asm__ volatile("lfence" ::: "memory");
+}
+
 // Helpers provided by xhci.c
 uint32_t trb_type(uint32_t control);
 uint32_t trb_cc(uint32_t status);
