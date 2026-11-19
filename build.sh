@@ -60,7 +60,7 @@ if ! command -v make >/dev/null 2>&1; then
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "[BUILD] Python 3 is required to validate NetLog IPv4 settings." >&2
+    echo "[BUILD] Python 3 is required to build embedded desktop assets." >&2
     exit 1
 fi
 
@@ -89,17 +89,26 @@ print(f"0x{int(address):08X}u")
 PY
 }
 
-if ! NETLOG_LOCAL_IPV4="$(ipv4_define "$NETLOG_LOCAL_IP")"; then
-    exit 1
-fi
-if ! NETLOG_NETMASK_IPV4="$(ipv4_define "$NETLOG_NETMASK")"; then
-    exit 1
-fi
-if ! NETLOG_GATEWAY_IPV4="$(ipv4_define "$NETLOG_GATEWAY")"; then
-    exit 1
-fi
-if ! NETLOG_DESTINATION_IPV4="$(ipv4_define "$NETLOG_DESTINATION")"; then
-    exit 1
+if [[ "$VEXOS_RELEASE" == "1" ]]; then
+    # NetLog is not compiled into release builds; do not validate or carry
+    # development-only network configuration into the release make command.
+    NETLOG_LOCAL_IPV4=0x0A00020Fu
+    NETLOG_NETMASK_IPV4=0xFFFFFF00u
+    NETLOG_GATEWAY_IPV4=0x0A000202u
+    NETLOG_DESTINATION_IPV4=0x0A000202u
+else
+    if ! NETLOG_LOCAL_IPV4="$(ipv4_define "$NETLOG_LOCAL_IP")"; then
+        exit 1
+    fi
+    if ! NETLOG_NETMASK_IPV4="$(ipv4_define "$NETLOG_NETMASK")"; then
+        exit 1
+    fi
+    if ! NETLOG_GATEWAY_IPV4="$(ipv4_define "$NETLOG_GATEWAY")"; then
+        exit 1
+    fi
+    if ! NETLOG_DESTINATION_IPV4="$(ipv4_define "$NETLOG_DESTINATION")"; then
+        exit 1
+    fi
 fi
 
 echo "[BUILD] Building VexOS"
@@ -113,10 +122,12 @@ if [[ "$VEXOS_RELEASE" == "1" ]]; then
 else
     echo "[BUILD] Profile:            DEBUG"
 fi
-echo "[BUILD] NetLog local:       $NETLOG_LOCAL_IP"
-echo "[BUILD] NetLog netmask:     $NETLOG_NETMASK"
-echo "[BUILD] NetLog gateway:     $NETLOG_GATEWAY"
-echo "[BUILD] NetLog destination: $NETLOG_DESTINATION"
+if [[ "$VEXOS_RELEASE" != "1" ]]; then
+    echo "[BUILD] NetLog local:       $NETLOG_LOCAL_IP"
+    echo "[BUILD] NetLog netmask:     $NETLOG_NETMASK"
+    echo "[BUILD] NetLog gateway:     $NETLOG_GATEWAY"
+    echo "[BUILD] NetLog destination: $NETLOG_DESTINATION"
+fi
 
 make all \
     VEXOS_RELEASE="$VEXOS_RELEASE" \
