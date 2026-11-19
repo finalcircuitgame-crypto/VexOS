@@ -880,36 +880,23 @@ static int alx_setup_rings(void) {
     alx_write32(ALX_SRAM9, 1u);
 
     /*
-     * A successful MAC reset plus SRAM pointer load must leave a fresh TX
-     * ring at index zero. Linux's ALX ring setup uses the same zero-based
-     * software indices and then issues ALX_SRAM_LOAD_PTR. If this hardware
-     * still reports an old index after reset, fail closed instead of trying
-     * to guess which descriptors the controller considers outstanding.
+     * Match the upstream ALX ring setup: software producer/consumer indices
+     * start at zero, descriptor addresses and ring sizes are published, then
+     * SRAM_LOAD_PTR asks the controller to latch the new ring pointers.
+     *
+     * Do not write TPD_PIDX or require an immediate TPD_CIDX==0 readback here.
+     * The pointer-load operation is a hardware command; the consumer register
+     * is owned by the device and is not a reliable initialization handshake.
+     * The first actual descriptor submission publishes producer index 1.
      */
     g_tx_next = 0u;
     g_tx_last_consumer = 0u;
     g_tx_probe_start_consumer = 0u;
     __asm__ volatile("mfence" ::: "memory");
-    alx_write16(ALX_TPD_PRI0_PIDX, 0u);
-
-    uint16_t tx_producer = alx_read16(ALX_TPD_PRI0_PIDX);
-    uint16_t tx_consumer = alx_read16(ALX_TPD_PRI0_CIDX);
-    char pointer_diag[128] = "[ALX] TX ring post-reset pointers\n";
-    size_t pointer_used = sizeof("[ALX] TX ring post-reset pointers\n") - 1u;
-    alx_append_hex32(pointer_diag, sizeof(pointer_diag), &pointer_used,
-                     "  TPD_PIDX=", tx_producer);
-    alx_append_hex32(pointer_diag, sizeof(pointer_diag), &pointer_used,
-                     "  TPD_CIDX=", tx_consumer);
-    serial_print(pointer_diag);
-
-    if (tx_producer != 0u || tx_consumer != 0u) {
-        serial_print("[ALX] TX ring pointers did not reset to zero; refusing to submit DMA descriptors\n");
-        return 0;
-    }
 
     /* Keep one RFD slot unposted so producer and consumer never alias. */
     alx_write16(ALX_RFD_PIDX, (uint16_t)(ALX_RING_COUNT - 1u));
-    serial_print("[ALX] TX ring reset and verified at index zero\n");
+    serial_print("[ALX] TX ring bases loaded; software indices initialized at zero\\n");
     return 1;
 }
 
