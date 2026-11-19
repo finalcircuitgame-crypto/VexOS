@@ -896,7 +896,7 @@ static int alx_setup_rings(void) {
 
     /* Keep one RFD slot unposted so producer and consumer never alias. */
     alx_write16(ALX_RFD_PIDX, (uint16_t)(ALX_RING_COUNT - 1u));
-    serial_print("[ALX] TX ring bases loaded; software indices initialized at zero\\n");
+    serial_print("[ALX] TX ring bases loaded; software indices initialized at zero\n");
     return 1;
 }
 
