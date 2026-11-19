@@ -222,20 +222,10 @@ void PrintString(const char *str, uint32_t color) {
         console_put_codepoint(console_decode_utf8(&str), color);
 }
 
-/* One-shot overlay for late kernel diagnostics after desktop_init(). */
+/* Print late diagnostics using the normal console text renderer. */
 void ConsoleDebugPrint(const char *str) {
-    if (!g_BootInfo || !g_BootInfo->framebuffer || !str) return;
-    uint32_t w = g_BootInfo->width > 32u ? g_BootInfo->width - 32u : g_BootInfo->width;
-    uint32_t h = g_BootInfo->height > 32u ? g_BootInfo->height - 32u : g_BootInfo->height;
-    if (w > 1000u) w = 1000u;
-    if (h > 340u) h = 340u;
-    uint32_t *fb = g_BootInfo->framebuffer;
-    uint32_t pitch = g_BootInfo->pitch;
-    for (uint32_t y = 8u; y < 8u + h; ++y)
-        for (uint32_t x = 8u; x < 8u + w; ++x)
-            fb[y * pitch + x] = (x < 12u) ? 0xFF42A5F5u : 0xFF101820u;
-    g_CursorX = 24u;
-    g_CursorY = 20u;
-    g_PreviousCodepoint = 0;
-    PrintString(str, 0xFFFFFFFFu);
+    if (!str)
+        return;
+    PrintString("\n", 0xFFFFFFu);
+    PrintString(str, 0xFFFFFFu);
 }
