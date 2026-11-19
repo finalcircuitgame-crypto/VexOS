@@ -1,18 +1,20 @@
 """VexOS USB Flasher for Windows.
 
-Copy mode updates an existing USB volume without formatting it.
-Flash mode repartitions a selected USB disk as GPT + FAT32 and installs
-the UEFI removable-media bootloader and kernel. Flash mode is destructive.
+The UI deliberately separates the safe update operation from the destructive
+whole-disk preparation operation. Quick Update never repartitions a disk.
+Erase & Prepare requires elevation, identity revalidation, and typed consent.
 """
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import hashlib
 import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
@@ -23,12 +25,33 @@ BOOTX64_SRC = os.path.join(DIST_DIR, "BOOTX64.EFI")
 KERNEL_SRC = os.path.join(DIST_DIR, "kernel.elf")
 STARTUP_SRC = os.path.join(PROJECT_ROOT, "build", "startup.nsh")
 APP_TITLE = "VexOS USB Flasher"
+WINDOW_BG = "#0B1020"
+PANEL_BG = "#131C2F"
+PANEL_ALT = "#18243A"
+TEXT = "#E8EEF9"
+MUTED = "#9AAAC2"
+ACCENT = "#59B7FF"
+GREEN = "#55D6A1"
+RED = "#FF6B78"
+BORDER = "#293852"
 
 
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except (AttributeError, OSError):
+        return False
+
+
+def relaunch_as_admin() -> bool:
+    """Relaunch this script elevated. Returns False if Windows refused it."""
+    try:
+        params = subprocess.list2cmdline(sys.argv)
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, params, PROJECT_ROOT, 1
+        )
+        return int(result) > 32
+    except (AttributeError, OSError, ValueError):
         return False
 
 
@@ -66,6 +89,7 @@ def parse_json_array(output: str) -> list[dict]:
 
 
 def get_usb_disks() -> list[dict]:
+    """Return online physical USB disks, not volumes or removable-letter guesses."""
     script = r"""
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -79,8 +103,7 @@ Get-Disk |
 
 
 def get_usb_volumes() -> list[dict]:
-    # Do not rely on DriveType=Removable: Windows reports many USB sticks as
-    # fixed disks. Resolve each mounted partition back to its physical USB disk.
+    """Map mounted drive letters back to their physical USB disks."""
     script = r"""
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -98,7 +121,6 @@ $result = @(
           FileSystem = [string]$volume.FileSystem
           Size = [int64]$volume.Size
           Free = [int64]$volume.SizeRemaining
-          DiskName = [string]$disk.FriendlyName
         }
       }
     }
@@ -110,7 +132,7 @@ $result | ConvertTo-Json -Depth 3 -Compress
 
 
 def human_size(value: int | str | None) -> str:
-    number = int(value or 0)
+    number = float(value or 0)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if number < 1024 or unit == "TiB":
             return f"{number:,.1f} {unit}"
@@ -126,69 +148,116 @@ def sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
-def validate_build() -> None:
+def validate_build() -> list[tuple[str, str]]:
     missing = [path for path in (BOOTX64_SRC, KERNEL_SRC) if not os.path.isfile(path)]
     if missing:
         names = "\n".join(os.path.relpath(path, PROJECT_ROOT) for path in missing)
         raise FileNotFoundError(
-            "VexOS has not been built yet. Missing:\n"
-            f"{names}\n\nBuild it from WSL with: make"
+            "VexOS build files are missing:\n"
+            f"{names}\n\nBuild VexOS first, then reopen the flasher."
         )
-    for path in (BOOTX64_SRC, KERNEL_SRC):
-        if os.path.getsize(path) == 0:
-            raise RuntimeError(f"Build artifact is empty: {path}")
+
+    copies = [
+        (BOOTX64_SRC, "EFI\\BOOT\\BOOTX64.EFI"),
+        (KERNEL_SRC, "kernel.elf"),
+    ]
+    if os.path.isfile(STARTUP_SRC):
+        copies.append((STARTUP_SRC, "startup.nsh"))
+
+    for source, _ in copies:
+        if os.path.getsize(source) == 0:
+            raise RuntimeError(f"Build artifact is empty: {source}")
+    return copies
 
 
-def validate_usb_volume(drive_letter: str, expected_disk_number: int | None = None) -> None:
+def validate_usb_volume(
+    drive_letter: str, expected_disk_number: int | None = None
+) -> dict:
     letter = drive_letter.upper()
     if len(letter) != 1 or not letter.isalpha():
         raise ValueError("Invalid destination drive letter.")
+
+    expected = expected_disk_number if expected_disk_number is not None else -1
     script = rf"""
 $ErrorActionPreference = 'Stop'
 $partition = Get-Partition -DriveLetter '{letter}' -ErrorAction Stop
 $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction Stop
-if ($disk.BusType -ne 'USB') {{ throw 'Refusing to copy: destination is not on a USB disk.' }}
-if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Refusing to copy: destination belongs to a Windows boot/system disk.' }}
+if ($disk.BusType -ne 'USB') {{ throw 'Safety check failed: destination is not a USB disk.' }}
+if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Safety check failed: refusing a Windows boot/system disk.' }}
+if ($disk.IsReadOnly -or $disk.IsOffline) {{ throw 'The selected USB disk is read-only or offline.' }}
+if ({expected} -ge 0 -and $disk.Number -ne {expected}) {{ throw 'USB disk identity changed. Refresh devices and try again.' }}
 $volume = Get-Volume -Partition $partition -ErrorAction Stop
-if ($volume.FileSystem -ne 'FAT32') {{ throw 'Quick Flash requires a FAT32 USB volume. Use Full Flash to prepare it.' }}
-if ({expected_disk_number if expected_disk_number is not None else -1} -ge 0 -and $disk.Number -ne {expected_disk_number if expected_disk_number is not None else -1}) {{ throw 'USB disk identity changed. Refresh devices and try again.' }}
+[pscustomobject]@{{
+  DriveLetter = [string]$partition.DriveLetter
+  DiskNumber = [int]$disk.Number
+  FileSystem = [string]$volume.FileSystem
+  Free = [int64]$volume.SizeRemaining
+}} | ConvertTo-Json -Compress
 """
-    run_powershell(script)
+    result = json.loads(run_powershell(script))
+    if str(result.get("FileSystem", "")).upper() != "FAT32":
+        raise RuntimeError(
+            f"{letter}: is {result.get('FileSystem') or 'not formatted as FAT32'}. "
+            "Use Erase & Prepare, or format the USB as FAT32 yourself."
+        )
+    return result
 
 
-def copy_boot_files(drive_letter: str, progress=None, log=None,
-                    expected_disk_number: int | None = None) -> dict:
-    validate_build()
-    if len(drive_letter) != 1 or not drive_letter.isalpha():
-        raise ValueError("Invalid destination drive letter.")
+def copy_verified(source: str, destination: str) -> str:
+    """Copy to a temporary sibling, verify it, then replace the destination."""
+    temporary = destination + ".vexos-tmp"
+    try:
+        shutil.copyfile(source, temporary)
+        source_hash = sha256_file(source)
+        temporary_hash = sha256_file(temporary)
+        if source_hash != temporary_hash:
+            raise IOError(f"SHA-256 verification failed for {os.path.basename(source)}.")
+        os.replace(temporary, destination)
+        if sha256_file(destination) != source_hash:
+            raise IOError(f"Final SHA-256 verification failed for {os.path.basename(source)}.")
+        return source_hash
+    finally:
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        except OSError:
+            pass
 
-    validate_usb_volume(drive_letter, expected_disk_number)
-    root = f"{drive_letter.upper()}:\\"
+
+def copy_boot_files(
+    drive_letter: str,
+    progress=None,
+    log=None,
+    expected_disk_number: int | None = None,
+) -> dict:
+    copies = validate_build()
+    volume = validate_usb_volume(drive_letter, expected_disk_number)
+    letter = drive_letter.upper()
+    root = f"{letter}:\\"
     if not os.path.isdir(root):
         raise FileNotFoundError(f"USB volume {root} is not accessible.")
 
-    efi_dir = os.path.join(root, "EFI", "BOOT")
-    os.makedirs(efi_dir, exist_ok=True)
-
-    copies = [
-        (BOOTX64_SRC, os.path.join(efi_dir, "BOOTX64.EFI")),
-        (KERNEL_SRC, os.path.join(root, "kernel.elf")),
-    ]
-    if os.path.isfile(STARTUP_SRC):
-        copies.append((STARTUP_SRC, os.path.join(root, "startup.nsh")))
+    required = sum(os.path.getsize(source) for source, _ in copies)
+    if int(volume.get("Free") or 0) < required + 1024 * 1024:
+        raise OSError(
+            f"Not enough free space on {letter}:. "
+            f"VexOS needs at least {human_size(required + 1024 * 1024)} free."
+        )
 
     results = []
-    for index, (source, destination) in enumerate(copies, start=1):
+    for index, (source, relative_destination) in enumerate(copies, start=1):
+        destination = os.path.join(root, *relative_destination.split("\\"))
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
         if log:
-            log(f"Copying {os.path.relpath(source, PROJECT_ROOT)}...")
-        shutil.copyfile(source, destination)
-        if sha256_file(source) != sha256_file(destination):
-            raise IOError(f"Verification failed after copying {os.path.basename(source)}.")
-        results.append({
-            "file": os.path.relpath(destination, root),
-            "bytes": os.path.getsize(destination),
-            "sha256": sha256_file(destination),
-        })
+            log(f"Installing {relative_destination}")
+        digest = copy_verified(source, destination)
+        results.append(
+            {
+                "file": relative_destination.replace("\\", "/"),
+                "bytes": os.path.getsize(destination),
+                "sha256": digest,
+            }
+        )
         if progress:
             progress(int(index * 100 / len(copies)))
 
@@ -196,21 +265,18 @@ def copy_boot_files(drive_letter: str, progress=None, log=None,
 
 
 def flash_usb_disk(disk: dict, progress=None, log=None) -> dict:
-    """Destructively prepare one verified USB disk, then copy VexOS boot files."""
+    """Erase one revalidated physical USB disk and install the boot files."""
     validate_build()
 
     number = int(disk["Number"])
     unique_id = str(disk.get("UniqueId") or "")
     serial = str(disk.get("SerialNumber") or "")
     size = int(disk["Size"])
-
-    # Base64 keeps device identifiers safe when embedded in a PowerShell script.
-    import base64
     unique_b64 = base64.b64encode(unique_id.encode("utf-8")).decode("ascii")
     serial_b64 = base64.b64encode(serial.encode("utf-8")).decode("ascii")
 
     if log:
-        log(f"Re-checking USB disk {number} before changing its partition table...")
+        log(f"Rechecking the identity of USB disk {number}...")
 
     script = rf"""
 $ErrorActionPreference = 'Stop'
@@ -221,16 +287,16 @@ $expectedUnique = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{
 $expectedSerial = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{serial_b64}'))
 $disk = Get-Disk -Number $number -ErrorAction Stop
 if ($disk.BusType -ne 'USB') {{ throw 'Safety check failed: selected disk is no longer a USB disk.' }}
-if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Safety check failed: refusing to modify a boot or system disk.' }}
+if ($disk.IsBoot -or $disk.IsSystem) {{ throw 'Safety check failed: refusing to modify a Windows boot/system disk.' }}
 if ($disk.IsReadOnly) {{ throw 'Selected USB disk is read-only.' }}
 if ($disk.IsOffline) {{ throw 'Selected USB disk is offline.' }}
-if ([int64]$disk.Size -ne $expectedSize) {{ throw 'Safety check failed: disk capacity changed since selection. Refresh devices.' }}
-if ($expectedUnique -and [string]$disk.UniqueId -ne $expectedUnique) {{ throw 'Safety check failed: disk identity changed. Refresh devices.' }}
-if ($expectedSerial -and [string]$disk.SerialNumber -ne $expectedSerial) {{ throw 'Safety check failed: disk serial changed. Refresh devices.' }}
+if ([int64]$disk.Size -ne $expectedSize) {{ throw 'Disk capacity changed since selection. Refresh devices.' }}
+if ($expectedUnique -and [string]$disk.UniqueId -ne $expectedUnique) {{ throw 'Disk identity changed. Refresh devices.' }}
+if ($expectedSerial -and [string]$disk.SerialNumber -ne $expectedSerial) {{ throw 'Disk serial changed. Refresh devices.' }}
 $disk | Clear-Disk -RemoveData -RemoveOEM -Confirm:$false
 Initialize-Disk -Number $number -PartitionStyle GPT
 $partition = New-Partition -DiskNumber $number -UseMaximumSize -AssignDriveLetter
-$volume = Format-Volume -Partition $partition -FileSystem FAT32 -NewFileSystemLabel 'VEXOS' -Confirm:$false -Force
+$null = Format-Volume -Partition $partition -FileSystem FAT32 -NewFileSystemLabel 'VEXOS' -Confirm:$false -Force
 $volume = Get-Volume -Partition $partition -ErrorAction Stop
 if (-not $volume.DriveLetter) {{ throw 'Formatting completed but Windows did not assign a drive letter.' }}
 [pscustomobject]@{{ DriveLetter = [string]$volume.DriveLetter; FileSystem = [string]$volume.FileSystem }} |
@@ -247,11 +313,16 @@ if (-not $volume.DriveLetter) {{ throw 'Formatting completed but Windows did not
         raise RuntimeError("The USB partition was created, but it is not FAT32.")
 
     if log:
-        log(f"USB disk prepared as {letter}:\\ (GPT / FAT32).")
-        log("Installing UEFI bootloader and kernel...")
+        log(f"USB prepared as {letter}: (GPT + FAT32). Installing VexOS files...")
     if progress:
         progress(20)
-    result = copy_boot_files(letter, progress=lambda value: progress(20 + int(value * 0.8)) if progress else None, log=log, expected_disk_number=number)
+
+    result = copy_boot_files(
+        letter,
+        progress=lambda value: progress(20 + int(value * 0.8)) if progress else None,
+        log=log,
+        expected_disk_number=number,
+    )
     result["drive_letter"] = letter
     return result
 
@@ -260,254 +331,605 @@ class VexOSFlasher(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1020x720")
-        self.minsize(850, 600)
-        self.configure(bg="#111827")
+        self.geometry("980x790")
+        self.minsize(860, 700)
+        self.configure(bg=WINDOW_BG)
 
         self.disks: dict[int, dict] = {}
-        self.volumes: dict[str, dict] = {}
+        self.volumes_by_disk: dict[int, list[dict]] = {}
+        self.volume_choices: dict[str, dict] = {}
         self.busy = False
+        self.scanning = False
 
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("TFrame", background="#111827")
-        style.configure("Panel.TFrame", background="#1F2937")
-        style.configure("TLabel", background="#111827", foreground="#E5E7EB", font=("Segoe UI", 10))
-        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground="#FFFFFF")
-        style.configure("Sub.TLabel", foreground="#9CA3AF")
-        style.configure("TButton", font=("Segoe UI", 10), padding=(10, 7))
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("Danger.TButton", foreground="#B91C1C", font=("Segoe UI", 10, "bold"))
-        style.configure("Treeview", font=("Segoe UI", 9), rowheight=27)
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
-        style.configure("Horizontal.TProgressbar", troughcolor="#374151", background="#38BDF8")
-
+        self._configure_style()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self.close_window)
         self.refresh_devices()
 
-    def _build_ui(self):
-        header = ttk.Frame(self, padding=(18, 16, 18, 10))
-        header.pack(fill=tk.X)
-        ttk.Label(header, text="VexOS USB Flasher", style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(
-            header,
-            text="Quick Flash updates a FAT32 USB without elevation. Full Flash prepares the entire USB and requires administrator permission.",
-            style="Sub.TLabel",
-        ).pack(anchor=tk.W, pady=(3, 0))
-
-        toolbar = ttk.Frame(self, padding=(14, 5))
-        toolbar.pack(fill=tk.X)
-        self.refresh_button = ttk.Button(toolbar, text="Refresh devices", command=self.refresh_devices)
-        self.refresh_button.pack(side=tk.LEFT, padx=(0, 8))
-        self.copy_button = ttk.Button(toolbar, text="Quick Flash (no admin)", command=self.copy_selected)
-        self.copy_button.pack(side=tk.LEFT)
-
-        content = ttk.Frame(self, padding=(14, 8))
-        content.pack(fill=tk.BOTH, expand=True)
-
-        disk_panel = ttk.LabelFrame(content, text="Full Flash — requires administrator permission and erases the entire selected USB disk", padding=10)
-        disk_panel.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.disk_tree = ttk.Treeview(
-            disk_panel,
-            columns=("number", "model", "size", "serial", "style", "readonly"),
-            show="headings",
-            height=7,
-            selectmode="browse",
+    def _configure_style(self):
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Vex.Treeview",
+            background=PANEL_BG,
+            fieldbackground=PANEL_BG,
+            foreground=TEXT,
+            rowheight=32,
+            borderwidth=0,
+            font=("Segoe UI", 9),
         )
-        for key, label, width in (
-            ("number", "Disk", 55), ("model", "Device", 300), ("size", "Capacity", 100),
-            ("serial", "Serial", 170), ("style", "Partition style", 110), ("readonly", "Read-only", 85),
-        ):
-            self.disk_tree.heading(key, text=label)
-            self.disk_tree.column(key, width=width, anchor=tk.W)
-        self.disk_tree.pack(fill=tk.BOTH, expand=True)
-        ttk.Button(disk_panel, text="Full Flash selected USB (ADMIN — ERASES DISK)", style="Danger.TButton",
-                   command=self.flash_selected).pack(anchor=tk.E, pady=(9, 0))
+        style.configure(
+            "Vex.Treeview.Heading",
+            background=PANEL_ALT,
+            foreground=MUTED,
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+        )
+        style.map(
+            "Vex.Treeview",
+            background=[("selected", "#21476B")],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        style.configure(
+            "Vex.TCombobox",
+            fieldbackground=PANEL_ALT,
+            background=PANEL_ALT,
+            foreground=TEXT,
+            arrowcolor=TEXT,
+            padding=7,
+        )
+        style.configure(
+            "Vex.Horizontal.TProgressbar",
+            troughcolor=PANEL_ALT,
+            background=ACCENT,
+            borderwidth=0,
+            thickness=10,
+        )
 
-        volume_panel = ttk.LabelFrame(content, text="Quick Flash — FAT32 volumes only; no admin; preserves unrelated files", padding=10)
-        volume_panel.pack(fill=tk.BOTH, expand=True)
-        self.volume_tree = ttk.Treeview(
-            volume_panel,
-            columns=("drive", "disk", "label", "filesystem", "size", "free"),
+    def _label(self, parent, text, color=TEXT, size=10, bold=False, **kwargs):
+        return tk.Label(
+            parent,
+            text=text,
+            bg=kwargs.pop("bg", parent.cget("bg")),
+            fg=color,
+            font=("Segoe UI", size, "bold" if bold else "normal"),
+            anchor=kwargs.pop("anchor", "w"),
+            **kwargs,
+        )
+
+    def _button(self, parent, text, command, bg, fg="#FFFFFF", **kwargs):
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=bg,
+            fg=fg,
+            activebackground=kwargs.pop("activebackground", bg),
+            activeforeground=fg,
+            disabledforeground="#68758B",
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=10,
+            cursor="hand2",
+            font=("Segoe UI", 10, "bold"),
+            **kwargs,
+        )
+
+    def _build_ui(self):
+        header = tk.Frame(self, bg=WINDOW_BG)
+        header.pack(fill=tk.X, padx=24, pady=(20, 12))
+
+        title_area = tk.Frame(header, bg=WINDOW_BG)
+        title_area.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._label(title_area, "VexOS", size=24, bold=True).pack(anchor=tk.W)
+        self._label(
+            title_area,
+            "USB INSTALLER",
+            color=ACCENT,
+            size=9,
+            bold=True,
+        ).pack(anchor=tk.W, pady=(0, 4))
+        self._label(
+            title_area,
+            "Choose a USB drive, then choose how to install.",
+            color=MUTED,
+            size=10,
+        ).pack(anchor=tk.W)
+
+        self.refresh_button = self._button(
+            header, "↻  Refresh drives", self.refresh_devices, PANEL_ALT, fg=TEXT
+        )
+        self.refresh_button.pack(side=tk.RIGHT, anchor=tk.N, pady=8)
+
+        self._section_heading("01", "SELECT YOUR USB DRIVE", "Only physical USB disks are listed.")
+        device_panel = tk.Frame(self, bg=PANEL_BG, highlightbackground=BORDER, highlightthickness=1)
+        device_panel.pack(fill=tk.BOTH, padx=24, pady=(8, 10))
+
+        columns = ("disk", "device", "capacity", "volumes", "partition")
+        self.disk_tree = ttk.Treeview(
+            device_panel,
+            columns=columns,
             show="headings",
             height=5,
             selectmode="browse",
+            style="Vex.Treeview",
         )
-        for key, label, width in (
-            ("drive", "Drive", 70), ("disk", "Disk", 55), ("label", "Label", 180),
-            ("filesystem", "Filesystem", 100), ("size", "Capacity", 100), ("free", "Free", 100),
-        ):
-            self.volume_tree.heading(key, text=label)
-            self.volume_tree.column(key, width=width, anchor=tk.W)
-        self.volume_tree.pack(fill=tk.BOTH, expand=True)
+        headings = (
+            ("disk", "DISK", 58),
+            ("device", "USB DEVICE", 280),
+            ("capacity", "CAPACITY", 112),
+            ("volumes", "MOUNTED VOLUMES", 230),
+            ("partition", "LAYOUT", 100),
+        )
+        for key, label, width in headings:
+            self.disk_tree.heading(key, text=label)
+            self.disk_tree.column(key, width=width, minwidth=55, anchor=tk.W, stretch=key in ("device", "volumes"))
+        self.disk_tree.pack(fill=tk.X, padx=8, pady=8)
+        self.disk_tree.bind("<<TreeviewSelect>>", self.on_disk_selected)
 
-        footer = ttk.Frame(self, padding=(14, 6, 14, 14))
-        footer.pack(fill=tk.BOTH)
-        self.status = tk.StringVar(value="Ready")
-        ttk.Label(footer, textvariable=self.status, style="Sub.TLabel").pack(anchor=tk.W, pady=(0, 5))
-        self.progress = ttk.Progressbar(footer, maximum=100, mode="determinate")
-        self.progress.pack(fill=tk.X, pady=(0, 7))
-        self.log = tk.Text(
-            footer, height=8, bg="#0B1220", fg="#D1D5DB", insertbackground="#FFFFFF",
-            relief=tk.FLAT, font=("Cascadia Mono", 9), padx=10, pady=8,
+        details = tk.Frame(self, bg=PANEL_BG, highlightbackground=BORDER, highlightthickness=1)
+        details.pack(fill=tk.X, padx=24, pady=(0, 12))
+        self._label(details, "SELECTED DRIVE", color=MUTED, size=8, bold=True).pack(
+            anchor=tk.W, padx=14, pady=(11, 3)
         )
-        self.log.pack(fill=tk.BOTH, expand=True)
+        self.selected_details = tk.StringVar(
+            value="No drive selected. Insert a USB drive, refresh, and select it above."
+        )
+        tk.Label(
+            details,
+            textvariable=self.selected_details,
+            bg=PANEL_BG,
+            fg=TEXT,
+            font=("Segoe UI", 10),
+            justify=tk.LEFT,
+            anchor=tk.W,
+            wraplength=850,
+        ).pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        volume_row = tk.Frame(details, bg=PANEL_BG)
+        volume_row.pack(fill=tk.X, padx=14, pady=(0, 12))
+        self._label(volume_row, "FAT32 volume for safe update:", color=MUTED, size=9).pack(
+            side=tk.LEFT, padx=(0, 10)
+        )
+        self.volume_var = tk.StringVar()
+        self.volume_combo = ttk.Combobox(
+            volume_row,
+            textvariable=self.volume_var,
+            state="readonly",
+            width=48,
+            style="Vex.TCombobox",
+        )
+        self.volume_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.volume_combo.bind("<<ComboboxSelected>>", self.on_volume_selected)
+
+        self._section_heading("02", "CHOOSE AN INSTALL METHOD", "The safe option is recommended when a FAT32 USB volume already exists.")
+        actions = tk.Frame(self, bg=WINDOW_BG)
+        actions.pack(fill=tk.X, padx=24, pady=(8, 12))
+        actions.grid_columnconfigure(0, weight=1)
+        actions.grid_columnconfigure(1, weight=1)
+
+        quick = tk.Frame(actions, bg=PANEL_BG, highlightbackground="#28644F", highlightthickness=1)
+        quick.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        self._label(quick, "SAFE UPDATE", color=GREEN, size=9, bold=True).pack(
+            anchor=tk.W, padx=16, pady=(14, 5)
+        )
+        self._label(quick, "Update existing USB", size=15, bold=True).pack(
+            anchor=tk.W, padx=16
+        )
+        self._label(
+            quick,
+            "Copies the VexOS bootloader and kernel onto an existing FAT32 volume. Keeps your other files. No administrator permission.",
+            color=MUTED,
+            size=9,
+            wraplength=390,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, padx=16, pady=(6, 12))
+        self.quick_button = self._button(
+            quick, "Update selected USB  →", self.copy_selected, "#176B55"
+        )
+        self.quick_button.pack(fill=tk.X, padx=16, pady=(0, 15))
+
+        full = tk.Frame(actions, bg=PANEL_BG, highlightbackground="#70404A", highlightthickness=1)
+        full.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        self._label(full, "DESTRUCTIVE • ERASES THE DRIVE", color=RED, size=9, bold=True).pack(
+            anchor=tk.W, padx=16, pady=(14, 5)
+        )
+        self._label(full, "Erase & prepare USB", size=15, bold=True).pack(
+            anchor=tk.W, padx=16
+        )
+        self._label(
+            full,
+            "Deletes every partition and file, creates GPT + FAT32, then installs VexOS. Requires administrator permission.",
+            color=MUTED,
+            size=9,
+            wraplength=390,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, padx=16, pady=(6, 12))
+        self.full_button = self._button(
+            full, "Erase USB and install VexOS  →", self.flash_selected, "#9B3548"
+        )
+        self.full_button.pack(fill=tk.X, padx=16, pady=(0, 15))
+
+        activity = tk.Frame(self, bg=PANEL_BG, highlightbackground=BORDER, highlightthickness=1)
+        activity.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 10))
+        top = tk.Frame(activity, bg=PANEL_BG)
+        top.pack(fill=tk.X, padx=14, pady=(10, 6))
+        self._label(top, "INSTALL PROGRESS", color=MUTED, size=8, bold=True).pack(side=tk.LEFT)
+        self.progress_text = tk.StringVar(value="Ready")
+        self._label(top, "", color=MUTED, size=9).pack(side=tk.LEFT, expand=True)
+        tk.Label(
+            top, textvariable=self.progress_text, bg=PANEL_BG, fg=TEXT,
+            font=("Segoe UI", 9, "bold")
+        ).pack(side=tk.RIGHT)
+
+        self.progress = ttk.Progressbar(
+            activity, maximum=100, mode="determinate", style="Vex.Horizontal.TProgressbar"
+        )
+        self.progress.pack(fill=tk.X, padx=14, pady=(0, 9))
+
+        log_header = tk.Frame(activity, bg=PANEL_BG)
+        log_header.pack(fill=tk.X, padx=14, pady=(0, 5))
+        self._label(log_header, "ACTIVITY", color=MUTED, size=8, bold=True).pack(side=tk.LEFT)
+        self._button(log_header, "Clear", self.clear_log, PANEL_ALT, fg=MUTED, padx=8, pady=3).pack(
+            side=tk.RIGHT
+        )
+        log_frame = tk.Frame(activity, bg=PANEL_BG)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
+        self.log = tk.Text(
+            log_frame,
+            height=6,
+            bg="#080D18",
+            fg="#CFD9EA",
+            insertbackground=TEXT,
+            relief=tk.FLAT,
+            font=("Cascadia Mono", 8),
+            padx=10,
+            pady=8,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+        )
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log.yview)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.status_var = tk.StringVar(value="Scanning for USB drives...")
+        self.status_label = tk.Label(
+            self,
+            textvariable=self.status_var,
+            bg=WINDOW_BG,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+            anchor=tk.W,
+        )
+        self.status_label.pack(fill=tk.X, padx=26, pady=(0, 12))
+
+        self._update_action_states()
+
+    def _section_heading(self, number: str, title: str, subtitle: str):
+        row = tk.Frame(self, bg=WINDOW_BG)
+        row.pack(fill=tk.X, padx=24, pady=(8, 0))
+        tk.Label(
+            row,
+            text=number,
+            bg="#1D3857",
+            fg=ACCENT,
+            font=("Segoe UI", 9, "bold"),
+            padx=8,
+            pady=4,
+        ).pack(side=tk.LEFT, padx=(0, 9))
+        text_area = tk.Frame(row, bg=WINDOW_BG)
+        text_area.pack(side=tk.LEFT, fill=tk.X)
+        self._label(text_area, title, size=10, bold=True).pack(anchor=tk.W)
+        self._label(text_area, subtitle, color=MUTED, size=8).pack(anchor=tk.W, pady=(1, 0))
 
     def _ui(self, callback):
-        self.after(0, callback)
+        try:
+            self.after(0, callback)
+        except tk.TclError:
+            pass
 
     def log_line(self, text: str):
         def append():
+            self.log.configure(state=tk.NORMAL)
             self.log.insert(tk.END, f"• {text}\n")
             self.log.see(tk.END)
+            self.log.configure(state=tk.DISABLED)
         self._ui(append)
 
+    def clear_log(self):
+        self.log.configure(state=tk.NORMAL)
+        self.log.delete("1.0", tk.END)
+        self.log.configure(state=tk.DISABLED)
+
     def set_progress(self, value: int):
-        self._ui(lambda: self.progress.configure(value=max(0, min(100, value))))
+        value = max(0, min(100, int(value)))
+        self._ui(lambda: (
+            self.progress.configure(value=value),
+            self.progress_text.set(f"{value}%")
+        ))
 
-    def set_status(self, text: str):
-        self._ui(lambda: self.status.set(text))
-
-    def show_error(self, title: str, text: str):
-        self._ui(lambda: messagebox.showerror(title, text, parent=self))
-
-    def show_info(self, title: str, text: str):
-        self._ui(lambda: messagebox.showinfo(title, text, parent=self))
+    def set_status(self, text: str, color=MUTED):
+        self._ui(lambda: (
+            self.status_var.set(text),
+            self.status_label.configure(fg=color)
+        ))
 
     def set_busy(self, busy: bool):
         self.busy = busy
-        state = tk.DISABLED if busy else tk.NORMAL
-        self._ui(lambda: (
-            self.refresh_button.configure(state=state),
-            self.copy_button.configure(state=state),
-        ))
+
+        def update():
+            self.refresh_button.configure(state=tk.DISABLED if busy else tk.NORMAL)
+            self._update_action_states()
+        self._ui(update)
 
     def refresh_devices(self):
-        if self.busy:
+        if self.busy or self.scanning:
             return
-        self.status.set("Scanning USB devices...")
+        self.scanning = True
+        self.status_var.set("Scanning for physical USB drives...")
+        self.status_label.configure(fg=MUTED)
+        self.refresh_button.configure(state=tk.DISABLED)
         self.disk_tree.delete(*self.disk_tree.get_children())
-        self.volume_tree.delete(*self.volume_tree.get_children())
+        self.disks.clear()
+        self.volumes_by_disk.clear()
+        self.volume_choices.clear()
+        self.volume_combo.configure(values=())
+        self.volume_var.set("")
+        self.selected_details.set("Scanning USB devices...")
 
         def worker():
             try:
                 disks = get_usb_disks()
                 volumes = get_usb_volumes()
-                self.disks = {int(d["Number"]): d for d in disks}
-                self.volumes = {str(v["DriveLetter"]).upper(): v for v in volumes}
+                by_disk: dict[int, list[dict]] = {}
+                for volume in volumes:
+                    by_disk.setdefault(int(volume["DiskNumber"]), []).append(volume)
 
                 def update():
+                    self.disks = {int(disk["Number"]): disk for disk in disks}
+                    self.volumes_by_disk = by_disk
                     for number, disk in self.disks.items():
-                        self.disk_tree.insert("", tk.END, iid=str(number), values=(
-                            number, disk.get("FriendlyName") or "USB device",
-                            human_size(disk.get("Size")), disk.get("SerialNumber") or "—",
-                            disk.get("PartitionStyle") or "RAW",
-                            "Yes" if disk.get("IsReadOnly") else "No",
-                        ))
-                    for letter, volume in self.volumes.items():
-                        self.volume_tree.insert("", tk.END, iid=letter, values=(
-                            f"{letter}:\\", volume.get("DiskNumber"), volume.get("Label") or "",
-                            volume.get("FileSystem") or "—", human_size(volume.get("Size")),
-                            human_size(volume.get("Free")),
-                        ))
-                    self.status.set(f"Found {len(disks)} USB disk(s) and {len(volumes)} mounted USB volume(s).")
+                        mounted = by_disk.get(number, [])
+                        volume_summary = ", ".join(
+                            f"{v['DriveLetter']}: {v.get('FileSystem') or 'Unknown'}"
+                            for v in mounted
+                        ) or "No mounted volume"
+                        self.disk_tree.insert(
+                            "",
+                            tk.END,
+                            iid=str(number),
+                            values=(
+                                f"Disk {number}",
+                                disk.get("FriendlyName") or "USB device",
+                                human_size(disk.get("Size")),
+                                volume_summary,
+                                disk.get("PartitionStyle") or "RAW",
+                            ),
+                        )
+                    self.scanning = False
+                    self.refresh_button.configure(state=tk.NORMAL)
+                    if disks:
+                        self.status_var.set(
+                            f"Found {len(disks)} physical USB drive(s). Select one to see its options."
+                        )
+                    else:
+                        self.status_var.set(
+                            "No online USB drives found. Insert a USB drive and select Refresh drives."
+                        )
+                    self.status_label.configure(fg=MUTED)
+                    self.selected_details.set(
+                        "Select a USB drive above. Internal disks are not shown."
+                        if disks else
+                        "No USB drive detected. Check the connection, then click Refresh drives."
+                    )
+                    self._update_action_states()
+
                 self._ui(update)
             except Exception as exc:
-                self.set_status("Device scan failed.")
-                self.log_line(f"Device scan error: {exc}")
+                def failed():
+                    self.scanning = False
+                    self.refresh_button.configure(state=tk.NORMAL)
+                    self.status_var.set("USB scan failed. See Activity for details.")
+                    self.status_label.configure(fg=RED)
+                    self.selected_details.set("The drive scan failed.")
+                    self.log_line(f"USB scan failed: {exc}")
+                    self._update_action_states()
+                self._ui(failed)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _selected_volume(self):
-        selected = self.volume_tree.selection()
-        if not selected:
-            messagebox.showwarning("Select a volume", "Choose a mounted USB volume first.", parent=self)
+    def selected_disk(self) -> dict | None:
+        selection = self.disk_tree.selection()
+        if not selection:
             return None
-        letter = selected[0].upper()
-        volume = self.volumes.get(letter)
-        if not volume:
-            messagebox.showerror("Device changed", "That USB volume is no longer available. Refresh devices.", parent=self)
+        try:
+            return self.disks.get(int(selection[0]))
+        except (ValueError, KeyError):
             return None
-        return letter, volume
+
+    def selected_volume(self) -> dict | None:
+        return self.volume_choices.get(self.volume_var.get())
+
+    def on_disk_selected(self, _event=None):
+        disk = self.selected_disk()
+        if not disk:
+            self.selected_details.set("Select a USB drive above.")
+            self._update_action_states()
+            return
+
+        number = int(disk["Number"])
+        volumes = self.volumes_by_disk.get(number, [])
+        model = disk.get("FriendlyName") or "USB device"
+        detail = (
+            f"Disk {number}  •  {model}  •  {human_size(disk.get('Size'))}\n"
+            f"Serial: {disk.get('SerialNumber') or 'Not reported'}  •  "
+            f"Partition layout: {disk.get('PartitionStyle') or 'RAW'}"
+        )
+        if disk.get("IsBoot") or disk.get("IsSystem"):
+            detail += "\nWindows marks this disk as a boot/system disk. Flashing is blocked."
+        elif disk.get("IsReadOnly"):
+            detail += "\nThis USB disk is read-only. Change its protection before flashing."
+        self.selected_details.set(detail)
+
+        self.volume_choices.clear()
+        choices = []
+        for volume in volumes:
+            if str(volume.get("FileSystem", "")).upper() != "FAT32":
+                continue
+            letter = str(volume.get("DriveLetter") or "").upper()
+            if len(letter) != 1:
+                continue
+            label = (
+                f"{letter}:  •  {volume.get('Label') or 'No label'}  •  "
+                f"{human_size(volume.get('Free'))} free"
+            )
+            choices.append(label)
+            self.volume_choices[label] = volume
+
+        self.volume_combo.configure(values=choices)
+        if choices:
+            self.volume_var.set(choices[0])
+        else:
+            self.volume_var.set("")
+            self.selected_details.set(
+                detail + "\nNo mounted FAT32 volume is available for a safe update. "
+                "Use Erase & Prepare to create one."
+            )
+        self._update_action_states()
+
+    def on_volume_selected(self, _event=None):
+        self._update_action_states()
+
+    def _update_action_states(self):
+        disk = self.selected_disk()
+        valid_disk = bool(
+            disk
+            and not disk.get("IsBoot")
+            and not disk.get("IsSystem")
+            and not disk.get("IsReadOnly")
+            and not disk.get("IsOffline")
+        )
+        quick_ready = bool(valid_disk and self.selected_volume())
+        full_ready = bool(valid_disk)
+
+        if self.busy or self.scanning:
+            quick_ready = False
+            full_ready = False
+
+        self.quick_button.configure(state=tk.NORMAL if quick_ready else tk.DISABLED)
+        self.full_button.configure(state=tk.NORMAL if full_ready else tk.DISABLED)
 
     def copy_selected(self):
         if self.busy:
             return
-        selected = self._selected_volume()
-        if not selected:
+        disk = self.selected_disk()
+        volume = self.selected_volume()
+        if not disk or not volume:
+            messagebox.showwarning(
+                "Choose a FAT32 volume",
+                "Select a USB drive that has a mounted FAT32 volume.",
+                parent=self,
+            )
             return
-        letter, volume = selected
-        if not messagebox.askyesno(
-            "Update VexOS files",
-            f"Quick Flash VexOS to {letter}:\\?\n\n"
-            "No administrator permission is needed. This requires FAT32 and does not format the USB. "
-            "Existing files other than VexOS boot files are preserved.",
+
+        letter = str(volume["DriveLetter"]).upper()
+        number = int(disk["Number"])
+        confirmed = messagebox.askyesno(
+            "Update existing USB",
+            f"Install VexOS to {letter}: on Disk {number}?\n\n"
+            "This copies the UEFI bootloader, kernel, and startup script if present.\n\n"
+            "• Existing unrelated files are preserved.\n"
+            "• The USB is not formatted or repartitioned.\n"
+            "• Administrator permission is not required.",
             parent=self,
-        ):
+        )
+        if not confirmed:
             return
+
         self._start_worker(
-            f"Updating {letter}:\\",
+            f"Updating {letter}:",
             lambda: copy_boot_files(
                 letter,
                 progress=self.set_progress,
                 log=self.log_line,
-                expected_disk_number=int(volume["DiskNumber"]),
+                expected_disk_number=number,
             ),
-            "VexOS volume updated",
+            "VexOS update complete",
         )
 
     def flash_selected(self):
         if self.busy:
             return
-        selected = self.disk_tree.selection()
-        if not selected:
-            messagebox.showwarning("Select a disk", "Choose a physical USB disk from the top list.", parent=self)
-            return
-        number = int(selected[0])
-        disk = self.disks.get(number)
+        disk = self.selected_disk()
         if not disk:
-            messagebox.showerror("Device changed", "That USB disk is no longer available. Refresh devices.", parent=self)
-            return
-        if disk.get("IsBoot") or disk.get("IsSystem"):
-            messagebox.showerror("Protected disk", "Windows identifies this as a boot or system disk. It cannot be flashed.", parent=self)
-            return
-        if disk.get("IsReadOnly"):
-            messagebox.showerror("Read-only disk", "This USB disk is read-only.", parent=self)
-            return
-        if not is_admin():
             messagebox.showwarning(
-                "Administrator permission required",
-                "Only Full Flash needs administrator permission because it repartitions and formats the physical disk. Quick Flash in the lower panel works without admin on an existing FAT32 USB.",
+                "Select a USB drive",
+                "Select a physical USB drive from the list first.",
+                parent=self,
+            )
+            return
+        if disk.get("IsBoot") or disk.get("IsSystem") or disk.get("IsReadOnly"):
+            messagebox.showerror(
+                "Drive is protected",
+                "Windows identifies this drive as protected or read-only. It cannot be flashed.",
                 parent=self,
             )
             return
 
+        if not is_admin():
+            relaunch = messagebox.askyesno(
+                "Administrator permission required",
+                "Erase & Prepare needs administrator permission to repartition the USB.\n\n"
+                "Restart VexOS USB Flasher as administrator?",
+                parent=self,
+            )
+            if relaunch:
+                if relaunch_as_admin():
+                    self.destroy()
+                else:
+                    messagebox.showerror(
+                        "Could not elevate",
+                        "Windows did not start the elevated flasher. Try opening PowerShell as Administrator.",
+                        parent=self,
+                    )
+            return
+
+        number = int(disk["Number"])
         identity = (
             f"Disk {number}: {disk.get('FriendlyName') or 'USB device'}\n"
             f"Capacity: {human_size(disk.get('Size'))}\n"
             f"Serial: {disk.get('SerialNumber') or 'Not reported'}"
         )
         confirmed = messagebox.askyesno(
-            "FINAL WARNING — THIS ERASES THE USB",
-            f"{identity}\n\nThis operation deletes every partition and file on this disk, "
-            "then creates a GPT/FAT32 VexOS boot volume.\n\nContinue only if this is definitely the USB drive you intend to erase.",
+            "This will erase the entire USB",
+            f"{identity}\n\n"
+            "EVERY PARTITION AND FILE ON THIS DISK WILL BE DELETED.\n"
+            "The installer will create a GPT/FAT32 VexOS boot drive.\n\n"
+            "Continue only if this is definitely the USB drive you want to erase.",
             icon="warning",
             parent=self,
         )
         if not confirmed:
             return
+
         phrase = f"ERASE {number}"
         typed = simpledialog.askstring(
-            "Confirm disk erase",
-            f"Type exactly {phrase} to authorize formatting this USB disk:",
+            "Final confirmation",
+            f"To confirm, type exactly:\n\n{phrase}",
             parent=self,
         )
         if typed != phrase:
-            messagebox.showinfo("Cancelled", "The disk was not changed.", parent=self)
+            messagebox.showinfo(
+                "Cancelled",
+                "The disk was not changed. The confirmation text did not match.",
+                parent=self,
+            )
             return
 
         self._start_worker(
-            f"Preparing USB disk {number}...",
+            f"Preparing Disk {number}...",
             lambda: flash_usb_disk(disk, progress=self.set_progress, log=self.log_line),
             "VexOS USB prepared",
             refresh_after=True,
@@ -515,8 +937,11 @@ class VexOSFlasher(tk.Tk):
 
     def _start_worker(self, status: str, operation, success_title: str, refresh_after=False):
         self.set_busy(True)
-        self.status.set(status)
+        self.status_var.set(status)
+        self.status_label.configure(fg=ACCENT)
         self.progress.configure(value=0)
+        self.progress_text.set("Starting")
+        self.log_line(status)
 
         def worker():
             try:
@@ -527,20 +952,42 @@ class VexOSFlasher(tk.Tk):
                     for item in files
                 )
                 destination = result.get("root") or f"{result.get('drive_letter')}:\\"
-                self.log_line(f"Completed successfully at {destination}")
-                self.show_info(success_title, f"VexOS boot files are ready at {destination}\n\n{detail}")
-                self.set_status(f"Completed: {destination}")
+                self.log_line(f"Success. VexOS is installed at {destination}")
+                self.set_progress(100)
+
+                def success():
+                    messagebox.showinfo(
+                        success_title,
+                        f"VexOS boot files are ready at {destination}\n\n{detail}",
+                        parent=self,
+                    )
+                    self.status_var.set(f"Complete — {destination}")
+                    self.status_label.configure(fg=GREEN)
+                self._ui(success)
             except Exception as exc:
                 self.log_line(f"ERROR: {exc}")
-                self.show_error("Operation failed", str(exc))
-                self.set_status("Operation failed.")
+                self.set_status("Operation failed. See Activity for the error.", RED)
+                self._ui(
+                    lambda: messagebox.showerror(
+                        "Installation failed", str(exc), parent=self
+                    )
+                )
             finally:
                 self.set_busy(False)
-                self.set_progress(0)
                 if refresh_after:
-                    self.refresh_devices()
+                    self._ui(self.refresh_devices)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def close_window(self):
+        if self.busy:
+            messagebox.showwarning(
+                "Operation in progress",
+                "A USB operation is still running. Wait for it to finish before closing the flasher.",
+                parent=self,
+            )
+            return
+        self.destroy()
 
 
 def main():
