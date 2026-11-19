@@ -62,7 +62,8 @@ static void xhci_debug_mouse_report(const xhci_device_state_t *dev,
     line[used++] = *data_text++;
   line[used] = '\0';
 
-  uint32_t shown = transfer_length < 4u ? transfer_length : 4u;
+  uint32_t shown = dev->intr_buf
+      ? (transfer_length < 4u ? transfer_length : 4u) : 0u;
   for (uint32_t i = 0; i < shown; ++i) {
     if (i) {
       if (used + 1u >= sizeof(line))
