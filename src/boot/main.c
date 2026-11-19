@@ -270,7 +270,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     EFI_STATUS status;
 
     InitializeLib(ImageHandle, SystemTable);
+#ifndef VEXOS_RELEASE
     Print(L"VexOS 2.0.0-dev UEFI bootloader initializing...\n");
+#endif
 
     status = LoadKernelFile(ImageHandle, SystemTable,
                             &kernel_buffer, &kernel_size);
