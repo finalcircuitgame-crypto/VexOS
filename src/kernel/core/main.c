@@ -1409,6 +1409,9 @@ void kernel_main(BootInfo *bootInfo) {
 #endif
   pci_start_xhci();
 
+  /* Persist diagnostics produced during xHCI startup, including NetLog/TX probes. */
+  (void)bootlog_flush();
+
 #ifdef VEXOS_CI_SKIP_WIZARD
   // CI-only path: bypass the interactive first-boot wizard for automated QEMU input.
   serial_print("[CI] Setup wizard skipped for automated desktop test\n");
@@ -1482,6 +1485,7 @@ void kernel_main(BootInfo *bootInfo) {
   }
   uint32_t frame_delay = 1000 / target_fps;
   uint64_t last_frame_ticks = Timer_Ticks();
+  uint64_t last_bootlog_flush_ticks = last_frame_ticks;
 
   int ci_task_runtime_reported = 0;
 #ifdef VEXOS_CI_INPUT_TEST
@@ -1510,6 +1514,17 @@ void kernel_main(BootInfo *bootInfo) {
 #ifdef VEXOS_NETLOG
     netlog_poll();
 #endif
+
+    /*
+     * Keep /boot.log current even when UDP NetLog cannot reach the host.
+     * bootlog_flush() is a no-op unless new log bytes exist and writable
+     * VexOS storage was detected during PCI enumeration.
+     */
+    uint64_t bootlog_now = Timer_Ticks();
+    if (bootlog_now - last_bootlog_flush_ticks >= 1000u) {
+      (void)bootlog_flush();
+      last_bootlog_flush_ticks = bootlog_now;
+    }
 
     // Keep xHCI polling frequent. The poll is atomic against PIT task switches.
     xhci_poll_events_atomic();
