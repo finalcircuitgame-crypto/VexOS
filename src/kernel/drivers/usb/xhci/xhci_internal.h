@@ -37,6 +37,7 @@ typedef struct xhci_device_state {
   uint8_t hid_ifnum;
   uint8_t hid_subclass;
   uint8_t hid_proto;
+  uint8_t hid_boot_protocol;
   uint16_t hid_report_desc_len;
 
   uint8_t hid_has_report_id;
