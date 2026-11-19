@@ -1213,6 +1213,7 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
   dev->hid_ifnum = 0xFF;
   dev->hid_subclass = 0;
   dev->hid_proto = 0;
+  dev->hid_boot_protocol = 0;
   dev->hid_report_desc_len = 0;
   dev->hid_has_report_id = 0;
   dev->hid_mouse_report_id = 0;
