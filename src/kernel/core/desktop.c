@@ -64,8 +64,10 @@ static uint32_t g_viewer_scroll;
 
 #ifndef VEXOS_RELEASE
 #define DESKTOP_DEBUG_INPUT_CAP 160u
+#define DESKTOP_DEBUG_USB_CAP 160u
 #define DESKTOP_DEBUG_NETWORK_CAP 768u
 static char g_debug_input_status[DESKTOP_DEBUG_INPUT_CAP];
+static char g_debug_usb_status[DESKTOP_DEBUG_USB_CAP];
 static char g_debug_network_status[DESKTOP_DEBUG_NETWORK_CAP];
 #endif
 
@@ -106,6 +108,15 @@ void desktop_debug_set_input_status(const char *status) {
 #endif
 }
 
+void desktop_debug_set_usb_status(const char *status) {
+#ifndef VEXOS_RELEASE
+  desktop_debug_copy(g_debug_usb_status,
+                     (uint32_t)sizeof(g_debug_usb_status), status);
+#else
+  (void)status;
+#endif
+}
+
 void desktop_debug_set_network_status(const char *status) {
 #ifndef VEXOS_RELEASE
   desktop_debug_copy(g_debug_network_status,
@@ -124,7 +135,8 @@ static void desktop_debug_draw_overlay(uint32_t *target) {
   return;
 #else
   if (!g_bi || !g_bi->framebuffer || !target ||
-      (!g_debug_input_status[0] && !g_debug_network_status[0]) ||
+      (!g_debug_input_status[0] && !g_debug_usb_status[0] &&
+       !g_debug_network_status[0]) ||
       g_bi->width <= 24u || g_bi->height <= 24u)
     return;
 
@@ -146,6 +158,13 @@ static void desktop_debug_draw_overlay(uint32_t *target) {
     gfx_blend_round_rect(x, y, panel_width, 40u, 6u, 0x09111Fu, 238u);
     gfx_draw_string(x + 10u, y + 5u, "INPUT", 0x8D7BFFu);
     gfx_draw_string(x + 82u, y + 5u, g_debug_input_status, 0xF1F3FAu);
+    y += 48u;
+  }
+
+  if (g_debug_usb_status[0]) {
+    gfx_blend_round_rect(x, y, panel_width, 40u, 6u, 0x09111Fu, 238u);
+    gfx_draw_string(x + 10u, y + 5u, "USB HID", 0x38BDF8u);
+    gfx_draw_string(x + 82u, y + 5u, g_debug_usb_status, 0xF1F3FAu);
     y += 48u;
   }
 
