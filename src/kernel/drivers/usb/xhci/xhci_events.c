@@ -11,6 +11,83 @@ static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   return 0;
 }
 
+static void xhci_debug_append_u32(char *out, uint32_t capacity,
+                                      uint32_t *used, uint32_t value) {
+  char digits[11];
+  uint32_t count = 0;
+  do {
+    digits[count++] = (char)('0' + (value % 10u));
+    value /= 10u;
+  } while (value && count < sizeof(digits));
+  while (count && *used + 1u < capacity)
+    out[(*used)++] = digits[--count];
+  out[*used] = '\0';
+}
+
+static void xhci_debug_append_hex8(char *out, uint32_t capacity,
+                                   uint32_t *used, uint8_t value) {
+  static const char hex[] = "0123456789ABCDEF";
+  if (*used + 2u >= capacity)
+    return;
+  out[(*used)++] = hex[(value >> 4) & 0x0Fu];
+  out[(*used)++] = hex[value & 0x0Fu];
+  out[*used] = '\0';
+}
+
+static void xhci_debug_mouse_report(const xhci_device_state_t *dev,
+                                    uint32_t completion_code,
+                                    uint32_t transfer_length) {
+  char line[160] = "USB mouse report: slot=";
+  uint32_t used = 23u;
+  xhci_debug_append_u32(line, sizeof(line), &used, dev->slot_id);
+  const char *ep_text = " ep=";
+  while (*ep_text && used + 1u < sizeof(line))
+    line[used++] = *ep_text++;
+  line[used] = '\0';
+  xhci_debug_append_u32(line, sizeof(line), &used, dev->intr_dci);
+  const char *cc_text = " cc=";
+  while (*cc_text && used + 1u < sizeof(line))
+    line[used++] = *cc_text++;
+  line[used] = '\0';
+  xhci_debug_append_u32(line, sizeof(line), &used, completion_code);
+  const char *len_text = " len=";
+  while (*len_text && used + 1u < sizeof(line))
+    line[used++] = *len_text++;
+  line[used] = '\0';
+  xhci_debug_append_u32(line, sizeof(line), &used, transfer_length);
+  const char *data_text = " data=";
+  while (*data_text && used + 1u < sizeof(line))
+    line[used++] = *data_text++;
+  line[used] = '\0';
+
+  uint32_t shown = transfer_length < 4u ? transfer_length : 4u;
+  for (uint32_t i = 0; i < shown; ++i) {
+    if (i) {
+      if (used + 1u >= sizeof(line))
+        break;
+      line[used++] = ' ';
+      line[used] = '\0';
+    }
+    xhci_debug_append_hex8(line, sizeof(line), &used, dev->intr_buf[i]);
+  }
+
+  input_pointer_state_t pointer = input_pointer_get();
+  const char *pos_text = " pos=";
+  while (*pos_text && used + 1u < sizeof(line))
+    line[used++] = *pos_text++;
+  line[used] = '\0';
+  xhci_debug_append_u32(line, sizeof(line), &used,
+                        (uint32_t)(pointer.x < 0 ? 0 : pointer.x));
+  if (used + 1u < sizeof(line)) {
+    line[used++] = ',';
+    line[used] = '\0';
+  }
+  xhci_debug_append_u32(line, sizeof(line), &used,
+                        (uint32_t)(pointer.y < 0 ? 0 : pointer.y));
+
+  desktop_debug_set_input_status(line);
+}
+
 static char xhci_kbd_keycode_to_ascii(uint8_t key, uint8_t shift) {
   if (key >= 0x04 && key <= 0x1D) {
     char c = (char)('a' + (key - 0x04));
@@ -293,7 +370,7 @@ void xhci_poll_events() {
             (void)ddx;
             (void)ddy;
           }
-      } else if (dev->hid_proto == 2) {
+      } else if (dev->hid_proto == 2 && dev->hid_boot_protocol) {
           uint8_t buttons = dev->intr_buf[0];
           int8_t dx = (int8_t)dev->intr_buf[1];
           int8_t dy = (int8_t)dev->intr_buf[2];
@@ -344,6 +421,10 @@ void xhci_poll_events() {
     }
 
 rearm:
+    if (dev->hid_mouse_valid ||
+        (dev->hid_proto == 2u && dev->hid_boot_protocol)) {
+      xhci_debug_mouse_report(dev, cc, xfer_len);
+    }
     if (dev->intr_ring && dev->intr_mps) {
       xhci_hid_start_polling(dev);
     }
