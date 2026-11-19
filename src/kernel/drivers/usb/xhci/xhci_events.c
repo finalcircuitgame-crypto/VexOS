@@ -1,7 +1,9 @@
 #include "xhci_internal.h"
 #include "input.h"
 
-extern void desktop_debug_set_input_status(const char *status);
+extern void desktop_debug_set_usb_status(const char *status);
+
+static uint32_t g_xhci_mouse_report_log_count;
 
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
@@ -88,7 +90,18 @@ static void xhci_debug_mouse_report(const xhci_device_state_t *dev,
   xhci_debug_append_u32(line, sizeof(line), &used,
                         (uint32_t)(pointer.y < 0 ? 0 : pointer.y));
 
-  desktop_debug_set_input_status(line);
+  /*
+   * Keep USB diagnostics independent from the PS/2 touchpad status. Also
+   * mirror a bounded sample to COM1/NetLog so the receiver can prove whether
+   * interrupt reports are actually arriving after enumeration.
+   */
+  if (g_xhci_mouse_report_log_count < 24u) {
+    serial_print("[HID][REPORT] ");
+    serial_print(line);
+    serial_print("\n");
+  }
+  g_xhci_mouse_report_log_count++;
+  desktop_debug_set_usb_status(line);
 }
 
 static char xhci_kbd_keycode_to_ascii(uint8_t key, uint8_t shift) {
