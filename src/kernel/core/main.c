@@ -76,32 +76,164 @@ static inline uint16_t pit_read_counter(void) {
 
 static int g_ConsoleReady = 0;
 
-void serial_print(const char *str) {
-  /* The PIT can preempt a task between serial characters and let another
-     task interleave its message. COM1 output is short; serialize it on this
-     single-core kernel by preserving the caller's interrupt-enable state. */
-  uint64_t irq_flags;
-  __asm__ volatile("pushfq; popq %0; cli" : "=r"(irq_flags) :: "memory");
+/*
+ * COM1 is commonly left in an arbitrary state by firmware. Configure it
+ * ourselves instead of relying on the BIOS baud rate. The 16550 FIFO lets
+ * us send up to 16 bytes per transmitter-ready event.
+ */
+#define SERIAL_COM1_BASE       0x3F8u
+#define SERIAL_COM1_DATA       (SERIAL_COM1_BASE + 0u)
+#define SERIAL_COM1_IER        (SERIAL_COM1_BASE + 1u)
+#define SERIAL_COM1_FCR        (SERIAL_COM1_BASE + 2u)
+#define SERIAL_COM1_LCR        (SERIAL_COM1_BASE + 3u)
+#define SERIAL_COM1_MCR        (SERIAL_COM1_BASE + 4u)
+#define SERIAL_COM1_LSR        (SERIAL_COM1_BASE + 5u)
+#define SERIAL_LSR_DATA_READY  0x01u
+#define SERIAL_LSR_THR_EMPTY   0x20u
+#define SERIAL_TX_QUEUE_SIZE   32768u
+#define SERIAL_TX_QUEUE_MASK   (SERIAL_TX_QUEUE_SIZE - 1u)
+#define SERIAL_UART_WAIT_LIMIT 1000000u
 
-  /* Capture every serial message before attempting hardware output. */
+static uint8_t g_SerialInitialized;
+static uint8_t g_SerialPresent;
+static volatile uint32_t g_SerialQueueHead;
+static volatile uint32_t g_SerialQueueTail;
+static volatile uint8_t g_SerialDraining;
+static char g_SerialTxQueue[SERIAL_TX_QUEUE_SIZE];
+
+static uint64_t serial_irq_save(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
+  return flags;
+}
+
+static void serial_irq_restore(uint64_t flags) {
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+}
+
+static void serial_uart_initialize(void) {
+  if (g_SerialInitialized)
+    return;
+  g_SerialInitialized = 1;
+
+  /* Disable UART interrupts while programming the divisor and line format. */
+  outb(SERIAL_COM1_IER, 0x00u);
+  outb(SERIAL_COM1_LCR, 0x80u); /* DLAB */
+  outb(SERIAL_COM1_DATA, 0x01u); /* 115200 baud from 1.8432 MHz */
+  outb(SERIAL_COM1_IER, 0x00u);
+  outb(SERIAL_COM1_LCR, 0x03u);  /* 8 data bits, no parity, 1 stop bit */
+  outb(SERIAL_COM1_FCR, 0xC7u);  /* Enable FIFO, clear RX/TX, 14-byte RX trigger */
+
+  /*
+   * Use the UART's internal loopback to distinguish a working 16550-compatible
+   * COM1 from an unimplemented legacy I/O port. Nothing is sent to the wire
+   * during this check.
+   */
+  outb(SERIAL_COM1_MCR, 0x1Eu); /* Loopback + DTR/RTS/OUT1/OUT2 */
+  outb(SERIAL_COM1_DATA, 0xAEu);
+
+  uint8_t loopback_ok = 0;
+  for (uint32_t spin = 0; spin < 10000u; ++spin) {
+    if (inb(SERIAL_COM1_LSR) & SERIAL_LSR_DATA_READY) {
+      loopback_ok = (inb(SERIAL_COM1_DATA) == 0xAEu);
+      break;
+    }
+  }
+
+  outb(SERIAL_COM1_MCR, 0x0Bu); /* Normal operation: DTR, RTS, OUT2 */
+  outb(SERIAL_COM1_FCR, 0xC7u);
+
+  g_SerialPresent = loopback_ok;
+}
+
+static int serial_uart_wait_tx_ready(void) {
+  for (uint32_t spin = 0; spin < SERIAL_UART_WAIT_LIMIT; ++spin) {
+    if (inb(SERIAL_COM1_LSR) & SERIAL_LSR_THR_EMPTY)
+      return 1;
+  }
+  return 0;
+}
+
+/*
+ * Drain the software queue in FIFO-sized bursts. Interrupts are enabled
+ * between bursts, so physical UART transmission does not freeze the timer
+ * scheduler for the duration of an entire log message.
+ */
+static void serial_tx_drain(void) {
+  uint8_t burst[16];
+
+  for (;;) {
+    if (!serial_uart_wait_tx_ready()) {
+      uint64_t flags = serial_irq_save();
+      g_SerialDraining = 0;
+      serial_irq_restore(flags);
+      return;
+    }
+
+    uint64_t flags = serial_irq_save();
+    uint32_t count = 0;
+    while (count < sizeof(burst) &&
+           g_SerialQueueTail != g_SerialQueueHead) {
+      burst[count++] = (uint8_t)g_SerialTxQueue[g_SerialQueueTail];
+      g_SerialQueueTail =
+          (g_SerialQueueTail + 1u) & SERIAL_TX_QUEUE_MASK;
+    }
+
+    if (count == 0) {
+      g_SerialDraining = 0;
+      serial_irq_restore(flags);
+      return;
+    }
+    serial_irq_restore(flags);
+
+    for (uint32_t i = 0; i < count; ++i)
+      outb(SERIAL_COM1_DATA, burst[i]);
+  }
+}
+
+void serial_print(const char *str) {
+  if (!str)
+    return;
+
+  /* Keep the in-memory boot log even when the machine has no COM1 UART. */
   bootlog_append(str);
 #ifdef VEXOS_NETLOG
   netlog_append(str);
 #endif
 
-  // Always print to COM1 as one indivisible message.
-  const char *p = str;
-  while (*p) {
-    outb(0x3F8, *p++);
+  serial_uart_initialize();
+
+  int start_drain = 0;
+  uint64_t flags = serial_irq_save();
+
+  if (g_SerialPresent) {
+    const unsigned char *p = (const unsigned char *)str;
+    while (*p) {
+      uint32_t next =
+          (g_SerialQueueHead + 1u) & SERIAL_TX_QUEUE_MASK;
+      if (next == g_SerialQueueTail)
+        break; /* Preserve queued bytes; bootlog retains any overflow. */
+
+      g_SerialTxQueue[g_SerialQueueHead] = (char)*p++;
+      g_SerialQueueHead = next;
+    }
+
+    if (!g_SerialDraining &&
+        g_SerialQueueHead != g_SerialQueueTail) {
+      g_SerialDraining = 1;
+      start_drain = 1;
+    }
   }
 
-  if (irq_flags & (1ull << 9))
-    __asm__ volatile("sti" ::: "memory");
+  serial_irq_restore(flags);
+
+  if (start_drain)
+    serial_tx_drain();
 
   // Also print to framebuffer console once initialized.
-  if (g_ConsoleReady) {
+  if (g_ConsoleReady)
     PrintString(str, 0xFFFFFF);
-  }
 }
 
 static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
