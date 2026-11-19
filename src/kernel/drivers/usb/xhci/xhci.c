@@ -314,6 +314,17 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
   uint8_t cur_ifclass = 0;
   uint8_t cur_ifsub = 0;
   uint8_t cur_ifproto = 0;
+  uint8_t cur_if_alt = 0;
+  uint16_t cur_if_report_desc_len = 0;
+
+  /*
+   * A composite HID device can expose several interfaces. Keep the
+   * interface metadata with the interrupt-IN endpoint it describes;
+   * never let a later interface overwrite the selected mouse protocol.
+   * Prefer a boot mouse, then a generic HID interface (whose report
+   * descriptor may identify it as a mouse), then a boot keyboard.
+   */
+  uint8_t selected_hid_score = 0;
 
   uint32_t off = 0;
   while (off + 2 <= total_len) {
@@ -336,12 +347,8 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
       cur_ifclass = cls;
       cur_ifsub = sub;
       cur_ifproto = proto;
-
-      if (cls == 3 && (sub == 0 || sub == 1)) {
-        dev->hid_ifnum = ifnum;
-        dev->hid_subclass = sub;
-        dev->hid_proto = proto;
-      }
+      cur_if_alt = alt;
+      cur_if_report_desc_len = 0;
 
       serial_print("[USB] Interface if=");
       xhci_print_u32_dec(ifnum);
@@ -360,7 +367,7 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
       if (cur_ifclass == 3) {
         uint16_t rep_len =
             (uint16_t)(buf[off + 7] | (uint16_t)(buf[off + 8] << 8));
-        dev->hid_report_desc_len = rep_len;
+        cur_if_report_desc_len = rep_len;
       }
     } else if (bType == 5 && bLength >= 7) {
       uint8_t epaddr = buf[off + 2];
@@ -370,13 +377,29 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
 
       uint8_t xfertype = attr & 0x3u;
       uint8_t dir_in = (epaddr & 0x80u) ? 1u : 0u;
-      if (dev->intr_epaddr == 0 && cur_ifclass == 3 &&
+      if (cur_ifclass == 3 && cur_if_alt == 0 &&
           (cur_ifsub == 0 || cur_ifsub == 1) && dir_in && xfertype == 3) {
-        dev->intr_epaddr = epaddr;
-        uint8_t epnum = (uint8_t)(epaddr & 0x0Fu);
-        dev->intr_dci = (uint8_t)(2u * (uint32_t)epnum + 1u);
-        dev->intr_mps = mps;
-        dev->intr_interval = interval;
+        uint8_t score = 1;
+        if (cur_ifsub == 1 && cur_ifproto == 2) {
+          score = 4; /* HID boot mouse */
+        } else if (cur_ifsub == 0 && cur_ifproto == 0) {
+          score = 3; /* Generic HID; validate its report descriptor below. */
+        } else if (cur_ifsub == 1 && cur_ifproto == 1) {
+          score = 2; /* HID boot keyboard */
+        }
+
+        if (score > selected_hid_score) {
+          selected_hid_score = score;
+          dev->hid_ifnum = cur_ifnum;
+          dev->hid_subclass = cur_ifsub;
+          dev->hid_proto = cur_ifproto;
+          dev->hid_report_desc_len = cur_if_report_desc_len;
+          dev->intr_epaddr = epaddr;
+          uint8_t epnum = (uint8_t)(epaddr & 0x0Fu);
+          dev->intr_dci = (uint8_t)(2u * (uint32_t)epnum + 1u);
+          dev->intr_mps = mps;
+          dev->intr_interval = interval;
+        }
       }
       serial_print("[USB] Endpoint addr=");
       xhci_print_hex32(epaddr);
@@ -390,6 +413,20 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
     }
 
     off += bLength;
+  }
+
+  if (dev->intr_epaddr != 0) {
+    serial_print("[HID] Selected interface=");
+    xhci_print_u32_dec(dev->hid_ifnum);
+    serial_print(" subclass=");
+    xhci_print_u32_dec(dev->hid_subclass);
+    serial_print(" protocol=");
+    xhci_print_u32_dec(dev->hid_proto);
+    serial_print(" endpoint=");
+    xhci_print_hex32(dev->intr_epaddr);
+    serial_print(" report_desc_len=");
+    xhci_print_u32_dec(dev->hid_report_desc_len);
+    serial_print("\n");
   }
 
   /* This kernel currently has HID input support only. Do not spend an
