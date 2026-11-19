@@ -157,6 +157,8 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_MAC_CTRL_FULLD            (1u << 5)
 #define ALX_MAC_CTRL_RXFC_EN          (1u << 3)
 #define ALX_MAC_CTRL_TXFC_EN          (1u << 2)
+#define ALX_DRV_PHY_PAUSE              (1u << 23)
+#define ALX_MII_ADVERTISE_PAUSE        0x0400u
 #define ALX_MAC_CTRL_RX_EN            (1u << 1)
 #define ALX_MAC_CTRL_TX_EN            (1u << 0)
 
@@ -622,7 +624,8 @@ static int alx_reset_phy(void) {
 }
 
 static int alx_configure_phy(void) {
-    const uint16_t advertise_10_100 = 0x01E1u; /* CSMA + 10/100 half/full. */
+    const uint16_t advertise_10_100 = 0x01E1u | ALX_MII_ADVERTISE_PAUSE;
+    /* Linux default: advertise 10/100 modes and symmetric RX/TX pause. */
     const uint16_t advertise_1000_full = 0x0200u;
     const uint32_t phy_field_mask = 0xFFu << 21;
 
@@ -667,7 +670,8 @@ static int alx_configure_phy(void) {
     driver_config = alx_read32(ALX_DRV);
     driver_config &= ~phy_field_mask;
     driver_config |= (1u << 28) | (1u << 27) |
-                     (1u << 26) | (1u << 25) | (1u << 24);
+                     (1u << 26) | (1u << 25) | (1u << 24) |
+                     ALX_DRV_PHY_PAUSE;
     alx_write32(ALX_DRV, driver_config);
 
     serial_print("[ALX] PHY auto-negotiation started (10/100/1000)\n");
