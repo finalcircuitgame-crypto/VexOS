@@ -73,6 +73,14 @@ $(OBJDIR)/core/picojpeg.o $(OBJDIR)/core/simplefs.o \
 $(OBJDIR)/drivers/console.o \
 $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
+# The release boot path spends substantial time mapping physical memory and
+# enumerating PCI functions. Optimize these CPU-side routines without changing
+# the audited xHCI/Ethernet MMIO and DMA driver optimization levels.
+ifeq ($(VEXOS_RELEASE),1)
+$(OBJDIR)/core/main.o $(OBJDIR)/drivers/pci.o \
+$(OBJDIR)/mem/vmm.o: CFLAGS_KERNEL += -O2
+endif
+
 # Keep window rendering and compositor hot paths optimized.
 $(OBJDIR)/desktop/%.o: CFLAGS_KERNEL += -O2
 $(OBJDIR)/desktop/graphics/font_engine.o: CFLAGS_KERNEL += -O2
