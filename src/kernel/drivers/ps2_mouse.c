@@ -170,8 +170,10 @@ void ps2_mouse_poll(void) {
     uint8_t status = ps2_inb(PS2_STATUS_PORT);
     if ((status & 0x01u) == 0u)
       break;
-    if ((status & 0x20u) == 0u)
-      break;
-    ps2_mouse_consume_byte(ps2_inb(PS2_DATA_PORT));
+    uint8_t data = ps2_inb(PS2_DATA_PORT);
+    if (status & 0x20u)
+      ps2_mouse_consume_byte(data);
+    /* PS/2 keyboard input is not handled by this driver. Drain its byte so
+       it cannot block queued auxiliary touchpad packets in the shared buffer. */
   }
 }
