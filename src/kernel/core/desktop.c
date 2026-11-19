@@ -62,10 +62,12 @@ enum {
 
 static uint32_t g_viewer_scroll;
 
+#ifndef VEXOS_RELEASE
 #define DESKTOP_DEBUG_INPUT_CAP 160u
 #define DESKTOP_DEBUG_NETWORK_CAP 768u
 static char g_debug_input_status[DESKTOP_DEBUG_INPUT_CAP];
 static char g_debug_network_status[DESKTOP_DEBUG_NETWORK_CAP];
+#endif
 
 #include "../desktop/window_manager.h"
 #include "../desktop/app_registry.h"
@@ -79,6 +81,7 @@ static char g_debug_network_status[DESKTOP_DEBUG_NETWORK_CAP];
 
 static uint8_t g_app_open[APP_COUNT];
 
+#ifndef VEXOS_RELEASE
 static void desktop_debug_copy(char *destination, uint32_t capacity,
                                const char *source) {
   if (!destination || capacity == 0)
@@ -92,6 +95,7 @@ static void desktop_debug_copy(char *destination, uint32_t capacity,
   }
   destination[i] = '\0';
 }
+#endif
 
 void desktop_debug_set_input_status(const char *status) {
 #ifndef VEXOS_RELEASE
