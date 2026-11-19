@@ -61,6 +61,11 @@ enum {
 
 static uint32_t g_viewer_scroll;
 
+#define DESKTOP_DEBUG_INPUT_CAP 160u
+#define DESKTOP_DEBUG_NETWORK_CAP 768u
+static char g_debug_input_status[DESKTOP_DEBUG_INPUT_CAP];
+static char g_debug_network_status[DESKTOP_DEBUG_NETWORK_CAP];
+
 #include "../desktop/window_manager.h"
 #include "../desktop/app_registry.h"
 #include "../desktop/graphics/graphics.h"
@@ -72,6 +77,89 @@ static uint32_t g_viewer_scroll;
 #include "../desktop/apps/doom/doom_window.h"
 
 static uint8_t g_app_open[APP_COUNT];
+
+static void desktop_debug_copy(char *destination, uint32_t capacity,
+                               const char *source) {
+  if (!destination || capacity == 0)
+    return;
+  uint32_t i = 0;
+  if (source) {
+    while (i + 1u < capacity && source[i]) {
+      destination[i] = source[i];
+      ++i;
+    }
+  }
+  destination[i] = '\0';
+}
+
+void desktop_debug_set_input_status(const char *status) {
+  desktop_debug_copy(g_debug_input_status,
+                     (uint32_t)sizeof(g_debug_input_status), status);
+}
+
+void desktop_debug_set_network_status(const char *status) {
+  desktop_debug_copy(g_debug_network_status,
+                     (uint32_t)sizeof(g_debug_network_status), status);
+}
+
+/* Draw diagnostics directly onto the visible scanout page, after the
+   compositor has presented the current desktop frame. */
+static void desktop_debug_draw_overlay(uint32_t *target) {
+  if (!g_bi || !g_bi->framebuffer || !target ||
+      (!g_debug_input_status[0] && !g_debug_network_status[0]) ||
+      g_bi->width <= 24u || g_bi->height <= 24u)
+    return;
+
+  uint32_t panel_width = g_bi->width - 24u;
+  if (panel_width > 940u)
+    panel_width = 940u;
+
+  gfx_font_family_t old_family = gfx_get_font_family();
+  uint8_t old_scale = gfx_get_font_scale();
+  uint8_t old_bold = gfx_get_font_bold();
+  uint16_t old_size = gfx_get_font_size();
+  gfx_set_backbuffer(target);
+  gfx_set_font(GFX_FONT_DEJAVU_MONO, 1u, 0u);
+  gfx_set_font_size(14u);
+
+  uint32_t x = 12u;
+  uint32_t y = 12u;
+  if (g_debug_input_status[0]) {
+    gfx_blend_round_rect(x, y, panel_width, 40u, 6u, 0x09111Fu, 238u);
+    gfx_draw_string(x + 10u, y + 5u, "INPUT", 0x8D7BFFu);
+    gfx_draw_string(x + 82u, y + 5u, g_debug_input_status, 0xF1F3FAu);
+    y += 48u;
+  }
+
+  if (g_debug_network_status[0] && y + 90u < g_bi->height) {
+    gfx_blend_round_rect(x, y, panel_width, 88u, 6u, 0x09111Fu, 238u);
+    gfx_draw_string(x + 10u, y + 5u, "NETWORK / TX", 0x67DDB5u);
+
+    uint32_t offset = 0u;
+    for (uint32_t row = 0u; row < 3u; ++row) {
+      char line[97];
+      uint32_t used = 0u;
+      while (g_debug_network_status[offset] &&
+             g_debug_network_status[offset] != '\n' &&
+             g_debug_network_status[offset] != '\r' &&
+             used < sizeof(line) - 1u) {
+        line[used++] = g_debug_network_status[offset++];
+      }
+      while (g_debug_network_status[offset] == '\n' ||
+             g_debug_network_status[offset] == '\r')
+        ++offset;
+      line[used] = '\0';
+      if (used)
+        gfx_draw_string(x + 10u, y + 26u + row * 18u, line, 0xE1E7F0u);
+      if (!g_debug_network_status[offset])
+        break;
+    }
+  }
+
+  gfx_set_font(old_family, old_scale, old_bold);
+  gfx_set_font_size(old_size);
+  gfx_set_backbuffer(g_back);
+}
 
 /* A maximized Doom window occupies the complete display, including the dock
    region. The taskbar must stay behind it until the game leaves maximized mode. */
@@ -2324,6 +2412,8 @@ void desktop_tick(void) {
       g_last_cursor_buttons = pointer.buttons;
     }
   }
+  desktop_debug_draw_overlay(g_back ? compositor_frontbuffer()
+                                    : g_bi->framebuffer);
   g_tick++;
 }
 
@@ -2457,6 +2547,7 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
           gfx_put_pixel((uint32_t)(p.x + i), (uint32_t)p.y, cursor_color);
       }
 
+      desktop_debug_draw_overlay(g_back ? g_back : fb);
       if (wizard_back)
         compositor_blit(fb, wizard_back, 0, 0, screen_w, screen_h);
       needs_redraw = 0;
