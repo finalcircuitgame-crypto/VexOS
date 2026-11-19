@@ -77,7 +77,9 @@ static inline uint16_t pit_read_counter(void) {
   return (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
 }
 
+#ifndef VEXOS_RELEASE
 static int g_ConsoleReady = 0;
+#endif
 
 /*
  * COM1 is commonly left in an arbitrary state by firmware. Configure it
@@ -1150,7 +1152,9 @@ void kernel_main(BootInfo *bootInfo) {
   // ... Console, PMM, VMM init ...
   serial_print("[KERNEL] Calling ConsoleInit...\n");
   ConsoleInit(bootInfo);
+#ifndef VEXOS_RELEASE
   g_ConsoleReady = 1;
+#endif
 
 #ifdef VEXOS_RELEASE
   /* Draw the splash immediately; it replaces the old blue text screen. */
@@ -1469,7 +1473,9 @@ void kernel_main(BootInfo *bootInfo) {
 
   // Keep subsequent diagnostics on COM1 only; do not paint boot text over
   // the newly initialized desktop and taskbar.
+#ifndef VEXOS_RELEASE
   g_ConsoleReady = 0;
+#endif
   serial_print("[KERNEL] Desktop initialized\n");
 
 #ifdef VEXOS_CI_INPUT_TEST
@@ -1515,9 +1521,11 @@ void kernel_main(BootInfo *bootInfo) {
   serial_print("[KERNEL] sti\n");
   __asm__ volatile("sti");
 
+#ifndef VEXOS_RELEASE
   if (g_ConsoleReady) {
     PrintString("Starting Preemptive Multitasking...\n", 0xFFFFFF);
   }
+#endif
   serial_print("[KERNEL] Starting desktop loop...\n");
 
   // Main loop - precise time-based frame rate limiter
@@ -1527,7 +1535,9 @@ void kernel_main(BootInfo *bootInfo) {
   }
   uint32_t frame_delay = 1000 / target_fps;
   uint64_t last_frame_ticks = Timer_Ticks();
+#ifndef VEXOS_RELEASE
   uint64_t last_bootlog_flush_ticks = last_frame_ticks;
+#endif
 
   int ci_task_runtime_reported = 0;
 #ifdef VEXOS_CI_INPUT_TEST
