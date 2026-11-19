@@ -18,6 +18,7 @@
 #include "e1000e.h"
 #include "e1000e_netdev.h"
 #include "alx_netdev.h"
+#include "alx.h"
 #include "netdev.h"
 #include "ethernet.h"
 #include "arp.h"
@@ -1529,6 +1530,7 @@ void kernel_main(BootInfo *bootInfo) {
 
     // Run desktop tick
     desktop_tick();
+    alx_render_pending_diagnostics();
 
 #ifdef VEXOS_NETLOG
     /* Draw one-shot NetLog diagnostics after desktop rendering so the panel
