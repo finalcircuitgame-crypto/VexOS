@@ -94,18 +94,31 @@ static void desktop_debug_copy(char *destination, uint32_t capacity,
 }
 
 void desktop_debug_set_input_status(const char *status) {
+#ifndef VEXOS_RELEASE
   desktop_debug_copy(g_debug_input_status,
                      (uint32_t)sizeof(g_debug_input_status), status);
+#else
+  (void)status;
+#endif
 }
 
 void desktop_debug_set_network_status(const char *status) {
+#ifndef VEXOS_RELEASE
   desktop_debug_copy(g_debug_network_status,
                      (uint32_t)sizeof(g_debug_network_status), status);
+#else
+  (void)status;
+#endif
 }
 
 /* Draw diagnostics directly onto the visible scanout page, after the
    compositor has presented the current desktop frame. */
 static void desktop_debug_draw_overlay(uint32_t *target) {
+#ifdef VEXOS_RELEASE
+  /* Keep development diagnostics off the public desktop. */
+  (void)target;
+  return;
+#else
   if (!g_bi || !g_bi->framebuffer || !target ||
       (!g_debug_input_status[0] && !g_debug_network_status[0]) ||
       g_bi->width <= 24u || g_bi->height <= 24u)
@@ -160,6 +173,7 @@ static void desktop_debug_draw_overlay(uint32_t *target) {
   gfx_set_font(old_family, old_scale, old_bold);
   gfx_set_font_size(old_size);
   gfx_set_backbuffer(g_back);
+#endif
 }
 
 /* A maximized Doom window occupies the complete display, including the dock
