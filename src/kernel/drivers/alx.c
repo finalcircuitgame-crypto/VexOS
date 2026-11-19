@@ -923,8 +923,10 @@ static void alx_configure_basic(void) {
 }
 
 static void alx_stop_mac(void) {
-    if (g_mac_started && g_link_up)
+    if (g_mac_started && g_link_up) {
         serial_print("[ALX] Physical Ethernet link lost; stopping MAC\n");
+        desktop_debug_set_network_status("[ALX] Ethernet link lost; TX is paused until link negotiation succeeds");
+    }
     alx_write32(ALX_RXQ0, alx_read32(ALX_RXQ0) & ~ALX_RXQ0_EN);
     alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) & ~ALX_TXQ0_EN);
     alx_write32(ALX_MAC_CTRL,
@@ -957,6 +959,10 @@ static void alx_start_mac(uint8_t speed_code, uint8_t full_duplex) {
     serial_print("[ALX] Ethernet link established at ");
     serial_print(speed_code == 2u ? "1000 Mbps" : "100 Mbps");
     serial_print(full_duplex ? " full duplex\n" : " half duplex\n");
+    desktop_debug_set_network_status(
+        speed_code == 2u
+            ? "[ALX] Ethernet link established at 1000 Mbps"
+            : "[ALX] Ethernet link established at 100 Mbps");
 }
 
 static void alx_log_phy_status(uint16_t bmsr, uint16_t bmcr,
@@ -1155,6 +1161,9 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
     alx_log_mac();
     serial_print(g_link_up ? "[ALX] Link is up\n" :
                              "[ALX] Link is down (device ready)\n");
+    desktop_debug_set_network_status(
+        g_link_up ? "[ALX] Ethernet link is up; waiting for TX probe"
+                  : "[ALX] Ethernet device ready, but link is down; TX cannot start");
     return 1;
 }
 
