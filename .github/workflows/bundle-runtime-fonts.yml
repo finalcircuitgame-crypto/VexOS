@@ -1,0 +1,90 @@
+name: Bundle runtime fonts
+
+on:
+  # Run once when this workflow is added. The action writes the font binaries
+  # back to the repository using the workflow-scoped GITHUB_TOKEN.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bundle-runtime-fonts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Install font packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            fonts-inter \
+            fonts-lato \
+            fonts-dejavu-core \
+            fonts-noto-core
+
+      - name: Copy the exact faces required by the kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p \
+            assets/fonts/Inter \
+            assets/fonts/Lato \
+            assets/fonts/DejaVu \
+            assets/fonts/Noto
+
+          cp /usr/share/fonts/opentype/inter/Inter-Regular.otf assets/fonts/Inter/
+          cp /usr/share/fonts/opentype/inter/Inter-Bold.otf assets/fonts/Inter/
+
+          cp /usr/share/fonts/truetype/lato/Lato-Regular.ttf assets/fonts/Lato/
+          cp /usr/share/fonts/truetype/lato/Lato-Bold.ttf assets/fonts/Lato/
+
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf assets/fonts/DejaVu/
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf assets/fonts/DejaVu/
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf assets/fonts/DejaVu/
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf assets/fonts/DejaVu/
+
+          cp /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf assets/fonts/Noto/
+          cp /usr/share/fonts/truetype/noto/NotoSans-Bold.ttf assets/fonts/Noto/
+          cp /usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf assets/fonts/Noto/
+          cp /usr/share/fonts/truetype/noto/NotoSerif-Bold.ttf assets/fonts/Noto/
+
+          cp /usr/share/doc/fonts-inter/copyright assets/fonts/Inter/LICENSE.txt
+          cp /usr/share/doc/fonts-lato/copyright assets/fonts/Lato/LICENSE.txt
+          cp /usr/share/doc/fonts-dejavu-core/copyright assets/fonts/DejaVu/LICENSE.txt
+          cp /usr/share/doc/fonts-noto-core/copyright assets/fonts/Noto/LICENSE.txt
+
+          # Fail early if any Makefile-required face is missing or empty.
+          test -s assets/fonts/Inter/Inter-Regular.otf
+          test -s assets/fonts/Inter/Inter-Bold.otf
+          test -s assets/fonts/Lato/Lato-Regular.ttf
+          test -s assets/fonts/Lato/Lato-Bold.ttf
+          test -s assets/fonts/DejaVu/DejaVuSans.ttf
+          test -s assets/fonts/DejaVu/DejaVuSans-Bold.ttf
+          test -s assets/fonts/DejaVu/DejaVuSansMono.ttf
+          test -s assets/fonts/DejaVu/DejaVuSansMono-Bold.ttf
+          test -s assets/fonts/Noto/NotoSans-Regular.ttf
+          test -s assets/fonts/Noto/NotoSans-Bold.ttf
+          test -s assets/fonts/Noto/NotoSerif-Regular.ttf
+          test -s assets/fonts/Noto/NotoSerif-Bold.ttf
+
+      - name: Commit bundled font assets
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/fonts/Inter assets/fonts/Lato assets/fonts/DejaVu assets/fonts/Noto
+          if git diff --cached --quiet; then
+            echo "Font assets already match the checked-in files."
+            exit 0
+          fi
+          git commit -m "Bundle runtime TrueType font assets"
+          git push origin HEAD:main
