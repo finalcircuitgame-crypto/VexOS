@@ -358,8 +358,12 @@ int xhci_cmd_configure_intr_in_ep(xhci_device_state_t *dev) {
   xhci_ep_ctx_32_t *ep =
       (xhci_ep_ctx_32_t *)(input_ctx + (ctx_index * g_ctx_size));
 
-  ep->dword1 = ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16) | (0u << 8) |
-               ((7u & 0x7u) << 3) | 3u;
+  /*
+   * Interrupt IN endpoint: CErr=3 (bits 2:1), EP Type=7.
+   * Dword 1 bit 0 is reserved and must remain clear.
+   */
+  ep->dword1 = ((uint32_t)(dev->intr_mps & 0xFFFFu) << 16) |
+               ((7u & 0x7u) << 3) | (3u << 1);
 
   uint64_t trdp = (uint64_t)(uintptr_t)dev->intr_ring;
   trdp &= ~0xFULL;
