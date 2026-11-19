@@ -797,9 +797,14 @@ static void alx_start_mac(uint8_t speed_code, uint8_t full_duplex) {
         control |= ALX_MAC_CTRL_FULLD;
     control |= ALX_MAC_CTRL_RX_EN | ALX_MAC_CTRL_TX_EN;
 
-    alx_write32(ALX_MAC_CTRL, control);
-    alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) | ALX_TXQ0_EN);
+    /*
+     * Match the upstream Linux ALX start sequence: enable the descriptor
+     * queues before enabling packet traffic in the MAC. This avoids exposing
+     * the MAC to TX/RX traffic before the queue engines are ready.
+     */
     alx_write32(ALX_RXQ0, alx_read32(ALX_RXQ0) | ALX_RXQ0_EN);
+    alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) | ALX_TXQ0_EN);
+    alx_write32(ALX_MAC_CTRL, control);
     g_link_speed_code = speed_code;
     g_link_full_duplex = full_duplex;
     g_mac_started = 1u;
