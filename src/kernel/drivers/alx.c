@@ -252,6 +252,9 @@ static uint16_t g_tx_inflight;
 static uint16_t g_rx_read;
 static uint16_t g_rx_write;
 static uint16_t g_rrd_read;
+static uint16_t g_rx_fault_index;
+static uint8_t g_rx_fault_count;
+static uint8_t g_rx_ring_fault;
 static uint32_t g_link_poll_count;
 static uint32_t g_mac_ctrl_base;
 
@@ -859,6 +862,9 @@ static int alx_setup_rings(void) {
     g_rx_read = 0u;
     g_rx_write = ALX_RING_COUNT - 1u;
     g_rrd_read = 0u;
+    g_rx_fault_index = 0u;
+    g_rx_fault_count = 0u;
+    g_rx_ring_fault = 0u;
     g_tx_inflight = 0u;
     g_tx_stall_polls = 0u;
     g_tx_last_consumer = 0u;
@@ -1386,12 +1392,22 @@ int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
         (uint8_t)((word0 >> ALX_RRD_NOR_SHIFT) & ALX_RRD_NOR_MASK);
     uint16_t packet_length = (uint16_t)(word3 & ALX_RRD_PKTLEN_MASK);
 
-    int valid = descriptor_count == 1u &&
-                descriptor_index < ALX_RING_COUNT &&
-                descriptor_index == g_rx_read &&
-                packet_length >= 18u &&
+    /*
+     * Linux treats an SI/NOR mismatch as ring corruption and schedules a
+     * device reset. Do not advance either software ring index or recycle an
+     * unrelated RFD: doing so would make every later completion misaligned.
+     */
+    if (descriptor_count != 1u ||
+        descriptor_index >= ALX_RING_COUNT ||
+        descriptor_index != g_rx_read) {
+        g_rx_fault_index = descriptor_index;
+        g_rx_fault_count = descriptor_count;
+        g_rx_ring_fault = 1u;
+        return -1;
+    }
+
+    int valid = packet_length >= 18u &&
                 packet_length <= ALX_RX_BUFFER_BYTES &&
-                packet_length >= 4u &&
                 (packet_length - 4u) <= capacity &&
                 (word3 & ALX_RRD_ERROR_MASK) == 0u;
 
@@ -1400,6 +1416,7 @@ int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
         alx_copy(frame, g_rx_buffers[descriptor_index], *length);
     }
 
+    /* Consume this completion, including ordinary packet-level RX errors. */
     completion->word3 = 0u;
     __asm__ volatile("mfence" ::: "memory");
 
@@ -1418,6 +1435,19 @@ int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
 void alx_poll(void) {
     if (!g_ready || !g_datapath_ready)
         return;
+
+    if (g_rx_ring_fault) {
+        serial_print("[ALX] RX descriptor ring is out of sync; resetting MAC and DMA rings\n");
+        char diagnostic[128] = "[ALX] RX ring fault\n";
+        size_t used = sizeof("[ALX] RX ring fault\n") - 1u;
+        alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  RRD_INDEX=", g_rrd_read);
+        alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  RFD_EXPECTED=", g_rx_read);
+        alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  RFD_REPORTED=", g_rx_fault_index);
+        alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  RFD_COUNT=", g_rx_fault_count);
+        desktop_debug_set_network_status(diagnostic);
+        (void)alx_recover_datapath();
+        return;
+    }
 
     if (++g_link_poll_count >= 64u) {
         g_link_poll_count = 0u;
