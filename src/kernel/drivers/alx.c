@@ -291,6 +291,41 @@ static void alx_copy(void *destination, const void *source, size_t length) {
         d[i] = s[i];
 }
 
+static void alx_log_hex32(const char *label, uint32_t value) {
+    static const char hex[] = "0123456789ABCDEF";
+    char out[11] = "0x00000000";
+    for (uint32_t i = 0; i < 8u; ++i)
+        out[2u + i] = hex[(value >> ((7u - i) * 4u)) & 0x0Fu];
+    serial_print(label);
+    serial_print(out);
+    serial_print("\n");
+}
+
+static void alx_log_tx_timeout(void) {
+    uint16_t index = (uint16_t)(
+        (g_tx_probe_expected + ALX_RING_COUNT - 1u) % ALX_RING_COUNT);
+    const alx_tpd_t *descriptor = &g_tpd[index];
+
+    serial_print("[ALX] TX timeout snapshot\n");
+    alx_log_hex32("  TXQ0=", alx_read32(ALX_TXQ0));
+    alx_log_hex32("  MAC_CTRL=", alx_read32(ALX_MAC_CTRL));
+    alx_log_hex32("  DMA=", alx_read32(ALX_DMA));
+    alx_log_hex32("  MAC_STS=", alx_read32(ALX_MAC_STS));
+    alx_log_hex32("  TPD_BASE_LO=", alx_read32(ALX_TPD_PRI0_ADDR_LO));
+    alx_log_hex32("  TPD_BASE_HI=", alx_read32(ALX_TX_BASE_ADDR_HI));
+    alx_log_hex32("  TPD_RING_SZ=", alx_read32(ALX_TPD_RING_SZ));
+    alx_log_hex32("  SRAM9=", alx_read32(ALX_SRAM9));
+    alx_log_hex32("  TPD_PIDX=", alx_read16(ALX_TPD_PRI0_PIDX));
+    alx_log_hex32("  TPD_CIDX=", alx_read16(ALX_TPD_PRI0_CIDX));
+    alx_log_hex32("  TPD_INDEX=", index);
+    alx_log_hex32("  TPD_LEN=", descriptor->length);
+    alx_log_hex32("  TPD_WORD1=", descriptor->word1);
+    alx_log_hex32("  TPD_ADDR_LO=", (uint32_t)descriptor->address);
+    alx_log_hex32("  TPD_ADDR_HI=", (uint32_t)(descriptor->address >> 32));
+    alx_log_hex32("  TXBUF_LO=", (uint32_t)(uintptr_t)g_tx_buffers[index]);
+    alx_log_hex32("  TXBUF_HI=", (uint32_t)((uint64_t)(uintptr_t)g_tx_buffers[index] >> 32));
+}
+
 static int alx_dma_address_ok(const void *pointer, size_t length) {
     uint64_t address = (uint64_t)(uintptr_t)pointer;
     return length != 0u &&
@@ -794,7 +829,8 @@ static int alx_setup_rings(void) {
 
     /* Keep one RFD slot unposted so producer and consumer never alias. */
     __asm__ volatile("mfence" ::: "memory");
-    alx_write32(ALX_SRAM9, alx_read32(ALX_SRAM9) | 1u);
+    /* Linux alx writes the SRAM ring-pointer load command directly. */
+    alx_write32(ALX_SRAM9, 1u);
     alx_write16(ALX_RFD_PIDX, (uint16_t)(ALX_RING_COUNT - 1u));
     return 1;
 }
@@ -1209,6 +1245,7 @@ void alx_poll(void) {
         } else if (++g_tx_probe_polls >= 512u) {
             g_tx_probe_finished = 1u;
             serial_print("[ALX] First TX descriptor still pending after 512 polls\n");
+            alx_log_tx_timeout();
         }
     }
 }
