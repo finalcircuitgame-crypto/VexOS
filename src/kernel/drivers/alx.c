@@ -17,6 +17,12 @@ void serial_print(const char *str);
 #define ALX_FRAME_MAX                 1518u
 #define ALX_WAIT_LIMIT                1000000u
 
+#define ALX_PCI_STATUS_CAP_LIST        0x0010u
+#define ALX_PCI_CAP_ID_EXP             0x10u
+#define ALX_PCIE_DEVCTL_MRRS_SHIFT     12u
+#define ALX_PCIE_DEVCTL_MRRS_MASK      (7u << ALX_PCIE_DEVCTL_MRRS_SHIFT)
+#define ALX_PCIE_DEVCTL_MRRS_MIN       2u
+
 /* ALX register offsets. */
 #define ALX_MSIX_MASK                 0x0090u
 #define ALX_ISR_DIS                   (1u << 31)
@@ -291,6 +297,79 @@ static int alx_dma_address_ok(const void *pointer, size_t length) {
            address <= 0xFFFFFFFFFFFFFFFFull - (uint64_t)length &&
            address < (1ull << 52) &&
            address + (uint64_t)length <= (1ull << 52);
+}
+
+/*
+ * Linux's alx driver guarantees a PCIe Max Read Request Size of at least
+ * 512 bytes before programming the ALX DMA read-request length. Firmware can
+ * leave this field below the required minimum, so mirror that safeguard.
+ */
+static int alx_configure_pcie_read_request(uint8_t bus, uint8_t slot,
+                                           uint8_t function) {
+    uint32_t command_status =
+        pci_config_read_dword(bus, slot, function, 0x04u);
+    uint16_t status = (uint16_t)(command_status >> 16);
+    if ((status & ALX_PCI_STATUS_CAP_LIST) == 0u) {
+        serial_print("[ALX] PCI capability list is unavailable\\n");
+        return 0;
+    }
+
+    uint8_t capability =
+        (uint8_t)pci_config_read_dword(bus, slot, function, 0x34u);
+    for (uint32_t i = 0; i < 48u; ++i) {
+        capability &= 0xFCu;
+        if (capability < 0x40u || capability > 0xFCu)
+            break;
+
+        uint32_t header =
+            pci_config_read_dword(bus, slot, function, capability);
+        uint8_t capability_id = (uint8_t)header;
+        uint8_t next = (uint8_t)(header >> 8);
+
+        if (capability_id == ALX_PCI_CAP_ID_EXP) {
+            /* Device Control is the low 16 bits at PCIe cap + 0x08. */
+            uint32_t control_status = pci_config_read_dword(
+                bus, slot, function, (uint8_t)(capability + 0x08u));
+            uint16_t control = (uint16_t)control_status;
+            uint16_t current_mrrs = (uint16_t)(
+                (control & ALX_PCIE_DEVCTL_MRRS_MASK) >>
+                ALX_PCIE_DEVCTL_MRRS_SHIFT);
+
+            if (current_mrrs < ALX_PCIE_DEVCTL_MRRS_MIN) {
+                control &= (uint16_t)~ALX_PCIE_DEVCTL_MRRS_MASK;
+                control |= (uint16_t)(ALX_PCIE_DEVCTL_MRRS_MIN <<
+                                      ALX_PCIE_DEVCTL_MRRS_SHIFT);
+
+                /*
+                 * Write zero to Device Status (the upper half) because its
+                 * status bits are write-one-to-clear.
+                 */
+                pci_config_write_dword(
+                    bus, slot, function, (uint8_t)(capability + 0x08u),
+                    (uint32_t)control);
+
+                control_status = pci_config_read_dword(
+                    bus, slot, function, (uint8_t)(capability + 0x08u));
+                uint16_t verified_mrrs = (uint16_t)(
+                    ((uint16_t)control_status & ALX_PCIE_DEVCTL_MRRS_MASK) >>
+                    ALX_PCIE_DEVCTL_MRRS_SHIFT);
+                if (verified_mrrs < ALX_PCIE_DEVCTL_MRRS_MIN) {
+                    serial_print("[ALX] Failed to raise PCIe MRRS to 512 bytes\\n");
+                    return 0;
+                }
+
+                serial_print("[ALX] PCIe MRRS raised to 512 bytes\\n");
+            }
+            return 1;
+        }
+
+        if (next == 0u || next == capability)
+            break;
+        capability = next;
+    }
+
+    serial_print("[ALX] PCIe capability was not found\\n");
+    return 0;
 }
 
 static int alx_wait_mdio(void) {
@@ -768,7 +847,7 @@ static void alx_configure_basic(void) {
                               (xon & 0xFFFFu));
     }
 
-    /* Conservative 128-byte PCIe read request, four channels on B0+. */
+    /* Match Linux's minimum 512-byte PCIe read request; four channels on B0+. */
     uint32_t channels = g_revision >= 2u ? 4u : 2u;
     value = (4u << 0) | (1u << 10) | (2u << 4) |
             (15u << 11) | (4u << 16) | ((channels - 1u) << 26);
@@ -942,6 +1021,8 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
     command |= 0x0007u;       /* PCI I/O, memory decoding + bus mastering. */
     command &= (uint16_t)~0x0400u; /* Ensure INTx is not disabled. */
     pci_config_write_dword(bus, slot, function, 0x04u, command);
+    if (!alx_configure_pcie_read_request(bus, slot, function))
+        return 0;
 
     const uint64_t map_flags = PAGE_PRESENT | PAGE_WRITE |
                                (1ull << 3) | (1ull << 4);
