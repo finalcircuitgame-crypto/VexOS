@@ -105,6 +105,7 @@ int ps2_mouse_init(void) {
   }
 
   if (!ps2_write_command(0x20u)) {
+    ps2_restore_ports();
     serial_print("[PS2] Could not request controller command byte\n");
     return 0;
   }
@@ -174,8 +175,8 @@ void ps2_mouse_poll(void) {
   if (!g_ps2_mouse_initialized)
     return;
 
-  /* The laptop's internal PS/2 touchpad commonly shares the i8042 output
-     buffer with the keyboard. Consume only auxiliary bytes here. */
+  /* The touchpad and keyboard share the i8042 output buffer. Drain both
+     sources, routing only AUX-tagged bytes into the mouse packet parser. */
   for (uint32_t processed = 0; processed < 32u; ++processed) {
     uint8_t status = ps2_inb(PS2_STATUS_PORT);
     if ((status & 0x01u) == 0u)
