@@ -225,17 +225,18 @@ void serial_print(const char *str) {
   if (!str)
     return;
 
-  /* Keep diagnostics in RAM even when release boot output is quiet. */
+#if defined(VEXOS_RELEASE) && !defined(VEXOS_SERIAL_DEBUG)
+  /*
+   * Release mode drops routine messages before touching the boot log or UART.
+   * Fatal/error strings still reach both so a failed boot remains diagnosable.
+   */
+  if (!serial_message_is_critical(str))
+    return;
+#endif
+
   bootlog_append(str);
 #ifdef VEXOS_NETLOG
   netlog_append(str);
-#endif
-
-#if defined(VEXOS_RELEASE) && !defined(VEXOS_SERIAL_DEBUG)
-  /* Avoid slow character-at-a-time UART output during normal release boot.
-     Critical messages remain visible on COM1 for hardware troubleshooting. */
-  if (!serial_message_is_critical(str))
-    return;
 #endif
 
   serial_uart_initialize();
