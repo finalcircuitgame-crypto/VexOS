@@ -1242,26 +1242,28 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
     serial_print("[xHCI] Config descriptor / set config failed\n");
   }
 
-  // Basic HID bring-up. Boot keyboards already have a fixed 8-byte
-  // report format, so do not fetch a mouse report descriptor for them.
+  // Boot-protocol HID interfaces have standardized report layouts.
+  // Use those layouts directly instead of trusting a device-specific report
+  // descriptor parser for boot mice (notably composite gaming mice).
   if (dev->hid_ifnum != 0xFF) {
-    if (!(dev->hid_subclass == 1 && dev->hid_proto == 1))
+    if (dev->hid_subclass == 1 && dev->hid_proto == 2) {
+      dev->hid_mouse_valid = 0;
+      dev->hid_has_report_id = 0;
+      dev->hid_buttons_bits = 0;
+      dev->hid_x_bits = 0;
+      dev->hid_y_bits = 0;
+      dev->hid_wheel_bits = 0;
+      serial_print("[HID] Boot mouse: using standardized boot report format\n");
+      if (!xhci_hid_set_protocol_boot(dev))
+        serial_print("[HID] WARNING: SET_PROTOCOL(boot) failed for mouse\n");
+    } else if (dev->hid_subclass == 1 && dev->hid_proto == 1) {
+      // Boot keyboard reports are fixed at 8 bytes.
+      serial_print("[HID] SET_PROTOCOL(boot) for keyboard\n");
+      if (!xhci_hid_set_protocol_boot(dev))
+        serial_print("[HID] WARNING: SET_PROTOCOL(boot) failed for keyboard\n");
+    } else {
+      // Generic HID interfaces must be interpreted from their report descriptor.
       xhci_hid_try_parse_mouse_report_desc(dev);
-
-    if (dev->hid_subclass == 1) {
-      if (dev->hid_proto == 1) {
-        // Keyboard: we only support boot protocol for now.
-        serial_print("[HID] SET_PROTOCOL(boot) for keyboard\n");
-        (void)xhci_hid_set_protocol_boot(dev);
-      } else if (dev->hid_proto == 2) {
-        // Mouse: only use boot protocol if we couldn't parse the report descriptor.
-        if (!dev->hid_mouse_valid) {
-          serial_print("[HID] SET_PROTOCOL(boot) for mouse (fallback)\n");
-          (void)xhci_hid_set_protocol_boot(dev);
-        } else {
-          serial_print("[HID] Using report protocol for mouse\n");
-        }
-      }
     }
 
     serial_print("[HID] SET_IDLE\n");
