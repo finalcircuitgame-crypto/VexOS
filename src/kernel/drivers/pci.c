@@ -129,8 +129,12 @@ static void pci_probe_ahci_before_usb(void) {
             for (uint8_t func = 0; func < 8; func++) {
                 uint32_t vendor_device =
                     pci_config_read_dword((uint8_t)bus, slot, func, 0);
-                if ((uint16_t)vendor_device == 0xFFFFu)
+                if ((uint16_t)vendor_device == 0xFFFFu) {
+                    /* An absent function 0 means the whole device slot is empty. */
+                    if (func == 0u)
+                        break;
                     continue;
+                }
 
                 uint32_t class_info =
                     pci_config_read_dword((uint8_t)bus, slot, func, 0x08);
@@ -195,7 +199,13 @@ void pci_enumerate() {
         for (uint8_t slot = 0; slot < 32; slot++) {
             for (uint8_t func = 0; func < 8; func++) {
                 uint32_t vendor_device = pci_config_read_dword((uint8_t)bus, slot, func, 0);
-                if ((uint16_t)vendor_device == 0xFFFF) continue;
+                if ((uint16_t)vendor_device == 0xFFFFu) {
+                    /* Only probe functions 1-7 when function 0 exists and
+                       advertises a multi-function header. */
+                    if (func == 0u)
+                        break;
+                    continue;
+                }
 
                 uint16_t vendor_id = (uint16_t)(vendor_device & 0xFFFFu);
                 uint16_t device_id = (uint16_t)((vendor_device >> 16) & 0xFFFFu);
