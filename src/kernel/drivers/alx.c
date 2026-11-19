@@ -1024,7 +1024,7 @@ int alx_send(const void *frame, uint16_t length) {
         length < 14u || length > ALX_FRAME_MAX) {
         if (g_ready && !g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
-            serial_print("[ALX] TX rejected before descriptor submission (link/state/frame)\\n");
+            serial_print("[ALX] TX rejected before descriptor submission (link/state/frame)\n");
         }
         return 0;
     }
@@ -1034,7 +1034,7 @@ int alx_send(const void *frame, uint16_t length) {
     if (next == hardware_consumer) {
         if (!g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
-            serial_print("[ALX] TX ring full; hardware consumer has not freed a descriptor\\n");
+            serial_print("[ALX] TX ring full; hardware consumer has not freed a descriptor\n");
         }
         return 0;
     }
@@ -1055,7 +1055,7 @@ int alx_send(const void *frame, uint16_t length) {
         g_tx_probe_started = 1u;
         g_tx_probe_expected = g_tx_next;
         g_tx_probe_polls = 0u;
-        serial_print("[ALX] First TX descriptor submitted; waiting for hardware consumer\\n");
+        serial_print("[ALX] First TX descriptor submitted; waiting for hardware consumer\n");
     }
     return 1;
 }
@@ -1119,10 +1119,10 @@ void alx_poll(void) {
         const uint16_t consumer = alx_read16(ALX_TPD_PRI0_CIDX);
         if (consumer == g_tx_probe_expected) {
             g_tx_probe_finished = 1u;
-            serial_print("[ALX] First TX descriptor consumed by hardware\\n");
+            serial_print("[ALX] First TX descriptor consumed by hardware\n");
         } else if (++g_tx_probe_polls >= 512u) {
             g_tx_probe_finished = 1u;
-            serial_print("[ALX] First TX descriptor still pending after 512 polls\\n");
+            serial_print("[ALX] First TX descriptor still pending after 512 polls\n");
         }
     }
 }
