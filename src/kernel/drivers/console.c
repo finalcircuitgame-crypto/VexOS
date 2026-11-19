@@ -62,6 +62,104 @@ void ConsoleInit(BootInfo *bootInfo) {
     g_PreviousCodepoint = 0;
 }
 
+#ifdef VEXOS_RELEASE
+static void console_splash_fill(uint32_t x, uint32_t y, uint32_t width,
+                                uint32_t height, uint32_t color) {
+    if (!g_BootInfo || !g_BootInfo->framebuffer ||
+        x >= g_BootInfo->width || y >= g_BootInfo->height)
+        return;
+
+    if (width > g_BootInfo->width - x)
+        width = g_BootInfo->width - x;
+    if (height > g_BootInfo->height - y)
+        height = g_BootInfo->height - y;
+
+    for (uint32_t row = 0; row < height; ++row) {
+        uint32_t *line = g_BootInfo->framebuffer +
+                         (uint64_t)(y + row) * g_BootInfo->pitch + x;
+        for (uint32_t col = 0; col < width; ++col)
+            line[col] = color;
+    }
+}
+
+static void console_splash_draw_glyph(char character, uint32_t x,
+                                      uint32_t y, uint32_t scale,
+                                      uint32_t color) {
+    uint8_t *glyph = &(_binary_CGA_F08_start[(uint8_t)character * 8u]);
+    for (uint32_t gy = 0; gy < 8u; ++gy) {
+        for (uint32_t gx = 0; gx < 8u; ++gx) {
+            if ((glyph[gy] & (uint8_t)(1u << (7u - gx))) == 0u)
+                continue;
+            console_splash_fill(x + gx * scale, y + gy * scale,
+                                scale, scale, color);
+        }
+    }
+}
+
+static void console_splash_draw_centered(const char *text, uint32_t y,
+                                         uint32_t scale, uint32_t color) {
+    if (!text || scale == 0u || !g_BootInfo)
+        return;
+
+    uint32_t length = 0;
+    while (text[length])
+        ++length;
+    if (length == 0u)
+        return;
+
+    uint64_t width = ((uint64_t)length * 8u +
+                      (uint64_t)(length - 1u) * 2u) * scale;
+    uint32_t x = width < g_BootInfo->width
+        ? (g_BootInfo->width - (uint32_t)width) / 2u : 0u;
+
+    for (uint32_t i = 0; i < length; ++i) {
+        console_splash_draw_glyph(text[i], x, y, scale, color);
+        x += 10u * scale;
+    }
+}
+
+/*
+ * A framebuffer-only release splash. It deliberately avoids the font engine,
+ * heap, compositor, and serial console so it can be drawn immediately after
+ * entering the kernel.
+ */
+void ConsoleShowSplash(BootInfo *bootInfo) {
+    if (!bootInfo || !bootInfo->framebuffer ||
+        !bootInfo->width || !bootInfo->height || !bootInfo->pitch)
+        return;
+
+    g_BootInfo = bootInfo;
+    const uint32_t width = bootInfo->width;
+    const uint32_t height = bootInfo->height;
+    const uint32_t center_y = height / 2u;
+
+    console_splash_fill(0, 0, width, height, 0x00101828u);
+
+    uint32_t logo_scale = width >= 1100u ? 6u :
+                          (width >= 640u ? 4u : 2u);
+    uint32_t logo_height = 8u * logo_scale;
+    uint32_t logo_y = center_y > logo_height + 30u
+        ? center_y - logo_height - 30u : 12u;
+
+    console_splash_draw_centered("VEXOS", logo_y, logo_scale, 0x00F1F5F9u);
+
+    uint32_t accent_width = width >= 480u ? 112u : width / 3u;
+    if (accent_width < 24u)
+        accent_width = 24u;
+    console_splash_fill((width - accent_width) / 2u,
+                        center_y - 4u, accent_width, 3u, 0x0038BDF8u);
+
+    console_splash_draw_centered("Starting your system",
+                                 center_y + 22u,
+                                 width >= 900u ? 2u : 1u,
+                                 0x0094A3B8u);
+
+    /* A small accent block gives the otherwise static screen a clear mark. */
+    console_splash_fill(width / 2u - 3u, center_y + 58u,
+                        6u, 6u, 0x0038BDF8u);
+}
+#endif
+
 static uint32_t console_blend(uint32_t background, uint32_t foreground,
                               uint8_t alpha) {
     uint32_t inverse = 255u - alpha;
@@ -218,8 +316,15 @@ static uint32_t console_decode_utf8(const char **text) {
 }
 
 void PrintString(const char *str, uint32_t color) {
+#ifdef VEXOS_RELEASE
+    /* Release boots keep diagnostics in the RAM boot log instead of painting
+       kernel messages over the branded splash screen. */
+    (void)str;
+    (void)color;
+#else
     while (str && *str)
         console_put_codepoint(console_decode_utf8(&str), color);
+#endif
 }
 
 /* Print late diagnostics using the normal console text renderer. */
