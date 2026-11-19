@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 void serial_print(const char *str);
+void ConsoleDebugPrint(const char *str);
 
 #define ALX_VENDOR_ID                 0x1969u
 #define ALX_DEVICE_ID_AR8171          0x10A1u
@@ -291,39 +292,49 @@ static void alx_copy(void *destination, const void *source, size_t length) {
         d[i] = s[i];
 }
 
-static void alx_log_hex32(const char *label, uint32_t value) {
+static void alx_append_hex32(char *buffer, size_t capacity, size_t *used,
+                            const char *label, uint32_t value) {
     static const char hex[] = "0123456789ABCDEF";
-    char out[11] = "0x00000000";
+    while (*label && *used + 1u < capacity)
+        buffer[(*used)++] = *label++;
+    if (*used + 11u >= capacity)
+        return;
+    buffer[(*used)++] = '0';
+    buffer[(*used)++] = 'x';
     for (uint32_t i = 0; i < 8u; ++i)
-        out[2u + i] = hex[(value >> ((7u - i) * 4u)) & 0x0Fu];
-    serial_print(label);
-    serial_print(out);
-    serial_print("\n");
+        buffer[(*used)++] = hex[(value >> ((7u - i) * 4u)) & 0x0Fu];
+    buffer[(*used)++] = '\n';
+    buffer[*used] = '\0';
 }
 
 static void alx_log_tx_timeout(void) {
+    char diagnostic[768] = "[ALX] TX timeout snapshot\n";
+    size_t used = sizeof("[ALX] TX timeout snapshot\n") - 1u;
     uint16_t index = (uint16_t)(
         (g_tx_probe_expected + ALX_RING_COUNT - 1u) % ALX_RING_COUNT);
     const alx_tpd_t *descriptor = &g_tpd[index];
 
-    serial_print("[ALX] TX timeout snapshot\n");
-    alx_log_hex32("  TXQ0=", alx_read32(ALX_TXQ0));
-    alx_log_hex32("  MAC_CTRL=", alx_read32(ALX_MAC_CTRL));
-    alx_log_hex32("  DMA=", alx_read32(ALX_DMA));
-    alx_log_hex32("  MAC_STS=", alx_read32(ALX_MAC_STS));
-    alx_log_hex32("  TPD_BASE_LO=", alx_read32(ALX_TPD_PRI0_ADDR_LO));
-    alx_log_hex32("  TPD_BASE_HI=", alx_read32(ALX_TX_BASE_ADDR_HI));
-    alx_log_hex32("  TPD_RING_SZ=", alx_read32(ALX_TPD_RING_SZ));
-    alx_log_hex32("  SRAM9=", alx_read32(ALX_SRAM9));
-    alx_log_hex32("  TPD_PIDX=", alx_read16(ALX_TPD_PRI0_PIDX));
-    alx_log_hex32("  TPD_CIDX=", alx_read16(ALX_TPD_PRI0_CIDX));
-    alx_log_hex32("  TPD_INDEX=", index);
-    alx_log_hex32("  TPD_LEN=", descriptor->length);
-    alx_log_hex32("  TPD_WORD1=", descriptor->word1);
-    alx_log_hex32("  TPD_ADDR_LO=", (uint32_t)descriptor->address);
-    alx_log_hex32("  TPD_ADDR_HI=", (uint32_t)(descriptor->address >> 32));
-    alx_log_hex32("  TXBUF_LO=", (uint32_t)(uintptr_t)g_tx_buffers[index]);
-    alx_log_hex32("  TXBUF_HI=", (uint32_t)((uint64_t)(uintptr_t)g_tx_buffers[index] >> 32));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXQ0=", alx_read32(ALX_TXQ0));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  MAC_CTRL=", alx_read32(ALX_MAC_CTRL));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  DMA=", alx_read32(ALX_DMA));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  MAC_STS=", alx_read32(ALX_MAC_STS));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_BASE_LO=", alx_read32(ALX_TPD_PRI0_ADDR_LO));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_BASE_HI=", alx_read32(ALX_TX_BASE_ADDR_HI));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_RING_SZ=", alx_read32(ALX_TPD_RING_SZ));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  SRAM9=", alx_read32(ALX_SRAM9));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_PIDX=", alx_read16(ALX_TPD_PRI0_PIDX));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_CIDX=", alx_read16(ALX_TPD_PRI0_CIDX));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_INDEX=", index);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_LEN=", descriptor->length);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_WORD1=", descriptor->word1);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_ADDR_LO=", (uint32_t)descriptor->address);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_ADDR_HI=", (uint32_t)(descriptor->address >> 32));
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXBUF_LO=", (uint32_t)(uintptr_t)g_tx_buffers[index]);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXBUF_HI=", (uint32_t)((uint64_t)(uintptr_t)g_tx_buffers[index] >> 32));
+
+    /* Keep it in serial/boot/NetLog as well as drawing it on the visible console. */
+    serial_print(diagnostic);
+    ConsoleDebugPrint(diagnostic);
 }
 
 static int alx_dma_address_ok(const void *pointer, size_t length) {
