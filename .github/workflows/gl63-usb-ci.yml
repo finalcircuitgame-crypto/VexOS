@@ -264,7 +264,8 @@ jobs:
           require_minimum "addressed USB devices" "$addressed_count" 3
           require_minimum "successful device descriptors" "$descriptor_count" 3
           require_minimum "successful configuration descriptor reads" "$config_count" 3
-          require_minimum "SET_CONFIGURATION completions" "$set_config_count" 3
+          # The USB mass-storage fixture is descriptor-tested but deliberately left unconfigured; only the two HID devices receive SET_CONFIGURATION.
+          require_minimum "SET_CONFIGURATION completions" "$set_config_count" 2
           require_minimum "HID interrupt-IN endpoints armed" "$hid_armed_count" 2
 
           if (( failures > 0 )); then
