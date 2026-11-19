@@ -18,6 +18,9 @@ EFI_INC = /usr/include/efi
 EFI_LIB = /usr/lib
 CFLAGS_EFI = -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -I$(EFI_INC) -I$(EFI_INC)/x86_64 -I$(SRCDIR)/include -DEFI_FUNCTION_WRAPPER -DGNU_EFI_USE_MS_ABI
 LDFLAGS_EFI = -nostdlib -znocombreloc -T $(EFI_LIB)/elf_x86_64_efi.lds -shared -Bsymbolic -L$(EFI_LIB) $(EFI_LIB)/crt0-efi-x86_64.o
+ifeq ($(VEXOS_RELEASE),1)
+CFLAGS_EFI += -DVEXOS_RELEASE
+endif
 
 # Kernel Flags
 VEXOS_VERSION ?= 2.0.0-dev
@@ -41,12 +44,27 @@ CFLAGS_KERNEL += -DVEXOS_NETLOG \
 	-DNETLOG_GATEWAY=$(NETLOG_GATEWAY_IPV4) \
 	-DNETLOG_DESTINATION_IPV4=$(NETLOG_DESTINATION_IPV4)
 endif
+ifeq ($(VEXOS_RELEASE),1)
+CFLAGS_KERNEL += -DVEXOS_RELEASE
+ifeq ($(VEXOS_SERIAL_DEBUG),1)
+CFLAGS_KERNEL += -DVEXOS_SERIAL_DEBUG
+endif
+endif
 CFLAGS_KERNEL += -DVEXOS_VERSION='"$(VEXOS_VERSION)"' -DVEXOS_BUILD_ID='"$(VEXOS_BUILD_ID)"'
 
 # Refresh the embedded Git build ID on every make invocation.
 .PHONY: FORCE_VEXOS_BUILD_ID
 FORCE_VEXOS_BUILD_ID:
 $(OBJDIR)/core/main.o: FORCE_VEXOS_BUILD_ID
+
+# Rebuild the EFI loader when switching between quiet release and debug boot.
+EFI_FLAGS_STAMP = $(OBJDIR)/.efi-cflags
+.PHONY: FORCE_EFI_FLAGS
+FORCE_EFI_FLAGS:
+$(EFI_FLAGS_STAMP): FORCE_EFI_FLAGS
+	@mkdir -p $(dir $@)
+	@printf '%s\\n' '$(CFLAGS_EFI)' > $@.tmp
+	@if ! cmp -s $@.tmp $@ 2>/dev/null; then mv $@.tmp $@; else rm -f $@.tmp; fi
 
 # Optimize CPU-side desktop/rendering and memory paths. Keep hardware drivers
 # at their existing optimization level until their MMIO/DMA paths are audited.
@@ -134,7 +152,7 @@ setup:
 	mkdir -p $(OBJDIR)
 
 # Build Bootloader
-$(BOOTLOADER_EFI): $(BOOTDIR)/main.c
+$(BOOTLOADER_EFI): $(BOOTDIR)/main.c $(EFI_FLAGS_STAMP)
 	@mkdir -p $(dir $(OBJDIR)/boot_main.o)
 	$(CC) $(CFLAGS_EFI) -c $< -o $(OBJDIR)/boot_main.o
 	$(LD) $(LDFLAGS_EFI) $(OBJDIR)/boot_main.o -o $(OBJDIR)/boot_main.so -lgnuefi -lefi
