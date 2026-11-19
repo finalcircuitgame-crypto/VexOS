@@ -1269,6 +1269,18 @@ void alx_poll(void) {
         if (consumer == g_tx_probe_expected) {
             g_tx_probe_finished = 1u;
             serial_print("[ALX] First TX descriptor consumed by hardware\n");
+
+            /* Make successful completion visible on the desktop as well. */
+            const char *message =
+                "[ALX] TX PROBE: descriptor consumed by hardware\n";
+            size_t length = 0u;
+            while (message[length] &&
+                   length + 1u < sizeof(g_tx_timeout_diagnostic)) {
+                g_tx_timeout_diagnostic[length] = message[length];
+                ++length;
+            }
+            g_tx_timeout_diagnostic[length] = '\0';
+            g_tx_timeout_diagnostic_pending = 1u;
         } else if (++g_tx_probe_polls >= 512u) {
             g_tx_probe_finished = 1u;
             serial_print("[ALX] First TX descriptor still pending after 512 polls\n");
