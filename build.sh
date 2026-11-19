@@ -3,6 +3,57 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Development remains the default. Release mode keeps the same drivers and
+# setup flow, but uses a branded splash, quiet diagnostics, and fewer boot I/O
+# operations. --serial-log re-enables the full COM1 log stream for diagnosis.
+VEXOS_RELEASE="${VEXOS_RELEASE:-0}"
+VEXOS_SERIAL_DEBUG="${VEXOS_SERIAL_DEBUG:-0}"
+
+usage() {
+    cat <<'USAGE'
+Usage: ./build.sh [--debug | --release] [--serial-log]
+
+  --debug       Verbose development boot (default)
+  --release     Branded splash and quiet, optimized release boot
+  --serial-log  Keep full COM1 output in release builds
+  --help        Show this help
+USAGE
+}
+
+while (($#)); do
+    case "$1" in
+        --debug)
+            VEXOS_RELEASE=0
+            VEXOS_SERIAL_DEBUG=0
+            ;;
+        --release)
+            VEXOS_RELEASE=1
+            ;;
+        --serial-log)
+            VEXOS_SERIAL_DEBUG=1
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "[BUILD] Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [[ "$VEXOS_RELEASE" != "0" && "$VEXOS_RELEASE" != "1" ]]; then
+    echo "[BUILD] VEXOS_RELEASE must be 0 or 1." >&2
+    exit 2
+fi
+if [[ "$VEXOS_SERIAL_DEBUG" != "0" && "$VEXOS_SERIAL_DEBUG" != "1" ]]; then
+    echo "[BUILD] VEXOS_SERIAL_DEBUG must be 0 or 1." >&2
+    exit 2
+fi
+
 if ! command -v make >/dev/null 2>&1; then
     echo "[BUILD] GNU Make is required." >&2
     exit 1
@@ -52,12 +103,24 @@ if ! NETLOG_DESTINATION_IPV4="$(ipv4_define "$NETLOG_DESTINATION")"; then
 fi
 
 echo "[BUILD] Building VexOS"
+if [[ "$VEXOS_RELEASE" == "1" ]]; then
+    echo "[BUILD] Profile:            RELEASE"
+    if [[ "$VEXOS_SERIAL_DEBUG" == "1" ]]; then
+        echo "[BUILD] COM1 logging:       enabled"
+    else
+        echo "[BUILD] COM1 logging:       critical errors only"
+    fi
+else
+    echo "[BUILD] Profile:            DEBUG"
+fi
 echo "[BUILD] NetLog local:       $NETLOG_LOCAL_IP"
 echo "[BUILD] NetLog netmask:     $NETLOG_NETMASK"
 echo "[BUILD] NetLog gateway:     $NETLOG_GATEWAY"
 echo "[BUILD] NetLog destination: $NETLOG_DESTINATION"
 
 make all \
+    VEXOS_RELEASE="$VEXOS_RELEASE" \
+    VEXOS_SERIAL_DEBUG="$VEXOS_SERIAL_DEBUG" \
     NETLOG_LOCAL_IPV4="$NETLOG_LOCAL_IPV4" \
     NETLOG_NETMASK_IPV4="$NETLOG_NETMASK_IPV4" \
     NETLOG_GATEWAY_IPV4="$NETLOG_GATEWAY_IPV4" \
