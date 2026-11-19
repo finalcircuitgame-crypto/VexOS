@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void serial_print(const char *str);
+void serial_print(const char *str);\nvoid ConsoleDebugPrint(const char *str);
 
 /*
  * QEMU user-mode networking defaults:
@@ -51,25 +51,21 @@ static uint8_t g_reported_link_wait;
 static uint8_t g_reported_udp_reject;
 static uint8_t g_reported_udp_accept;
 
-static void netlog_print_counter(const char *label, uint64_t value) {
+static void netlog_append_text(char *buffer, size_t capacity, size_t *used, const char *text) {
+    while (*text && *used + 1u < capacity) buffer[(*used)++] = *text++;
+    buffer[*used] = 0;
+}
+
+static void netlog_append_counter(char *buffer, size_t capacity, size_t *used,
+                                  const char *label, uint64_t value) {
     char digits[21];
     size_t length = 0;
-    if (value == 0u) {
-        digits[length++] = '0';
-    } else {
-        while (value != 0u && length < sizeof(digits)) {
-            digits[length++] = (char)('0' + (value % 10u));
-            value /= 10u;
-        }
-    }
-
-    serial_print(label);
-    while (length != 0u) {
-        char character[2];
-        character[0] = digits[--length];
-        character[1] = 0;
-        serial_print(character);
-    }
+    do { digits[length++] = (char)('0' + (value % 10u)); value /= 10u; }
+    while (value != 0u && length < sizeof(digits));
+    netlog_append_text(buffer, capacity, used, label);
+    while (length && *used + 1u < capacity) buffer[(*used)++] = digits[--length];
+    if (*used + 1u < capacity) buffer[(*used)++] = '\n';
+    buffer[*used] = 0;
 }
 
 static uint64_t netlog_irq_save(void) {
@@ -179,19 +175,24 @@ static void netlog_flush_internal(int force) {
             arp_get_stats(&arp_stats);
 
             g_reported_udp_reject = 1u;
-            serial_print("[NETLOG] udp_send rejected a payload; TX counters follow\n");
-            netlog_print_counter("  udp_drop=", udp_stats.tx_dropped);
-            netlog_print_counter(" ipv4_drop=", ipv4_stats.tx_dropped);
-            netlog_print_counter(" arp_requests=", arp_stats.tx_requests);
-            netlog_print_counter(" arp_tx_fail=", arp_stats.tx_failures);
-            netlog_print_counter(" arp_pending=", arp_stats.pending_queued);
-            netlog_print_counter(" arp_pending_drop=", arp_stats.pending_dropped);
-            netlog_print_counter(" arp_timeouts=", arp_stats.pending_timeouts);
-            netlog_print_counter(" arp_rx_replies=", arp_stats.rx_replies);
-            netlog_print_counter(" arp_pending_sent=", arp_stats.pending_sent);
-            netlog_print_counter(" nic_tx=", g_device->tx_packets);
-            netlog_print_counter(" nic_drop=", g_device->tx_dropped);
-            serial_print("\n");
+            char diagnostic[640] = {0};
+            size_t used = 0;
+            netlog_append_text(diagnostic, sizeof(diagnostic), &used,
+                "[NETLOG] UDP SEND REJECTED - TX DIAGNOSTICS\n"
+                "Cumulative counters at first rejection:\n");
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "udp_drop=", udp_stats.tx_dropped);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "ipv4_drop=", ipv4_stats.tx_dropped);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_requests=", arp_stats.tx_requests);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_tx_fail=", arp_stats.tx_failures);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_pending=", arp_stats.pending_queued);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_pending_drop=", arp_stats.pending_dropped);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_timeouts=", arp_stats.pending_timeouts);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_rx_replies=", arp_stats.rx_replies);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "arp_pending_sent=", arp_stats.pending_sent);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "nic_tx=", g_device->tx_packets);
+            netlog_append_counter(diagnostic, sizeof(diagnostic), &used, "nic_drop=", g_device->tx_dropped);
+            ConsoleDebugPrint(diagnostic);
+            serial_print(diagnostic);
         }
         return;
     }
