@@ -12,5 +12,6 @@ const uint8_t *alx_mac_address(void);
 int alx_send(const void *frame, uint16_t length);
 int alx_receive(void *frame, uint16_t capacity, uint16_t *length);
 void alx_poll(void);
+void alx_render_pending_diagnostics(void);
 
 #endif
