@@ -52,6 +52,7 @@ static void xhci_poll_events_atomic(void) {
 
 // Defined in other files
 void ConsoleInit(BootInfo *bootInfo);
+void ConsoleShowSplash(BootInfo *bootInfo);
 void PrintString(const char *str, uint32_t color);
 void SetupGDT();
 void SetupIDT();
@@ -194,14 +195,45 @@ static void serial_tx_drain(void) {
   }
 }
 
+#ifdef VEXOS_RELEASE
+#ifndef VEXOS_SERIAL_DEBUG
+static int serial_message_is_critical(const char *text) {
+  static const char *const markers[] = {"FATAL", "ERROR", "PANIC"};
+  if (!text)
+    return 0;
+  for (uint32_t i = 0; i < sizeof(markers) / sizeof(markers[0]); ++i) {
+    const char *needle = markers[i];
+    for (const char *p = text; *p; ++p) {
+      const char *a = p;
+      const char *b = needle;
+      while (*a && *b && *a == *b) {
+        ++a;
+        ++b;
+      }
+      if (*b == '\0')
+        return 1;
+    }
+  }
+  return 0;
+}
+#endif
+#endif
+
 void serial_print(const char *str) {
   if (!str)
     return;
 
-  /* Keep the in-memory boot log even when the machine has no COM1 UART. */
+  /* Keep diagnostics in RAM even when release boot output is quiet. */
   bootlog_append(str);
 #ifdef VEXOS_NETLOG
   netlog_append(str);
+#endif
+
+#if defined(VEXOS_RELEASE) && !defined(VEXOS_SERIAL_DEBUG)
+  /* Avoid slow character-at-a-time UART output during normal release boot.
+     Critical messages remain visible on COM1 for hardware troubleshooting. */
+  if (!serial_message_is_critical(str))
+    return;
 #endif
 
   serial_uart_initialize();
@@ -233,9 +265,11 @@ void serial_print(const char *str) {
   if (start_drain)
     serial_tx_drain();
 
-  // Also print to framebuffer console once initialized.
+#ifndef VEXOS_RELEASE
+  // Development builds mirror serial diagnostics to the framebuffer console.
   if (g_ConsoleReady)
     PrintString(str, 0xFFFFFF);
+#endif
 }
 
 static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
@@ -247,19 +281,17 @@ static void vmm_map_or_halt(void *virtual_addr, void *physical_addr,
 }
 
 static int pci_has_qemu_stdvga(void) {
-  /* QEMU's standard VGA adapter is PCI 1234:1111. Detect it before VMM
-     activation so its second scanout page can be identity-mapped as well. */
-  for (uint16_t bus = 0; bus < 256u; ++bus) {
-    for (uint8_t slot = 0; slot < 32u; ++slot) {
-      for (uint8_t func = 0; func < 8u; ++func) {
-        uint32_t id = pci_config_read_dword((uint8_t)bus, slot, func, 0x00u);
-        if ((uint16_t)id == 0xFFFFu)
-          continue;
-        if ((uint16_t)id == 0x1234u &&
-            (uint16_t)(id >> 16) == 0x1111u)
-          return 1;
-      }
-    }
+  /*
+   * QEMU's standard VGA adapter (1234:1111) is a single-function device on
+   * the root PCI bus. This is only a targeted framebuffer quirk check, not
+   * PCI enumeration: probing every bus and all eight functions here caused
+   * tens of thousands of unnecessary configuration-space reads before VMM.
+   */
+  for (uint8_t slot = 0; slot < 32u; ++slot) {
+    uint32_t id = pci_config_read_dword(0u, slot, 0u, 0x00u);
+    if ((uint16_t)id == 0x1234u &&
+        (uint16_t)(id >> 16) == 0x1111u)
+      return 1;
   }
   return 0;
 }
@@ -1120,14 +1152,20 @@ void kernel_main(BootInfo *bootInfo) {
   ConsoleInit(bootInfo);
   g_ConsoleReady = 1;
 
+#ifdef VEXOS_RELEASE
+  /* Draw the splash immediately; it replaces the old blue text screen. */
+  ConsoleShowSplash(bootInfo);
+#else
   serial_print("[KERNEL] Clearing Framebuffer...\n");
   uint32_t *fb = bootInfo->framebuffer;
-  for (uint32_t i = 0; i < bootInfo->width * bootInfo->height; i++) {
-    fb[i] = 0x001122;
+  for (uint32_t y = 0; y < bootInfo->height; ++y) {
+    for (uint32_t x = 0; x < bootInfo->width; ++x)
+      fb[(uint64_t)y * bootInfo->pitch + x] = 0x001122u;
   }
 
   PrintString("Tiny64 Kernel Loaded!\n", 0xFFFFFF);
   PrintString("VexOS " VEXOS_VERSION " (" VEXOS_BUILD_ID ")\n", 0xFFFFFF);
+#endif
   serial_print("[KERNEL] Setting up GDT...\n");
   SetupGDT();
   // Setup TSS/IST so hardware IRQs can run on a dedicated interrupt stack.
@@ -1411,8 +1449,10 @@ void kernel_main(BootInfo *bootInfo) {
 #endif
   pci_start_xhci();
 
-  /* Persist diagnostics produced during xHCI startup, including NetLog/TX probes. */
+#ifndef VEXOS_RELEASE
+  /* Development builds persist startup diagnostics for inspection. */
   (void)bootlog_flush();
+#endif
 
 #ifdef VEXOS_CI_SKIP_WIZARD
   // CI-only path: bypass the interactive first-boot wizard for automated QEMU input.
@@ -1515,16 +1555,18 @@ void kernel_main(BootInfo *bootInfo) {
     arp_poll();
 
 
+#ifndef VEXOS_RELEASE
     /*
      * Keep /boot.log current even when UDP NetLog cannot reach the host.
-     * bootlog_flush() is a no-op unless new log bytes exist and writable
-     * VexOS storage was detected during PCI enumeration.
+     * Release builds keep the compact boot log in RAM and avoid periodic
+     * synchronous storage writes on the desktop frame path.
      */
     uint64_t bootlog_now = Timer_Ticks();
     if (bootlog_now - last_bootlog_flush_ticks >= 1000u) {
       (void)bootlog_flush();
       last_bootlog_flush_ticks = bootlog_now;
     }
+#endif
 
     // Keep USB and PS/2 pointer polling frequent and independent of frame rate.
     xhci_poll_events_atomic();
