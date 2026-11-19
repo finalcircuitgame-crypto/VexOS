@@ -140,13 +140,22 @@ int xhci_poll_event(xhci_trb_t *out) {
     return 0;
   }
 
-  xhci_trb_t trb = event_ring[event_ring_index];
-
-  if ((trb.control & 1u) != (uint32_t)event_ring_cycle) {
+  /*
+   * Event TRBs are written by the controller. Read the cycle bit first:
+   * xHCI publishes the rest of the event before handing ownership over by
+   * changing Cycle. Do not copy stale fields before checking that handoff.
+   */
+  volatile xhci_trb_t *entry = (volatile xhci_trb_t *)&event_ring[event_ring_index];
+  uint32_t control = entry->control;
+  if ((control & 1u) != (uint32_t)event_ring_cycle) {
     return 0;
   }
 
-  *out = trb;
+  /* Acquire the controller's DMA writes before consuming the event payload. */
+  xhci_dma_read_barrier();
+  out->data = entry->data;
+  out->status = entry->status;
+  out->control = control;
 
   event_ring_index++;
   if (event_ring_index >= 256) {
@@ -307,6 +316,13 @@ void xhci_poll_events() {
     if (ep_id != (uint32_t)dev->intr_dci) {
       continue;
     }
+
+    /*
+     * A matching Transfer Event means the controller has finished writing
+     * the associated input buffer. Pair the event-ring acquire with a DMA
+     * read barrier before decoding the report bytes.
+     */
+    xhci_dma_read_barrier();
 
     uint32_t trb_len_remaining = evt.status & 0xFFFFFFu;
     uint32_t xfer_len = dev->intr_mps;
