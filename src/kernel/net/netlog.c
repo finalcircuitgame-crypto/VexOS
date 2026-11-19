@@ -9,7 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void serial_print(const char *str);\nvoid ConsoleDebugPrint(const char *str);
+void serial_print(const char *str);
+void ConsoleDebugPrint(const char *str);
 
 /*
  * QEMU user-mode networking defaults:
