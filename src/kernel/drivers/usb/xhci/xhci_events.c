@@ -290,7 +290,7 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
   return 0;
 }
 
-void xhci_poll_events() {
+static void xhci_poll_events_impl(void) {
   if (!event_ring || !runtime_regs) {
     return;
   }
@@ -482,4 +482,24 @@ rearm:
       xhci_hid_start_polling(dev);
     }
   }
+}
+
+
+/*
+ * The event ring has one global dequeue index and cycle state. Polling is
+ * reached from the desktop loop, input syscalls, and the main loop; make the
+ * operation atomic against the PIT scheduler at the common entry point so
+ * callers cannot race and advance the event-ring consumer twice.
+ *
+ * Preserve the caller's IF state: syscall/interrupt contexts already have
+ * interrupts disabled, while ordinary desktop code must restore them.
+ */
+void xhci_poll_events(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; cli; popq %0" : "=r"(flags) :: "memory");
+
+  xhci_poll_events_impl();
+
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
 }
