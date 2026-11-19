@@ -12,6 +12,8 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_VENDOR_ID                 0x1969u
 #define ALX_DEVICE_ID_AR8171          0x10A1u
 #define ALX_MMIO_BYTES                0x2000u
+#define ALX_IDLE_DECISN_TIMER          0x1474u
+#define ALX_IDLE_DECISN_TIMER_DEF      0x0400u
 #define ALX_RING_COUNT                128u
 #define ALX_RX_BUFFER_BYTES           1536u
 #define ALX_DMA_BUFFER_STRIDE         2048u
@@ -238,6 +240,7 @@ static uint8_t g_tx_buffers[ALX_RING_COUNT][ALX_DMA_BUFFER_STRIDE]
 static volatile uint8_t *g_mmio;
 static uint8_t g_mac[6];
 static uint8_t g_ready;
+static uint8_t g_datapath_ready;
 static uint8_t g_link_up;
 static uint8_t g_mac_started;
 static uint8_t g_link_speed_code;
@@ -245,20 +248,18 @@ static uint8_t g_link_full_duplex;
 static uint8_t g_revision;
 static uint8_t g_revision_cr;
 static uint16_t g_tx_next;
+static uint16_t g_tx_inflight;
 static uint16_t g_rx_read;
 static uint16_t g_rx_write;
 static uint16_t g_rrd_read;
 static uint32_t g_link_poll_count;
 static uint32_t g_mac_ctrl_base;
 
-/* One-shot TX diagnostic: distinguish descriptor submission from DMA completion. */
-static uint8_t g_tx_probe_started;
-static uint8_t g_tx_probe_finished;
-static uint8_t g_tx_probe_failure_reported;
-static uint16_t g_tx_probe_start_consumer;
-static uint16_t g_tx_probe_expected;
+/* TX completion is tracked for every submitted descriptor, not just a probe. */
 static uint16_t g_tx_last_consumer;
-static uint32_t g_tx_probe_polls;
+static uint32_t g_tx_stall_polls;
+static uint32_t g_tx_recovery_count;
+static uint8_t g_tx_completion_reported;
 static uint8_t g_tx_reject_reported;
 static uint8_t g_mdio_status_failures;
 static char g_tx_timeout_diagnostic[768];
@@ -317,7 +318,7 @@ static void alx_log_tx_timeout(void) {
     char diagnostic[768] = "[ALX] TX timeout snapshot\n";
     size_t used = sizeof("[ALX] TX timeout snapshot\n") - 1u;
     uint16_t index = (uint16_t)(
-        (g_tx_probe_expected + ALX_RING_COUNT - 1u) % ALX_RING_COUNT);
+        (g_tx_next + ALX_RING_COUNT - 1u) % ALX_RING_COUNT);
     const alx_tpd_t *descriptor = &g_tpd[index];
 
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXQ0=", alx_read32(ALX_TXQ0));
@@ -332,8 +333,8 @@ static void alx_log_tx_timeout(void) {
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_CIDX=", alx_read16(ALX_TPD_PRI0_CIDX));
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_SW_NEXT=", g_tx_next);
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_LAST_CIDX=", g_tx_last_consumer);
-    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_PROBE_START=", g_tx_probe_start_consumer);
-    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_PROBE_EXPECT=", g_tx_probe_expected);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_INFLIGHT=", g_tx_inflight);
+    alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_STALL_POLLS=", g_tx_stall_polls);
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_INDEX=", index);
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_LEN=", descriptor->length);
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TPD_WORD1=", descriptor->word1);
@@ -858,10 +859,9 @@ static int alx_setup_rings(void) {
     g_rx_read = 0u;
     g_rx_write = ALX_RING_COUNT - 1u;
     g_rrd_read = 0u;
-    g_tx_probe_started = 0u;
-    g_tx_probe_finished = 0u;
-    g_tx_probe_failure_reported = 0u;
-    g_tx_probe_polls = 0u;
+    g_tx_inflight = 0u;
+    g_tx_stall_polls = 0u;
+    g_tx_last_consumer = 0u;
     g_tx_reject_reported = 0u;
 
     alx_write32(ALX_RX_BASE_ADDR_HI, rx_high);
@@ -890,8 +890,9 @@ static int alx_setup_rings(void) {
      * The first actual descriptor submission publishes producer index 1.
      */
     g_tx_next = 0u;
+    g_tx_inflight = 0u;
     g_tx_last_consumer = 0u;
-    g_tx_probe_start_consumer = 0u;
+    g_tx_stall_polls = 0u;
     __asm__ volatile("mfence" ::: "memory");
 
     /* Keep one RFD slot unposted so producer and consumer never alias. */
@@ -913,6 +914,9 @@ static void alx_configure_basic(void) {
                       (7u << ALX_MAC_CTRL_PRMBLEN_SHIFT);
 
     alx_write32(ALX_CLK_GATE, ALX_CLK_GATE_ALL);
+    if (g_revision >= 2u)
+        alx_write32(ALX_IDLE_DECISN_TIMER, ALX_IDLE_DECISN_TIMER_DEF);
+
     value = alx_read32(ALX_MASTER);
     value |= ALX_MASTER_IRQMOD2_EN | ALX_MASTER_IRQMOD1_EN |
              ALX_MASTER_SYSALVTIMER_EN;
@@ -1034,10 +1038,15 @@ static void alx_log_phy_status(uint16_t bmsr, uint16_t bmcr,
     serial_print("\n");
 }
 
+static int alx_recover_datapath(void);
+
 static void alx_update_link(void) {
     uint16_t bmsr = 0u;
     uint16_t bmcr = 0u;
     uint16_t status = 0u;
+
+    if (!g_datapath_ready)
+        return;
 
     /* BMSR link state is latched low; read it twice. */
     if (!alx_mdio_read(ALX_MII_BMSR, &bmsr) ||
@@ -1059,16 +1068,23 @@ static void alx_update_link(void) {
     alx_log_phy_status(bmsr, bmcr, status);
 
     if ((bmsr & ALX_BMSR_LSTATUS) == 0u) {
-        if (g_mac_started)
+        if (g_mac_started) {
             alx_stop_mac();
-        else
+            /* Linux resets the MAC and reinitializes both DMA rings on link loss. */
+            (void)alx_recover_datapath();
+        } else {
             g_link_up = 0u;
+        }
         return;
     }
 
     if ((status & ALX_GIGA_PSSR_RESOLVED) == 0u) {
-        if (g_mac_started)
+        if (g_mac_started) {
             alx_stop_mac();
+            (void)alx_recover_datapath();
+        } else {
+            g_link_up = 0u;
+        }
         return;
     }
 
@@ -1078,12 +1094,16 @@ static void alx_update_link(void) {
         speed_code = 2u;
         break;
     case ALX_GIGA_PSSR_100:
-    case 0u:
+    case 0u: /* 10 and 100 Mbps share the MAC's 10/100 speed setting. */
         speed_code = 1u;
         break;
     default:
-        if (g_mac_started)
+        if (g_mac_started) {
             alx_stop_mac();
+            (void)alx_recover_datapath();
+        } else {
+            g_link_up = 0u;
+        }
         return;
     }
 
@@ -1095,6 +1115,49 @@ static void alx_update_link(void) {
         alx_start_mac(speed_code, full_duplex);
     else
         g_link_up = 1u;
+}
+
+static int alx_recover_datapath(void) {
+    if (!g_ready || !g_mmio)
+        return 0;
+
+    /*
+     * Follow Linux alx's reset/re-init path: stop traffic, reset the MAC/DMA
+     * engine, reload ring pointers, then restore queue/MAC configuration.
+     */
+    g_datapath_ready = 0u;
+    g_mac_started = 0u;
+    g_link_up = 0u;
+    ++g_tx_recovery_count;
+    serial_print("[ALX] Recovering Ethernet datapath: resetting MAC and DMA rings\n");
+    desktop_debug_set_network_status("[ALX] Recovering TX: resetting MAC and DMA rings");
+
+    alx_stop_mac();
+    if (!alx_reset_mac())
+        goto failed;
+    if (!alx_setup_rings())
+        goto failed;
+
+    alx_configure_basic();
+    g_tx_inflight = 0u;
+    g_tx_last_consumer = 0u;
+    g_tx_stall_polls = 0u;
+    g_mdio_status_failures = 0u;
+    g_datapath_ready = 1u;
+
+    /* Re-check the PHY on the next poll; do not start the MAC blindly. */
+    g_link_poll_count = 63u;
+    serial_print("[ALX] MAC reset and DMA ring reinitialization completed\n");
+    desktop_debug_set_network_status("[ALX] TX recovery complete; checking PHY link");
+    return 1;
+
+failed:
+    g_datapath_ready = 0u;
+    g_mac_started = 0u;
+    g_link_up = 0u;
+    serial_print("[ALX] ERROR: Ethernet datapath recovery failed; TX disabled\n");
+    desktop_debug_set_network_status("[ALX] ERROR: Ethernet recovery failed; reboot required");
+    return 0;
 }
 
 int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
@@ -1195,6 +1258,7 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
     }
 
     g_ready = 1u;
+    g_datapath_ready = 1u;
     g_link_up = 0u;
     g_mac_started = 0u;
     g_link_poll_count = 511u;
@@ -1215,15 +1279,44 @@ int alx_is_ready(void) {
 }
 
 int alx_link_up(void) {
-    return g_ready && g_link_up;
+    return g_ready && g_datapath_ready && g_link_up;
 }
 
 const uint8_t *alx_mac_address(void) {
     return g_ready ? g_mac : NULL;
 }
 
+static int alx_tx_reap(uint16_t hardware_consumer) {
+    if (hardware_consumer >= ALX_RING_COUNT)
+        return 0;
+
+    if (g_tx_inflight == 0u) {
+        /* Establish a fresh completion baseline whenever the ring is empty. */
+        g_tx_last_consumer = hardware_consumer;
+        g_tx_stall_polls = 0u;
+        return 1;
+    }
+
+    const uint16_t completed = (uint16_t)(
+        (hardware_consumer + ALX_RING_COUNT - g_tx_last_consumer) %
+        ALX_RING_COUNT);
+    if (completed > g_tx_inflight)
+        return 0;
+
+    if (completed != 0u) {
+        g_tx_inflight = (uint16_t)(g_tx_inflight - completed);
+        g_tx_last_consumer = hardware_consumer;
+        g_tx_stall_polls = 0u;
+        if (!g_tx_completion_reported) {
+            g_tx_completion_reported = 1u;
+            serial_print("[ALX] TX completion observed: hardware consumed descriptors\n");
+        }
+    }
+    return 1;
+}
+
 int alx_send(const void *frame, uint16_t length) {
-    if (!g_ready || !g_link_up || !frame ||
+    if (!g_ready || !g_datapath_ready || !g_link_up || !frame ||
         length < 14u || length > ALX_FRAME_MAX) {
         if (g_ready && !g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
@@ -1233,18 +1326,20 @@ int alx_send(const void *frame, uint16_t length) {
         return 0;
     }
 
-    uint16_t next = (uint16_t)((g_tx_next + 1u) % ALX_RING_COUNT);
     uint16_t hardware_consumer = alx_read16(ALX_TPD_PRI0_CIDX);
-    if (hardware_consumer >= ALX_RING_COUNT) {
+    if (hardware_consumer >= ALX_RING_COUNT ||
+        !alx_tx_reap(hardware_consumer)) {
         if (!g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
-            serial_print("[ALX] TX rejected: hardware consumer index is outside the ring\n");
-            desktop_debug_set_network_status("[ALX] TX halted: invalid hardware consumer index");
+            serial_print("[ALX] TX rejected: hardware consumer state is invalid or out of sync\n");
+            desktop_debug_set_network_status("[ALX] TX halted: consumer index is invalid or out of sync");
         }
         return 0;
     }
-    g_tx_last_consumer = hardware_consumer;
-    if (next == hardware_consumer) {
+
+    uint16_t next = (uint16_t)((g_tx_next + 1u) % ALX_RING_COUNT);
+    if (next == hardware_consumer ||
+        g_tx_inflight >= ALX_RING_COUNT - 1u) {
         if (!g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
             serial_print("[ALX] TX ring full; hardware consumer has not freed a descriptor\n");
@@ -1270,20 +1365,12 @@ int alx_send(const void *frame, uint16_t length) {
         desktop_debug_set_network_status("[ALX] TX warning: producer-index readback mismatch");
     }
 
-    if (!g_tx_probe_started) {
-        g_tx_probe_started = 1u;
-        g_tx_probe_start_consumer = hardware_consumer;
-        g_tx_probe_expected = g_tx_next;
-        g_tx_probe_polls = 0u;
-        g_tx_probe_failure_reported = 0u;
-        serial_print("[ALX] First TX descriptor submitted; tracking hardware consumer progress\n");
-        desktop_debug_set_network_status("[ALX] TX probe: descriptor submitted; tracking hardware consumer");
-    }
+    ++g_tx_inflight;
+    g_tx_reject_reported = 0u;
     return 1;
 }
-
 int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
-    if (!g_ready || !frame || !length || capacity == 0u)
+    if (!g_ready || !g_datapath_ready || !frame || !length || capacity == 0u)
         return 0;
 
     alx_rrd_t *completion = &g_rrd[g_rrd_read];
@@ -1329,62 +1416,35 @@ int alx_receive(void *frame, uint16_t capacity, uint16_t *length) {
 }
 
 void alx_poll(void) {
-    if (!g_ready)
+    if (!g_ready || !g_datapath_ready)
         return;
 
     if (++g_link_poll_count >= 64u) {
         g_link_poll_count = 0u;
         alx_update_link();
+        if (!g_datapath_ready)
+            return;
     }
 
-    if (g_tx_probe_started && !g_tx_probe_finished) {
-        const uint16_t consumer = alx_read16(ALX_TPD_PRI0_CIDX);
-        if (consumer < ALX_RING_COUNT) {
-            if (consumer != g_tx_last_consumer)
-                g_tx_last_consumer = consumer;
+    const uint16_t consumer = alx_read16(ALX_TPD_PRI0_CIDX);
+    if (consumer >= ALX_RING_COUNT || !alx_tx_reap(consumer)) {
+        serial_print("[ALX] TX consumer index is invalid or no longer matches outstanding descriptors\n");
+        alx_log_tx_timeout();
+        (void)alx_recover_datapath();
+        return;
+    }
 
-            const uint16_t target_distance = (uint16_t)(
-                (g_tx_probe_expected + ALX_RING_COUNT -
-                 g_tx_probe_start_consumer) % ALX_RING_COUNT);
-            const uint16_t completed_distance = (uint16_t)(
-                (consumer + ALX_RING_COUNT -
-                 g_tx_probe_start_consumer) % ALX_RING_COUNT);
+    if (g_tx_inflight == 0u) {
+        g_tx_stall_polls = 0u;
+        return;
+    }
 
-            if (target_distance != 0u &&
-                completed_distance >= target_distance) {
-                g_tx_probe_finished = 1u;
-                if (g_tx_probe_failure_reported) {
-                    serial_print("[ALX] TX consumer recovered; first descriptor is now consumed\n");
-                    desktop_debug_set_network_status("[ALX] TX recovered: hardware consumer advanced");
-                } else {
-                    serial_print("[ALX] First TX descriptor consumed by hardware\n");
-                    desktop_debug_set_network_status("[ALX] TX PROBE PASSED: hardware consumed the first descriptor");
-                }
+    if (g_tx_stall_polls < 512u)
+        ++g_tx_stall_polls;
 
-                /* Make successful completion visible on the desktop as well. */
-                const char *message =
-                    "[ALX] TX PROBE: descriptor consumed by hardware\n";
-                size_t length = 0u;
-                while (message[length] &&
-                       length + 1u < sizeof(g_tx_timeout_diagnostic)) {
-                    g_tx_timeout_diagnostic[length] = message[length];
-                    ++length;
-                }
-                g_tx_timeout_diagnostic[length] = '\0';
-                g_tx_timeout_diagnostic_pending = 1u;
-            }
-        } else if (!g_tx_probe_failure_reported) {
-            g_tx_probe_failure_reported = 1u;
-            serial_print("[ALX] TX consumer index became invalid while tracking the first descriptor\n");
-            alx_log_tx_timeout();
-        }
-
-        if (!g_tx_probe_finished && !g_tx_probe_failure_reported &&
-            g_link_up && ++g_tx_probe_polls >= 512u) {
-            g_tx_probe_failure_reported = 1u;
-            serial_print("[ALX] TX descriptor still pending after 512 polls; continuing to watch for recovery\n");
-            desktop_debug_set_network_status("[ALX] TX STALLED: descriptor pending; watching for recovery");
-            alx_log_tx_timeout();
-        }
+    if (g_tx_stall_polls >= 512u) {
+        serial_print("[ALX] TX descriptors stalled for 512 polls; attempting Linux-style MAC/DMA recovery\n");
+        alx_log_tx_timeout();
+        (void)alx_recover_datapath();
     }
 }
