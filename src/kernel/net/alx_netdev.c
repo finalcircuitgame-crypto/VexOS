@@ -36,7 +36,7 @@ static void alx_netdev_poll(net_device_t *device, uint32_t budget) {
         if (received == 0)
             break;
         if (received < 0)
-            continue;
+            break; // Avoid spinning on a faulted completion; ALX poll resets the ring.
         netdev_receive(device, g_rx_frame, frame_length);
     }
 }
