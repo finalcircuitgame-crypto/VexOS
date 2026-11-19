@@ -110,7 +110,7 @@ static void netlog_flush_internal(int force) {
     if (!g_device->link_up) {
         if (!g_reported_link_wait) {
             g_reported_link_wait = 1u;
-            serial_print("[NETLOG] Waiting for registered interface link before sending\\n");
+            serial_print("[NETLOG] Waiting for registered interface link before sending\n");
         }
         return;
     }
@@ -151,14 +151,14 @@ static void netlog_flush_internal(int force) {
                   NETLOG_DESTINATION_PORT, packet, length)) {
         if (!g_reported_udp_reject) {
             g_reported_udp_reject = 1u;
-            serial_print("[NETLOG] udp_send rejected the first payload\\n");
+            serial_print("[NETLOG] udp_send rejected the first payload\n");
         }
         return;
     }
 
     if (!g_reported_udp_accept) {
         g_reported_udp_accept = 1u;
-        serial_print("[NETLOG] First UDP payload accepted by IP/ARP stack\\n");
+        serial_print("[NETLOG] First UDP payload accepted by IP/ARP stack\n");
     }
 
     flags = netlog_irq_save();
