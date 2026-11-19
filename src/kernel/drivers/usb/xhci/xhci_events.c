@@ -4,6 +4,7 @@
 extern void desktop_debug_set_usb_status(const char *status);
 
 static uint32_t g_xhci_mouse_report_log_count;
+static uint32_t g_xhci_transfer_event_log_count;
 
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
@@ -312,6 +313,26 @@ void xhci_poll_events() {
     uint32_t cc = trb_cc(evt.status);
     uint32_t slot_id = trb_slot_id(evt.control);
     uint32_t ep_id = (evt.control >> 16) & 0x1Fu;
+
+    /*
+     * Log raw transfer events before device/endpoint filtering. This makes
+     * wrong-slot or wrong-DCI completions visible instead of silently losing
+     * the evidence needed to debug a dead HID endpoint.
+     */
+    if (g_xhci_transfer_event_log_count < 32u) {
+      serial_print("[xHCI][EVENT] transfer slot=");
+      xhci_print_u32_dec(slot_id);
+      serial_print(" ep=");
+      xhci_print_u32_dec(ep_id);
+      serial_print(" cc=");
+      xhci_print_u32_dec(cc);
+      serial_print(" status=");
+      xhci_print_hex32(evt.status);
+      serial_print(" control=");
+      xhci_print_hex32(evt.control);
+      serial_print("\n");
+    }
+    g_xhci_transfer_event_log_count++;
 
     if (slot_id == 0 || slot_id >= 256) {
       continue;
