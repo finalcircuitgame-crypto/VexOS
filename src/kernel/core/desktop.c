@@ -2516,6 +2516,8 @@ void desktop_run_fullscreen_wizard(BootInfo *bootInfo) {
   g_setup_complete = 0;
   g_fullscreen_setup_step = 0;
   input_init(bootInfo->width, bootInfo->height);
+  if (ps2_mouse_init())
+    desktop_debug_set_input_status("PS/2 touchpad enabled; USB HID input is monitored too");
 
   uint32_t screen_w = bootInfo->width;
   uint32_t screen_h = bootInfo->height;
