@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 void serial_print(const char *str);
+extern void desktop_debug_set_network_status(const char *status);
 void ConsoleDebugPrint(const char *str);
 
 #define ALX_VENDOR_ID                 0x1969u
@@ -336,6 +337,7 @@ static void alx_log_tx_timeout(void) {
 
     /* Keep a durable copy; the desktop frame would overwrite an immediate draw. */
     serial_print(diagnostic);
+    desktop_debug_set_network_status(diagnostic);
     size_t copy_length = used;
     if (copy_length >= sizeof(g_tx_timeout_diagnostic))
         copy_length = sizeof(g_tx_timeout_diagnostic) - 1u;
@@ -349,7 +351,7 @@ static void alx_log_tx_timeout(void) {
 void alx_render_pending_diagnostics(void) {
     if (!g_tx_timeout_diagnostic_pending)
         return;
-    ConsoleDebugPrint(g_tx_timeout_diagnostic);
+    desktop_debug_set_network_status(g_tx_timeout_diagnostic);
     g_tx_timeout_diagnostic_pending = 0u;
 }
 
@@ -1174,6 +1176,7 @@ int alx_send(const void *frame, uint16_t length) {
         if (g_ready && !g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
             serial_print("[ALX] TX rejected before descriptor submission (link/state/frame)\n");
+            desktop_debug_set_network_status("[ALX] TX rejected: link is down, driver is not ready, or frame is invalid");
         }
         return 0;
     }
@@ -1184,6 +1187,7 @@ int alx_send(const void *frame, uint16_t length) {
         if (!g_tx_reject_reported) {
             g_tx_reject_reported = 1u;
             serial_print("[ALX] TX ring full; hardware consumer has not freed a descriptor\n");
+            desktop_debug_set_network_status("[ALX] TX ring full: hardware has not freed a descriptor");
         }
         return 0;
     }
@@ -1205,6 +1209,7 @@ int alx_send(const void *frame, uint16_t length) {
         g_tx_probe_expected = g_tx_next;
         g_tx_probe_polls = 0u;
         serial_print("[ALX] First TX descriptor submitted; waiting for hardware consumer\n");
+        desktop_debug_set_network_status("[ALX] TX probe: descriptor submitted; waiting for hardware consumer");
     }
     return 1;
 }
@@ -1269,6 +1274,7 @@ void alx_poll(void) {
         if (consumer == g_tx_probe_expected) {
             g_tx_probe_finished = 1u;
             serial_print("[ALX] First TX descriptor consumed by hardware\n");
+            desktop_debug_set_network_status("[ALX] TX PROBE PASSED: hardware consumed the first descriptor");
 
             /* Make successful completion visible on the desktop as well. */
             const char *message =
@@ -1284,6 +1290,7 @@ void alx_poll(void) {
         } else if (++g_tx_probe_polls >= 512u) {
             g_tx_probe_finished = 1u;
             serial_print("[ALX] First TX descriptor still pending after 512 polls\n");
+            desktop_debug_set_network_status("[ALX] TX PROBE FAILED: descriptor remained pending after 512 polls");
             alx_log_tx_timeout();
         }
     }
