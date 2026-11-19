@@ -156,8 +156,8 @@ static void ps2_mouse_consume_byte(uint8_t value) {
   int32_t dx = (int32_t)(int8_t)g_ps2_mouse_packet[1];
   int32_t dy = -(int32_t)(int8_t)g_ps2_mouse_packet[2];
   uint32_t buttons = (uint32_t)(flags & 0x07u);
-  if (dx || dy || buttons)
-    input_pointer_add_rel(dx, dy, buttons);
+  /* Always publish packets so a zero-motion button release is not lost. */
+  input_pointer_add_rel(dx, dy, buttons);
 }
 
 void ps2_mouse_poll(void) {
