@@ -52,6 +52,7 @@ $(OBJDIR)/core/main.o: FORCE_VEXOS_BUILD_ID
 # at their existing optimization level until their MMIO/DMA paths are audited.
 $(OBJDIR)/core/desktop.o $(OBJDIR)/core/png.o $(OBJDIR)/core/jpeg.o \
 $(OBJDIR)/core/picojpeg.o $(OBJDIR)/core/simplefs.o \
+$(OBJDIR)/drivers/console.o \
 $(OBJDIR)/mem/heap.o $(OBJDIR)/mem/pmm.o: CFLAGS_KERNEL += -O2
 
 # Keep window rendering and compositor hot paths optimized.
