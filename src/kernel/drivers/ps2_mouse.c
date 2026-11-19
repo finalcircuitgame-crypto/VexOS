@@ -85,7 +85,7 @@ int ps2_mouse_init(void) {
     return 1;
 
   uint8_t initial_status = ps2_inb(PS2_STATUS_PORT);
-  if (initial_status == 0xFFu || initial_status == 0x00u) {
+  if (initial_status == 0xFFu) {
     serial_print("[PS2] No usable i8042 controller detected\n");
     return 0;
   }
