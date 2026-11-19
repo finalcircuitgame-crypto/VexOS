@@ -1,6 +1,8 @@
 #include "xhci_internal.h"
 #include "input.h"
 
+extern void desktop_debug_set_input_status(const char *status);
+
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
     return 1;
