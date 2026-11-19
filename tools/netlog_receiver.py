@@ -107,7 +107,7 @@ def main() -> int:
         destination = args.host if args.host not in ("0.0.0.0", "") else "127.0.0.1"
         try:
             sock.sendto(
-                b"[NETLOG RECEIVER SELF-TEST] Local UDP receive path is working.\\n",
+                b"[NETLOG RECEIVER SELF-TEST] Local UDP receive path is working.\n",
                 (destination, args.port),
             )
             print("[TEST]     Sent a local test datagram. This checks the receiver only.")
