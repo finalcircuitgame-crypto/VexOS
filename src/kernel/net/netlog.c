@@ -47,6 +47,9 @@ static uint64_t g_last_send;
 static net_device_t *g_device;
 static uint8_t g_ready;
 static uint8_t g_drop_notice_pending;
+static uint8_t g_reported_link_wait;
+static uint8_t g_reported_udp_reject;
+static uint8_t g_reported_udp_accept;
 
 static uint64_t netlog_irq_save(void) {
     uint64_t flags;
@@ -101,8 +104,16 @@ int netlog_init(void) {
 }
 
 static void netlog_flush_internal(int force) {
-    if (!g_ready || !g_device || !g_device->link_up)
+    if (!g_ready || !g_device)
         return;
+
+    if (!g_device->link_up) {
+        if (!g_reported_link_wait) {
+            g_reported_link_wait = 1u;
+            serial_print("[NETLOG] Waiting for registered interface link before sending\\n");
+        }
+        return;
+    }
 
     const uint64_t now = Timer_Ticks();
     if (!force && now - g_last_send < NETLOG_SEND_INTERVAL_TICKS)
@@ -137,8 +148,18 @@ static void netlog_flush_internal(int force) {
      * pump keeps polling the NIC until the ARP reply releases that queued frame.
      */
     if (!udp_send(g_device, NETLOG_DESTINATION_IP, NETLOG_SOURCE_PORT,
-                  NETLOG_DESTINATION_PORT, packet, length))
+                  NETLOG_DESTINATION_PORT, packet, length)) {
+        if (!g_reported_udp_reject) {
+            g_reported_udp_reject = 1u;
+            serial_print("[NETLOG] udp_send rejected the first payload\\n");
+        }
         return;
+    }
+
+    if (!g_reported_udp_accept) {
+        g_reported_udp_accept = 1u;
+        serial_print("[NETLOG] First UDP payload accepted by IP/ARP stack\\n");
+    }
 
     flags = netlog_irq_save();
     if (send_drop_notice) {
