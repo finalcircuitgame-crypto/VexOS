@@ -1584,7 +1584,9 @@ void kernel_main(BootInfo *bootInfo) {
 
     // Run desktop tick
     desktop_tick();
+#ifndef VEXOS_RELEASE
     alx_render_pending_diagnostics();
+#endif
 
 #ifdef VEXOS_NETLOG
     /* Draw one-shot NetLog diagnostics after desktop rendering so the panel
