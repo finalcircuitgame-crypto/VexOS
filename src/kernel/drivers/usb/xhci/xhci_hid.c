@@ -430,6 +430,7 @@ int xhci_hid_set_idle(xhci_device_state_t *dev) {
 }
 
 void xhci_hid_start_polling(xhci_device_state_t *dev) {
+  static uint32_t rearm_log_count;
   if (!dev->intr_ring) {
     return;
   }
@@ -452,4 +453,15 @@ void xhci_hid_start_polling(xhci_device_state_t *dev) {
                 (1u << 2);
   xhci_intr_ring_push(dev, &trb);
   xhci_ring_doorbell_ep(dev->slot_id, dci);
+
+  if (rearm_log_count < 16u) {
+    serial_print("[HID][REARM] slot=");
+    xhci_print_u32_dec(dev->slot_id);
+    serial_print(" ep=");
+    xhci_print_u32_dec(dci);
+    serial_print(" mps=");
+    xhci_print_u32_dec(dev->intr_mps);
+    serial_print("\n");
+  }
+  rearm_log_count++;
 }
