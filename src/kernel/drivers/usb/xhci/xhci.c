@@ -103,6 +103,7 @@ static uint64_t *dcbaa;
 // Forward declarations for printing
 void PrintString(const char *str, uint32_t color);
 void serial_print(const char *str);
+extern void desktop_debug_set_input_status(const char *status);
 
 static void print_hex64(uint64_t val) {
   for (int i = 15; i >= 0; i--) {
@@ -282,6 +283,7 @@ static int xhci_ep0_get_config_and_set_config(xhci_device_state_t *dev) {
   dev->hid_ifnum = 0xFF;
   dev->hid_subclass = 0;
   dev->hid_proto = 0;
+  dev->hid_boot_protocol = 0;
   dev->hid_report_desc_len = 0;
   dev->hid_has_report_id = 0;
   dev->hid_mouse_report_id = 0;
@@ -1242,20 +1244,31 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
     serial_print("[xHCI] Config descriptor / set config failed\n");
   }
 
-  // Boot-protocol HID interfaces have standardized report layouts.
-  // Use those layouts directly instead of trusting a device-specific report
-  // descriptor parser for boot mice (notably composite gaming mice).
   if (dev->hid_ifnum != 0xFF) {
     if (dev->hid_subclass == 1 && dev->hid_proto == 2) {
-      dev->hid_mouse_valid = 0;
-      dev->hid_has_report_id = 0;
-      dev->hid_buttons_bits = 0;
-      dev->hid_x_bits = 0;
-      dev->hid_y_bits = 0;
-      dev->hid_wheel_bits = 0;
-      serial_print("[HID] Boot mouse: using standardized boot report format\n");
-      if (!xhci_hid_set_protocol_boot(dev))
-        serial_print("[HID] WARNING: SET_PROTOCOL(boot) failed for mouse\n");
+      /*
+       * Only decode the standardized 3/4-byte boot report if the device
+       * actually accepted SET_PROTOCOL(boot). Some composite gaming mice
+       * expose a boot interface but keep sending their report-descriptor
+       * format when that request is rejected.
+       */
+      serial_print("[HID] Requesting boot protocol for mouse\n");
+      if (xhci_hid_set_protocol_boot(dev)) {
+        dev->hid_boot_protocol = 1u;
+        dev->hid_mouse_valid = 0;
+        dev->hid_has_report_id = 0;
+        dev->hid_buttons_bits = 0;
+        dev->hid_x_bits = 0;
+        dev->hid_y_bits = 0;
+        dev->hid_wheel_bits = 0;
+        serial_print("[HID] Boot mouse protocol accepted\n");
+      } else {
+        dev->hid_boot_protocol = 0u;
+        serial_print("[HID] SET_PROTOCOL(boot) failed; parsing mouse report descriptor\n");
+        xhci_hid_try_parse_mouse_report_desc(dev);
+        if (!dev->hid_mouse_valid)
+          serial_print("[HID] ERROR: no usable mouse report format found\n");
+      }
     } else if (dev->hid_subclass == 1 && dev->hid_proto == 1) {
       // Boot keyboard reports are fixed at 8 bytes.
       serial_print("[HID] SET_PROTOCOL(boot) for keyboard\n");
@@ -1266,12 +1279,20 @@ static int xhci_cmd_address_device(uint32_t slot_id, uint32_t port_id,
       xhci_hid_try_parse_mouse_report_desc(dev);
     }
 
-    serial_print("[HID] SET_IDLE\n");
-    (void)xhci_hid_set_idle(dev);
+    /*
+     * SET_IDLE is optional for this polling-only driver. The HID default idle
+     * rate is zero (report on change), so avoid an extra control transfer that
+     * can stall on otherwise functional devices.
+     */
+    serial_print("[HID] Skipping optional SET_IDLE request\n");
 
     if (xhci_cmd_configure_intr_in_ep(dev)) {
       serial_print("[HID] Interrupt IN armed\n");
       xhci_hid_start_polling(dev);
+      if (dev->hid_proto == 2u || dev->hid_mouse_valid) {
+        desktop_debug_set_input_status(
+            "USB mouse endpoint armed; waiting for interrupt reports");
+      }
     }
   }
 
