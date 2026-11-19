@@ -51,6 +51,27 @@ static uint8_t g_reported_link_wait;
 static uint8_t g_reported_udp_reject;
 static uint8_t g_reported_udp_accept;
 
+static void netlog_print_counter(const char *label, uint64_t value) {
+    char digits[21];
+    size_t length = 0;
+    if (value == 0u) {
+        digits[length++] = '0';
+    } else {
+        while (value != 0u && length < sizeof(digits)) {
+            digits[length++] = (char)('0' + (value % 10u));
+            value /= 10u;
+        }
+    }
+
+    serial_print(label);
+    while (length != 0u) {
+        char character[2];
+        character[0] = digits[--length];
+        character[1] = 0;
+        serial_print(character);
+    }
+}
+
 static uint64_t netlog_irq_save(void) {
     uint64_t flags;
     __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");
@@ -150,8 +171,27 @@ static void netlog_flush_internal(int force) {
     if (!udp_send(g_device, NETLOG_DESTINATION_IP, NETLOG_SOURCE_PORT,
                   NETLOG_DESTINATION_PORT, packet, length)) {
         if (!g_reported_udp_reject) {
+            udp_stats_t udp_stats = {0};
+            ipv4_stats_t ipv4_stats = {0};
+            arp_stats_t arp_stats = {0};
+            udp_get_stats(&udp_stats);
+            ipv4_get_stats(&ipv4_stats);
+            arp_get_stats(&arp_stats);
+
             g_reported_udp_reject = 1u;
-            serial_print("[NETLOG] udp_send rejected the first payload\n");
+            serial_print("[NETLOG] udp_send rejected a payload; TX counters follow\n");
+            netlog_print_counter("  udp_drop=", udp_stats.tx_dropped);
+            netlog_print_counter(" ipv4_drop=", ipv4_stats.tx_dropped);
+            netlog_print_counter(" arp_requests=", arp_stats.tx_requests);
+            netlog_print_counter(" arp_tx_fail=", arp_stats.tx_failures);
+            netlog_print_counter(" arp_pending=", arp_stats.pending_queued);
+            netlog_print_counter(" arp_pending_drop=", arp_stats.pending_dropped);
+            netlog_print_counter(" arp_timeouts=", arp_stats.pending_timeouts);
+            netlog_print_counter(" arp_rx_replies=", arp_stats.rx_replies);
+            netlog_print_counter(" arp_pending_sent=", arp_stats.pending_sent);
+            netlog_print_counter(" nic_tx=", g_device->tx_packets);
+            netlog_print_counter(" nic_drop=", g_device->tx_dropped);
+            serial_print("\n");
         }
         return;
     }
