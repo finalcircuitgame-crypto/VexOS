@@ -1511,9 +1511,7 @@ void kernel_main(BootInfo *bootInfo) {
     // Poll network devices in task context; the E1000e driver is polling-only.
     netdev_poll_all(16u);
     arp_poll();
-#ifdef VEXOS_NETLOG
-    netlog_poll();
-#endif
+
 
     /*
      * Keep /boot.log current even when UDP NetLog cannot reach the host.
@@ -1531,6 +1529,12 @@ void kernel_main(BootInfo *bootInfo) {
 
     // Run desktop tick
     desktop_tick();
+
+#ifdef VEXOS_NETLOG
+    /* Draw one-shot NetLog diagnostics after desktop rendering so the panel
+       is not immediately overwritten by the next desktop frame. */
+    netlog_poll();
+#endif
 
     // Yield/Wait to maintain targeted FPS
     uint64_t current_ticks = Timer_Ticks();
