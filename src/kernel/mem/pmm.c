@@ -19,21 +19,20 @@ static void pmm_irq_restore(uint64_t flags) {
         __asm__ volatile("sti" ::: "memory");
 }
 
-static inline void outb(uint16_t port, uint8_t val) {
-    __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
-}
+extern void serial_print(const char *str);
 
 static void debug_print(const char *str) {
-    while (str && *str) outb(0x3F8, (uint8_t)*str++);
+    serial_print(str);
 }
 
 static void debug_hex(uint64_t val) {
-    for (int i = 15; i >= 0; i--) {
-        char c = (char)((val >> (i * 4)) & 0xF);
-        if (c < 10) c += '0'; else c += 'A' - 10;
-        char s[2] = {c, 0};
-        debug_print(s);
-    }
+    static const char digits[] = "0123456789ABCDEF";
+    char text[17];
+
+    for (int i = 15; i >= 0; --i)
+        text[15 - i] = digits[(val >> (i * 4)) & 0xFu];
+    text[16] = '\0';
+    serial_print(text);
 }
 
 void PMM_Init(uint64_t mem_size, void *bitmap_addr) {
