@@ -257,6 +257,8 @@ static uint8_t g_tx_probe_finished;
 static uint16_t g_tx_probe_expected;
 static uint32_t g_tx_probe_polls;
 static uint8_t g_tx_reject_reported;
+static char g_tx_timeout_diagnostic[768];
+static uint8_t g_tx_timeout_diagnostic_pending;
 
 static uint32_t alx_read32(uint32_t offset) {
     return *(volatile uint32_t *)(void *)(g_mmio + offset);
@@ -332,9 +334,23 @@ static void alx_log_tx_timeout(void) {
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXBUF_LO=", (uint32_t)(uintptr_t)g_tx_buffers[index]);
     alx_append_hex32(diagnostic, sizeof(diagnostic), &used, "  TXBUF_HI=", (uint32_t)((uint64_t)(uintptr_t)g_tx_buffers[index] >> 32));
 
-    /* Keep it in serial/boot/NetLog as well as drawing it on the visible console. */
+    /* Keep a durable copy; the desktop frame would overwrite an immediate draw. */
     serial_print(diagnostic);
-    ConsoleDebugPrint(diagnostic);
+    size_t copy_length = used;
+    if (copy_length >= sizeof(g_tx_timeout_diagnostic))
+        copy_length = sizeof(g_tx_timeout_diagnostic) - 1u;
+    for (size_t i = 0; i < copy_length; ++i)
+        g_tx_timeout_diagnostic[i] = diagnostic[i];
+    g_tx_timeout_diagnostic[copy_length] = '\0';
+    g_tx_timeout_diagnostic_pending = 1u;
+}
+
+/* Called after desktop_tick() so the next full desktop paint cannot erase it. */
+void alx_render_pending_diagnostics(void) {
+    if (!g_tx_timeout_diagnostic_pending)
+        return;
+    ConsoleDebugPrint(g_tx_timeout_diagnostic);
+    g_tx_timeout_diagnostic_pending = 0u;
 }
 
 static int alx_dma_address_ok(const void *pointer, size_t length) {
