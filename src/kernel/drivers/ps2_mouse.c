@@ -12,6 +12,7 @@ static uint8_t g_ps2_mouse_packet[PS2_PACKET_SIZE];
 static uint8_t g_ps2_mouse_packet_index;
 
 extern void serial_print(const char *str);
+extern void desktop_debug_set_input_status(const char *status);
 
 static inline uint8_t ps2_inb(uint16_t port) {
   uint8_t value;
@@ -67,6 +68,11 @@ static int ps2_write_aux(uint8_t data) {
   return ps2_write_command(0xD4u) && ps2_write_data(data);
 }
 
+static void ps2_restore_ports(void) {
+  (void)ps2_write_command(0xAEu);
+  (void)ps2_write_command(0xA8u);
+}
+
 static int ps2_aux_expect_ack(void) {
   uint8_t response = 0;
   if (!ps2_wait_output_full(1u, &response))
@@ -87,6 +93,7 @@ int ps2_mouse_init(void) {
   /* Temporarily disable both ports so the controller command byte can be
      changed without racing keyboard scancodes or auxiliary packets. */
   if (!ps2_write_command(0xADu) || !ps2_write_command(0xA7u)) {
+    ps2_restore_ports();
     serial_print("[PS2] Controller did not accept port-disable commands\n");
     return 0;
   }
@@ -104,6 +111,7 @@ int ps2_mouse_init(void) {
 
   uint8_t command_byte = 0;
   if (!ps2_wait_output_full(0u, &command_byte)) {
+    ps2_restore_ports();
     serial_print("[PS2] Controller command-byte read timed out\n");
     return 0;
   }
@@ -113,6 +121,7 @@ int ps2_mouse_init(void) {
   command_byte &= (uint8_t)~((1u << 1) | (1u << 4) | (1u << 5));
   if (!ps2_write_command(0x60u) || !ps2_write_data(command_byte) ||
       !ps2_write_command(0xA8u) || !ps2_write_command(0xAEu)) {
+    ps2_restore_ports();
     serial_print("[PS2] Could not enable controller ports\n");
     return 0;
   }
@@ -158,6 +167,7 @@ static void ps2_mouse_consume_byte(uint8_t value) {
   uint32_t buttons = (uint32_t)(flags & 0x07u);
   /* Always publish packets so a zero-motion button release is not lost. */
   input_pointer_add_rel(dx, dy, buttons);
+  desktop_debug_set_input_status("[PS/2] Touchpad packets received");
 }
 
 void ps2_mouse_poll(void) {
