@@ -728,13 +728,14 @@ class VexOSFlasher(tk.Tk):
 
                 self._ui(update)
             except Exception as exc:
+                error_text = str(exc)
                 def failed():
                     self.scanning = False
                     self.refresh_button.configure(state=tk.NORMAL)
                     self.status_var.set("USB scan failed. See Activity for details.")
                     self.status_label.configure(fg=RED)
                     self.selected_details.set("The drive scan failed.")
-                    self.log_line(f"USB scan failed: {exc}")
+                    self.log_line(f"USB scan failed: {error_text}")
                     self._update_action_states()
                 self._ui(failed)
 
@@ -965,11 +966,12 @@ class VexOSFlasher(tk.Tk):
                     self.status_label.configure(fg=GREEN)
                 self._ui(success)
             except Exception as exc:
-                self.log_line(f"ERROR: {exc}")
+                error_text = str(exc)
+                self.log_line(f"ERROR: {error_text}")
                 self.set_status("Operation failed. See Activity for the error.", RED)
                 self._ui(
                     lambda: messagebox.showerror(
-                        "Installation failed", str(exc), parent=self
+                        "Installation failed", error_text, parent=self
                     )
                 )
             finally:
