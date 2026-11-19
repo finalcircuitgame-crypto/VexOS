@@ -680,6 +680,15 @@ static int alx_reset_mac(void) {
 
     alx_write32(ALX_RXQ0, alx_read32(ALX_RXQ0) & ~ALX_RXQ0_EN);
     alx_write32(ALX_TXQ0, alx_read32(ALX_TXQ0) & ~ALX_TXQ0_EN);
+
+    /*
+     * Give both descriptor engines time to stop before disabling packet
+     * traffic in MAC_CTRL. The ALX hardware sequence uses a 40 us settle
+     * interval here; this early-boot driver uses a conservative pause loop
+     * because PIT timekeeping is not initialized yet.
+     */
+    alx_delay(100000u);
+
     alx_write32(ALX_MAC_CTRL,
                 alx_read32(ALX_MAC_CTRL) &
                 ~(ALX_MAC_CTRL_RX_EN | ALX_MAC_CTRL_TX_EN));
@@ -871,31 +880,36 @@ static int alx_setup_rings(void) {
     alx_write32(ALX_SRAM9, 1u);
 
     /*
-     * Do not assume the TX consumer resets to index zero on every firmware
-     * handoff. Start the empty software ring at the consumer index reported
-     * after the hardware has loaded the new descriptor base.
+     * A successful MAC reset plus SRAM pointer load must leave a fresh TX
+     * ring at index zero. Linux's ALX ring setup uses the same zero-based
+     * software indices and then issues ALX_SRAM_LOAD_PTR. If this hardware
+     * still reports an old index after reset, fail closed instead of trying
+     * to guess which descriptors the controller considers outstanding.
      */
-    uint16_t tx_consumer = alx_read16(ALX_TPD_PRI0_CIDX);
-    if (tx_consumer >= ALX_RING_COUNT) {
-        serial_print("[ALX] Invalid TX consumer index after ring load; refusing to enable TX\n");
-        return 0;
-    }
-
-    g_tx_next = tx_consumer;
-    g_tx_last_consumer = tx_consumer;
-    g_tx_probe_start_consumer = tx_consumer;
+    g_tx_next = 0u;
+    g_tx_last_consumer = 0u;
+    g_tx_probe_start_consumer = 0u;
     __asm__ volatile("mfence" ::: "memory");
-    alx_write16(ALX_TPD_PRI0_PIDX, tx_consumer);
+    alx_write16(ALX_TPD_PRI0_PIDX, 0u);
 
-    /* A readback flushes the posted producer-index write before link start. */
-    if (alx_read16(ALX_TPD_PRI0_PIDX) != tx_consumer) {
-        serial_print("[ALX] TX producer index did not retain the synchronized value\n");
+    uint16_t tx_producer = alx_read16(ALX_TPD_PRI0_PIDX);
+    uint16_t tx_consumer = alx_read16(ALX_TPD_PRI0_CIDX);
+    char pointer_diag[128] = "[ALX] TX ring post-reset pointers\n";
+    size_t pointer_used = sizeof("[ALX] TX ring post-reset pointers\n") - 1u;
+    alx_append_hex32(pointer_diag, sizeof(pointer_diag), &pointer_used,
+                     "  TPD_PIDX=", tx_producer);
+    alx_append_hex32(pointer_diag, sizeof(pointer_diag), &pointer_used,
+                     "  TPD_CIDX=", tx_consumer);
+    serial_print(pointer_diag);
+
+    if (tx_producer != 0u || tx_consumer != 0u) {
+        serial_print("[ALX] TX ring pointers did not reset to zero; refusing to submit DMA descriptors\n");
         return 0;
     }
 
     /* Keep one RFD slot unposted so producer and consumer never alias. */
     alx_write16(ALX_RFD_PIDX, (uint16_t)(ALX_RING_COUNT - 1u));
-    serial_print("[ALX] TX ring synchronized to hardware consumer index\n");
+    serial_print("[ALX] TX ring reset and verified at index zero\n");
     return 1;
 }
 
