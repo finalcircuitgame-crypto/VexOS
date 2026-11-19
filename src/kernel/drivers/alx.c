@@ -244,6 +244,13 @@ static uint16_t g_rrd_read;
 static uint32_t g_link_poll_count;
 static uint32_t g_mac_ctrl_base;
 
+/* One-shot TX diagnostic: distinguish descriptor submission from DMA completion. */
+static uint8_t g_tx_probe_started;
+static uint8_t g_tx_probe_finished;
+static uint16_t g_tx_probe_expected;
+static uint32_t g_tx_probe_polls;
+static uint8_t g_tx_reject_reported;
+
 static uint32_t alx_read32(uint32_t offset) {
     return *(volatile uint32_t *)(void *)(g_mmio + offset);
 }
@@ -1014,13 +1021,23 @@ const uint8_t *alx_mac_address(void) {
 
 int alx_send(const void *frame, uint16_t length) {
     if (!g_ready || !g_link_up || !frame ||
-        length < 14u || length > ALX_FRAME_MAX)
+        length < 14u || length > ALX_FRAME_MAX) {
+        if (g_ready && !g_tx_reject_reported) {
+            g_tx_reject_reported = 1u;
+            serial_print("[ALX] TX rejected before descriptor submission (link/state/frame)\\n");
+        }
         return 0;
+    }
 
     uint16_t next = (uint16_t)((g_tx_next + 1u) % ALX_RING_COUNT);
     uint16_t hardware_consumer = alx_read16(ALX_TPD_PRI0_CIDX);
-    if (next == hardware_consumer)
+    if (next == hardware_consumer) {
+        if (!g_tx_reject_reported) {
+            g_tx_reject_reported = 1u;
+            serial_print("[ALX] TX ring full; hardware consumer has not freed a descriptor\\n");
+        }
         return 0;
+    }
 
     uint16_t index = g_tx_next;
     alx_copy(g_tx_buffers[index], frame, length);
@@ -1033,6 +1050,13 @@ int alx_send(const void *frame, uint16_t length) {
     __asm__ volatile("mfence" ::: "memory");
     g_tx_next = next;
     alx_write16(ALX_TPD_PRI0_PIDX, g_tx_next);
+
+    if (!g_tx_probe_started) {
+        g_tx_probe_started = 1u;
+        g_tx_probe_expected = g_tx_next;
+        g_tx_probe_polls = 0u;
+        serial_print("[ALX] First TX descriptor submitted; waiting for hardware consumer\\n");
+    }
     return 1;
 }
 
@@ -1089,5 +1113,16 @@ void alx_poll(void) {
     if (++g_link_poll_count >= 64u) {
         g_link_poll_count = 0u;
         alx_update_link();
+    }
+
+    if (g_tx_probe_started && !g_tx_probe_finished) {
+        const uint16_t consumer = alx_read16(ALX_TPD_PRI0_CIDX);
+        if (consumer == g_tx_probe_expected) {
+            g_tx_probe_finished = 1u;
+            serial_print("[ALX] First TX descriptor consumed by hardware\\n");
+        } else if (++g_tx_probe_polls >= 512u) {
+            g_tx_probe_finished = 1u;
+            serial_print("[ALX] First TX descriptor still pending after 512 polls\\n");
+        }
     }
 }
