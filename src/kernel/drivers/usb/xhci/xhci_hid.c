@@ -414,7 +414,8 @@ int xhci_hid_set_protocol_boot(xhci_device_state_t *dev) {
   uint64_t setup = 0;
   setup |= 0x21ULL;
   setup |= 0x0BULL << 8;
-  setup |= 0x0000ULL << 16;
+  /* HID SET_PROTOCOL: wValue=1 selects the standardized Boot Protocol. */
+  setup |= 0x0001ULL << 16;
   setup |= ((uint64_t)dev->hid_ifnum) << 32;
   setup |= 0ULL << 48;
 
