@@ -266,7 +266,7 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
   while (!xhci_time_expired(deadline)) {
     xhci_service_background();
     xhci_trb_t evt;
-    if (xhci_poll_event(&evt)) {
+    if (xhci_poll_event_for_waiter(&evt)) {
       const uint32_t event_type = trb_type(evt.control);
       const uint32_t event_slot = trb_slot_id(evt.control);
       const uint32_t event_dci = (evt.control >> 16) & 0x1Fu;
