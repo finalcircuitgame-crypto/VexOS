@@ -826,7 +826,7 @@ static int alx_reset_mac(void) {
      * 25 MHz source and ensure the oscillator-open bit is cleared. The
      * previous B0+ path left this bit set after calibration.
      */
-    uint32_t misc3 = alx_read32(ALX_MISC3);
+    misc3 = alx_read32(ALX_MISC3);
     alx_write32(ALX_MISC3,
                 (misc3 & ~ALX_MISC3_25M_BY_SW) | ALX_MISC3_25M_NOTO_INTNL);
     misc = alx_read32(ALX_MISC);
