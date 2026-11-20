@@ -164,8 +164,7 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_DRV_PHY_PAUSE              (1u << 23)
 #define ALX_DRV_PHY_FIELD_MASK         (0xFFu << 21)
 #define ALX_DRV_PHY_CONFIG             (ALX_DRV_PHY_AUTO | ALX_DRV_PHY_100 | \
-                                        ALX_DRV_PHY_10 | ALX_DRV_PHY_DUPLEX | \
-                                        ALX_DRV_PHY_PAUSE)
+                                        ALX_DRV_PHY_10 | ALX_DRV_PHY_DUPLEX)
 #define ALX_PHY_INITED                 0x003Fu
 #define ALX_MII_ADVERTISE_PAUSE        0x0400u
 #define ALX_MAC_CTRL_RX_EN            (1u << 1)
