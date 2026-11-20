@@ -157,7 +157,16 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_MAC_CTRL_FULLD            (1u << 5)
 #define ALX_MAC_CTRL_RXFC_EN          (1u << 3)
 #define ALX_MAC_CTRL_TXFC_EN          (1u << 2)
+#define ALX_DRV_PHY_AUTO               (1u << 28)
+#define ALX_DRV_PHY_100                (1u << 26)
+#define ALX_DRV_PHY_10                 (1u << 25)
+#define ALX_DRV_PHY_DUPLEX             (1u << 24)
 #define ALX_DRV_PHY_PAUSE              (1u << 23)
+#define ALX_DRV_PHY_FIELD_MASK         (0xFFu << 21)
+#define ALX_DRV_PHY_CONFIG             (ALX_DRV_PHY_AUTO | ALX_DRV_PHY_100 | \
+                                        ALX_DRV_PHY_10 | ALX_DRV_PHY_DUPLEX | \
+                                        ALX_DRV_PHY_PAUSE)
+#define ALX_PHY_INITED                 0x003Fu
 #define ALX_MII_ADVERTISE_PAUSE        0x0400u
 #define ALX_MAC_CTRL_RX_EN            (1u << 1)
 #define ALX_MAC_CTRL_TX_EN            (1u << 0)
@@ -625,20 +634,43 @@ static int alx_reset_phy(void) {
     return 1;
 }
 
+/*
+ * Linux alx uses the PHY control field plus the MII debug-page marker to
+ * determine whether firmware/another OS already configured this PHY for the
+ * requested advertised modes. Preserve that valid state across warm boots.
+ */
+static int alx_phy_is_configured(void) {
+    if ((alx_read32(ALX_PHY_CTRL) & ALX_PHY_CTRL_DSPRST_OUT) == 0u)
+        return 0;
+
+    uint32_t driver_config = alx_read32(ALX_DRV);
+    uint32_t phy_config =
+        (driver_config & ALX_DRV_PHY_FIELD_MASK) >> 21;
+    uint32_t expected_config = ALX_DRV_PHY_CONFIG >> 21;
+    if (phy_config == 0u || phy_config != expected_config)
+        return 0;
+
+    uint16_t debug_page = 0u;
+    if (!alx_mdio_read(ALX_MII_DBG_ADDR, &debug_page))
+        return 0;
+
+    return debug_page == ALX_PHY_INITED;
+}
+
 static int alx_configure_phy(void) {
-    const uint16_t advertise_10_100 = 0x01E1u | ALX_MII_ADVERTISE_PAUSE;
-    /* Linux default: advertise 10/100 modes and symmetric RX/TX pause. */
+    const uint16_t advertise_10_100 =
+        0x01E1u | ALX_MII_ADVERTISE_PAUSE;
     const uint16_t advertise_1000_full = 0x0200u;
-    const uint32_t phy_field_mask = 0xFFu << 21;
 
     /*
-     * Match the Linux ALX initialization sequence: clear the hardware PHY
-     * configuration field, select the normal debug page, program the
-     * advertisements, then issue BMCR_RESET | ANENABLE | ANRESTART.
+     * Match Linux alx's setup_speed_duplex sequence: select the normal PHY
+     * debug page, program 10/100 and 1000 advertisements, restart autoneg,
+     * set the PHY initialized marker, and publish the matching ALX_DRV
+     * capability field. In particular, do not advertise 1000BASE-T half
+     * duplex: Linux's default capability map advertises 1000 full duplex.
      */
     uint32_t driver_config = alx_read32(ALX_DRV);
-    driver_config &= ~phy_field_mask;
-    alx_write32(ALX_DRV, driver_config);
+    driver_config &= ~ALX_DRV_PHY_FIELD_MASK;
 
     if (!alx_mdio_write(ALX_MII_DBG_ADDR, 0u) ||
         !alx_mdio_write(ALX_MII_ADVERTISE, advertise_10_100) ||
@@ -648,9 +680,9 @@ static int alx_configure_phy(void) {
                         ALX_BMCR_ANRESTART))
         return 0;
 
-    /* BMCR reset is self-clearing. Wait for MDIO to report it completed. */
-    uint16_t control = 0;
-    uint8_t reset_complete = 0;
+    /* Wait for the PHY's self-clearing reset bit before marking it ready. */
+    uint16_t control = 0u;
+    uint8_t reset_complete = 0u;
     for (uint32_t i = 0; i < 200000u; ++i) {
         if (!alx_mdio_read(ALX_MII_BMCR, &control))
             return 0;
@@ -665,15 +697,10 @@ static int alx_configure_phy(void) {
         return 0;
     }
 
-    /* Linux uses this debug-register marker to identify an initialized PHY. */
-    if (!alx_mdio_write(ALX_MII_DBG_ADDR, 0x003Fu))
+    if (!alx_mdio_write(ALX_MII_DBG_ADDR, ALX_PHY_INITED))
         return 0;
 
-    driver_config = alx_read32(ALX_DRV);
-    driver_config &= ~phy_field_mask;
-    driver_config |= (1u << 28) | (1u << 27) |
-                     (1u << 26) | (1u << 25) | (1u << 24) |
-                     ALX_DRV_PHY_PAUSE;
+    driver_config |= ALX_DRV_PHY_CONFIG;
     alx_write32(ALX_DRV, driver_config);
 
     serial_print("[ALX] PHY auto-negotiation started (10/100/1000)\n");
@@ -731,19 +758,32 @@ static int alx_reset_mac(void) {
     alx_write32(ALX_MASTER, master | ALX_MASTER_DMA_MAC_RST |
                                   ALX_MASTER_OOB_DIS);
 
-    int reset_done = 0;
-    for (uint32_t i = 0; i < ALX_WAIT_LIMIT; ++i) {
-        if (alx_read16(ALX_RFD_PIDX) == 0u &&
-            (alx_read32(ALX_MASTER) & ALX_MASTER_DMA_MAC_RST) == 0u) {
-            reset_done = 1;
+    /* Linux waits 10 us before checking the controller's reset handshake. */
+    alx_delay(10000u);
+
+    uint32_t reset_poll = 0u;
+    for (; reset_poll < ALX_WAIT_LIMIT; ++reset_poll) {
+        if (alx_read16(ALX_RFD_PIDX) == 0u)
             break;
-        }
         __asm__ volatile("pause");
     }
-    if (!reset_done) {
-        serial_print("[ALX] MAC/DMA reset timed out\n");
+    if (reset_poll == ALX_WAIT_LIMIT) {
+        serial_print("[ALX] MAC/DMA reset did not clear RFD producer index\n");
         return 0;
     }
+
+    for (; reset_poll < ALX_WAIT_LIMIT; ++reset_poll) {
+        master = alx_read32(ALX_MASTER);
+        if ((master & ALX_MASTER_DMA_MAC_RST) == 0u)
+            break;
+        __asm__ volatile("pause");
+    }
+    if (reset_poll == ALX_WAIT_LIMIT) {
+        serial_print("[ALX] MAC/DMA reset bit did not self-clear\n");
+        return 0;
+    }
+
+    alx_delay(10000u);
 
     if (a_cr) {
         master = alx_read32(ALX_MASTER);
@@ -751,6 +791,15 @@ static int alx_reset_mac(void) {
         if (pmctrl_saved & (ALX_PMCTRL_L1_EN | ALX_PMCTRL_L0S_EN))
             alx_write32(ALX_PMCTRL, pmctrl_saved);
     }
+
+    /*
+     * Match Linux alx_reset_osc(): select the internal 25 MHz source before
+     * toggling/calibrating the oscillator. Doing this only after calibration
+     * leaves the calibration dependent on the inherited clock source.
+     */
+    uint32_t misc3 = alx_read32(ALX_MISC3);
+    alx_write32(ALX_MISC3,
+                (misc3 & ~ALX_MISC3_25M_BY_SW) | ALX_MISC3_25M_NOTO_INTNL);
 
     /* Recalibrate the internal oscillator after the MAC reset. */
     uint32_t misc = alx_read32(ALX_MISC);
@@ -1244,18 +1293,28 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
         return 0;
     }
 
-    serial_print("[ALX] Qualcomm Atheros AR8171 detected (1969:10A1)\n");
+    serial_print("[ALX] Qualcomm Atheros AR8171 detected (1969:10A1) revision=");
+    serial_print(g_revision >= 2u ? "B0+" : "A0/A1");
+    serial_print(g_revision_cr ? " CR\n" : "\n");
     alx_write32(ALX_IMR, 0u);
     alx_write32(ALX_MSIX_MASK, 0xFFFFFFFFu);
 
-    /* This must precede PHY reset/auto-negotiation, as in Linux alx. */
+    /* This must precede PHY configuration, as in Linux alx. */
     alx_reset_pcie();
+    alx_delay(10000u); /* Linux allows the PCIe clock/power policy to settle. */
 
-    if (!alx_reset_phy()) {
-        serial_print("[ALX] PHY reset/MDIO initialization failed\n");
-        g_mmio = NULL;
-        return 0;
+    uint8_t phy_configured = alx_phy_is_configured() ? 1u : 0u;
+    if (phy_configured) {
+        serial_print("[ALX] PHY configuration already matches; preserving it\n");
+    } else {
+        serial_print("[ALX] PHY configuration missing or stale; resetting PHY\n");
+        if (!alx_reset_phy()) {
+            serial_print("[ALX] PHY reset/MDIO initialization failed\n");
+            g_mmio = NULL;
+            return 0;
+        }
     }
+
     if (!alx_reset_mac()) {
         g_mmio = NULL;
         return 0;
@@ -1271,7 +1330,7 @@ int alx_init(uint8_t bus, uint8_t slot, uint8_t function) {
         g_mmio = NULL;
         return 0;
     }
-    if (!alx_configure_phy()) {
+    if (!phy_configured && !alx_configure_phy()) {
         serial_print("[ALX] PHY auto-negotiation setup failed\n");
         g_mmio = NULL;
         return 0;
