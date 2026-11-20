@@ -174,13 +174,24 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
 
     if (tag == 0xAu) {
       uint32_t collection_usage = usage_n ? usages[0] : 0u;
+      uint32_t collection_usage_page = usage_page;
+      if (collection_usage > 0xFFFFu) {
+        collection_usage_page = collection_usage >> 16;
+        collection_usage &= 0xFFFFu;
+      }
       uint8_t parent_is_mouse =
           collection_depth != 0u
               ? mouse_collection_stack[collection_depth - 1u]
               : 0u;
+      /*
+       * Haiku's HID driver accepts both Generic Desktop Mouse (0x02) and
+       * Pointer (0x01) application collections. Extended 32-bit Usage items
+       * carry their own page in the upper half and must be decoded likewise.
+       */
       uint8_t is_mouse_application =
-          ((value & 0xFFu) == 1u && usage_page == 0x01u &&
-           collection_usage == 0x02u) ? 1u : 0u;
+          ((value & 0xFFu) == 1u && collection_usage_page == 0x01u &&
+           (collection_usage == 0x01u || collection_usage == 0x02u))
+              ? 1u : 0u;
 
       if (collection_depth >= 32u)
         break;
