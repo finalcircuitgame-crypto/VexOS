@@ -184,6 +184,25 @@ int xhci_poll_event(xhci_trb_t *out) {
   return 1;
 }
 
+/*
+ * The event ring has one global dequeue index. The desktop poll loop disables
+ * interrupts around consume+dispatch; synchronous EP0/command waiters must do
+ * the same, otherwise a PIT preemption can let a second consumer overtake the
+ * first event before its HID completion has been handled.
+ */
+static int xhci_poll_event_for_waiter(xhci_trb_t *out) {
+  uint64_t flags;
+  __asm__ volatile("pushfq; cli; popq %0" : "=r"(flags) :: "memory");
+
+  int received = xhci_poll_event(out);
+  if (received && trb_type(out->control) == TRB_TYPE_TRANSFER_EVENT)
+    xhci_handle_transfer_event(out);
+
+  if (flags & (1ull << 9))
+    __asm__ volatile("sti" ::: "memory");
+  return received;
+}
+
 int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
   /* Commands normally complete quickly; keep a bounded 100 ms failure path. */
   uint64_t start = xhci_time_now_ticks();
@@ -191,10 +210,7 @@ int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
   while (!xhci_time_expired(deadline)) {
     xhci_service_background();
     xhci_trb_t evt;
-    if (xhci_poll_event(&evt)) {
-      if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT)
-        xhci_handle_transfer_event(&evt);
-
+    if (xhci_poll_event_for_waiter(&evt)) {
       if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
         uint32_t slot = trb_slot_id(evt.control);
         uint32_t cc = trb_cc(evt.status);
@@ -273,8 +289,6 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
                               (cc == 1u || cc == 13u) ? "success" : "device-error");
         return 1;
       }
-      if (event_type == TRB_TYPE_TRANSFER_EVENT)
-        xhci_handle_transfer_event(&evt);
     } else {
       __asm__ volatile("pause");
     }
