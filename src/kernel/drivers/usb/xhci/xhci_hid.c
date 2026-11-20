@@ -32,25 +32,54 @@ int32_t xhci_hid_get_bits_s32(const uint8_t *buf, uint32_t bitoff,
 
 static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
                                              const uint8_t *d, uint32_t len) {
+  typedef struct {
+    uint32_t id;
+    uint8_t used;
+    uint16_t buttons_bitoff;
+    uint16_t buttons_bits;
+    uint16_t x_bitoff;
+    uint8_t x_bits;
+    uint8_t x_relative;
+    uint16_t y_bitoff;
+    uint8_t y_bits;
+    uint8_t y_relative;
+    uint16_t wheel_bitoff;
+    uint8_t wheel_bits;
+    uint8_t wheel_relative;
+  } mouse_report_t;
+
+  typedef struct {
+    uint32_t id;
+    uint32_t bitpos;
+    uint8_t used;
+  } input_report_position_t;
+
+  typedef struct {
+    uint32_t usage_page;
+    uint32_t report_size;
+    uint32_t report_count;
+    uint32_t report_id;
+  } hid_global_state_t;
+
+  mouse_report_t reports[16] = {{0}};
+  input_report_position_t positions[16] = {{0}};
+  hid_global_state_t global_stack[8];
+  uint32_t global_depth = 0;
+
   uint32_t usage_page = 0;
   uint32_t report_size = 0;
   uint32_t report_count = 0;
-  uint32_t bitpos = 0;
-
   uint32_t report_id = 0;
-  uint8_t has_report_id = 0;
-
   uint32_t usages[16];
   uint32_t usage_n = 0;
   uint32_t usage_min = 0;
   uint32_t usage_max = 0;
   uint8_t has_range = 0;
+  uint8_t has_report_id = 0;
 
-  uint8_t in_mouse_app = 0;
-  uint8_t in_mouse_phys = 0;
-  uint8_t seen_mouse_usage = 0;
-
-  uint8_t cur_is_relative = 0;
+  /* Track the full collection nesting; a later vendor collection is not a mouse. */
+  uint8_t mouse_collection_stack[32] = {0};
+  uint32_t collection_depth = 0;
 
   dev->hid_mouse_valid = 0;
   dev->hid_has_report_id = 0;
@@ -68,141 +97,279 @@ static void xhci_hid_parse_report_desc_mouse(xhci_device_state_t *dev,
   dev->hid_wheel_is_relative = 0;
 
   for (uint32_t i = 0; i < len;) {
-    uint8_t p = d[i++];
-    if (p == 0xFE) {
-      if (i + 2 > len)
+    uint8_t prefix = d[i++];
+    if (prefix == 0xFEu) {
+      if (i + 2u > len)
         break;
-      uint8_t sz = d[i];
-      i += 2;
-      if (i + sz > len)
+      uint8_t long_size = d[i];
+      i += 2u;
+      if (i + long_size > len)
         break;
-      i += sz;
+      i += long_size;
       continue;
     }
 
-    uint8_t sz_code = p & 0x3u;
-    uint8_t type = (p >> 2) & 0x3u;
-    uint8_t tag = (p >> 4) & 0xFu;
-    uint32_t sz = (sz_code == 3) ? 4u : (uint32_t)sz_code;
-    if (i + sz > len)
+    uint8_t size_code = prefix & 0x3u;
+    uint8_t item_type = (prefix >> 2) & 0x3u;
+    uint8_t tag = (prefix >> 4) & 0xFu;
+    uint32_t item_size = size_code == 3u ? 4u : (uint32_t)size_code;
+    if (i + item_size > len)
       break;
 
-    uint32_t v = 0;
-    for (uint32_t k = 0; k < sz; k++) {
-      v |= ((uint32_t)d[i + k]) << (8u * k);
-    }
-    i += sz;
+    uint32_t value = 0;
+    for (uint32_t k = 0; k < item_size; ++k)
+      value |= (uint32_t)d[i + k] << (8u * k);
+    i += item_size;
 
-    if (type == 1) {
-      if (tag == 0x0) {
-        usage_page = v;
-      } else if (tag == 0x7) {
-        report_size = v;
-      } else if (tag == 0x9) {
-        report_count = v;
-      } else if (tag == 0x8) {
-        report_id = v;
-        has_report_id = 1;
-        bitpos = 0;
+    if (item_type == 1u) {
+      /* Global items. Report positions remain separated by Report ID. */
+      if (tag == 0x0u) {
+        usage_page = value;
+      } else if (tag == 0x7u) {
+        report_size = value;
+      } else if (tag == 0x8u) {
+        if (value == 0u || value > 255u)
+          break;
+        report_id = value;
+        has_report_id = 1u;
+      } else if (tag == 0x9u) {
+        report_count = value;
+      } else if (tag == 0xAu) {
+        if (global_depth >= 8u)
+          break;
+        global_stack[global_depth].usage_page = usage_page;
+        global_stack[global_depth].report_size = report_size;
+        global_stack[global_depth].report_count = report_count;
+        global_stack[global_depth].report_id = report_id;
+        ++global_depth;
+      } else if (tag == 0xBu) {
+        if (global_depth != 0u) {
+          --global_depth;
+          usage_page = global_stack[global_depth].usage_page;
+          report_size = global_stack[global_depth].report_size;
+          report_count = global_stack[global_depth].report_count;
+          report_id = global_stack[global_depth].report_id;
+        }
       }
-    } else if (type == 2) {
-      if (tag == 0x0) {
-        if (usage_n < 16) {
-          usages[usage_n++] = v;
-        }
-      } else if (tag == 0x1) {
-        usage_min = v;
-        has_range = 1;
-      } else if (tag == 0x2) {
-        usage_max = v;
-        has_range = 1;
+      continue;
+    }
+
+    if (item_type == 2u) {
+      /* Local items are consumed by the next Main item. */
+      if (tag == 0x0u) {
+        if (usage_n < 16u)
+          usages[usage_n++] = value;
+      } else if (tag == 0x1u) {
+        usage_min = value;
+        has_range = 1u;
+      } else if (tag == 0x2u) {
+        usage_max = value;
+        has_range = 1u;
       }
-    } else if (type == 0) {
-      if (tag == 0xA) {
-        uint32_t u = 0;
-        if (usage_n) {
-          u = usages[0];
+      continue;
+    }
+
+    if (item_type != 0u)
+      continue;
+
+    if (tag == 0xAu) {
+      uint32_t collection_usage = usage_n ? usages[0] : 0u;
+      uint8_t parent_is_mouse =
+          collection_depth != 0u
+              ? mouse_collection_stack[collection_depth - 1u]
+              : 0u;
+      uint8_t is_mouse_application =
+          ((value & 0xFFu) == 1u && usage_page == 0x01u &&
+           collection_usage == 0x02u) ? 1u : 0u;
+
+      if (collection_depth >= 32u)
+        break;
+      mouse_collection_stack[collection_depth++] =
+          (uint8_t)(parent_is_mouse || is_mouse_application);
+      usage_n = 0u;
+      has_range = 0u;
+      continue;
+    }
+
+    if (tag == 0xCu) {
+      if (collection_depth != 0u)
+        --collection_depth;
+      usage_n = 0u;
+      has_range = 0u;
+      continue;
+    }
+
+    /*
+     * Only Input items contribute to an input report's bit offsets.
+     * Output and Feature reports have independent layouts, even when their
+     * Report ID matches an input report.
+     */
+    if (tag == 0x8u) {
+      uint32_t count = report_count;
+      uint32_t size_bits = report_size;
+      uint64_t total_bits = (uint64_t)count * (uint64_t)size_bits;
+      if (count == 0u || size_bits == 0u || total_bits > 65535u) {
+        usage_n = 0u;
+        has_range = 0u;
+        continue;
+      }
+
+      int32_t position_index = -1;
+      for (uint32_t n = 0; n < 16u; ++n) {
+        if (positions[n].used && positions[n].id == report_id) {
+          position_index = (int32_t)n;
+          break;
         }
-        if (usage_page == 0x01 && u == 0x02) {
-          seen_mouse_usage = 1;
-        }
-        if (seen_mouse_usage) {
-          if (!in_mouse_app) {
-            in_mouse_app = 1;
-          } else {
-            in_mouse_phys = 1;
+      }
+      if (position_index < 0) {
+        for (uint32_t n = 0; n < 16u; ++n) {
+          if (!positions[n].used) {
+            positions[n].used = 1u;
+            positions[n].id = report_id;
+            positions[n].bitpos = 0u;
+            position_index = (int32_t)n;
+            break;
           }
         }
-        usage_n = 0;
-        has_range = 0;
-      } else if (tag == 0xC) {
-        if (in_mouse_phys) {
-          in_mouse_phys = 0;
-        } else if (in_mouse_app) {
-          in_mouse_app = 0;
-        }
-        usage_n = 0;
-        has_range = 0;
-      } else if (tag == 0x8 || tag == 0x9) {
-        cur_is_relative = (uint8_t)((v & (1u << 2)) ? 1u : 0u);
-        uint32_t count = report_count;
-        uint32_t size_bits = report_size;
-        if (count == 0 || size_bits == 0) {
-          usage_n = 0;
-          has_range = 0;
-          continue;
-        }
+      }
 
-        uint8_t in_mouse = (in_mouse_app || in_mouse_phys) ? 1u : 0u;
-        if (in_mouse) {
-          for (uint32_t f = 0; f < count; f++) {
-            uint32_t u = 0;
-            if (has_range) {
-              uint32_t uu = usage_min + f;
-              if (uu <= usage_max) {
-                u = uu;
-              }
-            } else if (f < usage_n) {
-              u = usages[f];
-            }
+      if (position_index >= 0) {
+        uint32_t base_bit = positions[(uint32_t)position_index].bitpos;
+        uint8_t in_mouse_collection =
+            collection_depth != 0u
+                ? mouse_collection_stack[collection_depth - 1u]
+                : 0u;
+        uint8_t is_constant = (value & 0x1u) ? 1u : 0u;
 
-            if (usage_page == 0x09) {
-              if (dev->hid_buttons_bits == 0) {
-                dev->hid_buttons_bitoff = (uint16_t)(bitpos);
-                dev->hid_buttons_bits = (uint16_t)(count * size_bits);
-              }
+        if (in_mouse_collection && !is_constant) {
+          int32_t report_index = -1;
+          for (uint32_t n = 0; n < 16u; ++n) {
+            if (reports[n].used && reports[n].id == report_id) {
+              report_index = (int32_t)n;
               break;
             }
+          }
+          if (report_index < 0) {
+            for (uint32_t n = 0; n < 16u; ++n) {
+              if (!reports[n].used) {
+                reports[n].used = 1u;
+                reports[n].id = report_id;
+                report_index = (int32_t)n;
+                break;
+              }
+            }
+          }
 
-            if (usage_page == 0x01) {
-              if (u == 0x30 && dev->hid_x_bits == 0) {
-                dev->hid_x_bitoff = (uint16_t)(bitpos + (f * size_bits));
-                dev->hid_x_bits = (uint8_t)size_bits;
-                dev->hid_x_is_relative = cur_is_relative;
-              } else if (u == 0x31 && dev->hid_y_bits == 0) {
-                dev->hid_y_bitoff = (uint16_t)(bitpos + (f * size_bits));
-                dev->hid_y_bits = (uint8_t)size_bits;
-                dev->hid_y_is_relative = cur_is_relative;
-              } else if (u == 0x38 && dev->hid_wheel_bits == 0) {
-                dev->hid_wheel_bitoff = (uint16_t)(bitpos + (f * size_bits));
-                dev->hid_wheel_bits = (uint8_t)size_bits;
-                dev->hid_wheel_is_relative = cur_is_relative;
+          if (report_index >= 0) {
+            mouse_report_t *report = &reports[(uint32_t)report_index];
+            uint8_t is_relative = (value & (1u << 2)) ? 1u : 0u;
+
+            if (usage_page == 0x09u && report->buttons_bits == 0u &&
+                base_bit <= 65535u) {
+              uint32_t button_bits = (uint32_t)total_bits;
+              if (button_bits > 32u)
+                button_bits = 32u;
+              report->buttons_bitoff = (uint16_t)base_bit;
+              report->buttons_bits = (uint16_t)button_bits;
+            }
+
+            if (size_bits <= 32u) {
+              for (uint32_t field = 0; field < count; ++field) {
+                uint32_t field_usage = 0u;
+                uint32_t field_usage_page = usage_page;
+
+                if (has_range) {
+                  uint64_t ranged_usage = (uint64_t)usage_min + field;
+                  if (ranged_usage <= usage_max)
+                    field_usage = (uint32_t)ranged_usage;
+                } else if (field < usage_n) {
+                  field_usage = usages[field];
+                }
+
+                /* Four-byte Usage items may carry their own Usage Page. */
+                if (field_usage > 0xFFFFu) {
+                  field_usage_page = field_usage >> 16;
+                  field_usage &= 0xFFFFu;
+                }
+
+                uint64_t field_bit = (uint64_t)base_bit +
+                                     (uint64_t)field * size_bits;
+                if (field_bit > 65535u)
+                  continue;
+
+                if (field_usage_page == 0x01u) {
+                  if (field_usage == 0x30u && report->x_bits == 0u) {
+                    report->x_bitoff = (uint16_t)field_bit;
+                    report->x_bits = (uint8_t)size_bits;
+                    report->x_relative = is_relative;
+                  } else if (field_usage == 0x31u && report->y_bits == 0u) {
+                    report->y_bitoff = (uint16_t)field_bit;
+                    report->y_bits = (uint8_t)size_bits;
+                    report->y_relative = is_relative;
+                  } else if (field_usage == 0x38u &&
+                             report->wheel_bits == 0u) {
+                    report->wheel_bitoff = (uint16_t)field_bit;
+                    report->wheel_bits = (uint8_t)size_bits;
+                    report->wheel_relative = is_relative;
+                  }
+                }
               }
             }
           }
         }
 
-        bitpos += count * size_bits;
-        usage_n = 0;
-        has_range = 0;
+        positions[(uint32_t)position_index].bitpos =
+            base_bit + (uint32_t)total_bits;
       }
+
+      usage_n = 0u;
+      has_range = 0u;
+      continue;
+    }
+
+    /* Output and Feature items reset local state but do not move Input offsets. */
+    if (tag == 0x9u || tag == 0xBu) {
+      usage_n = 0u;
+      has_range = 0u;
     }
   }
 
-  if (dev->hid_x_bits && dev->hid_y_bits) {
-    dev->hid_has_report_id = has_report_id ? 1u : 0u;
-    dev->hid_mouse_report_id = (uint8_t)report_id;
-    dev->hid_mouse_valid = 1;
+  int32_t selected = -1;
+  uint32_t selected_score = 0u;
+  for (uint32_t n = 0; n < 16u; ++n) {
+    if (!reports[n].used || reports[n].x_bits == 0u ||
+        reports[n].y_bits == 0u)
+      continue;
+
+    uint32_t score = 1u;
+    if (reports[n].buttons_bits)
+      score += 4u;
+    if (reports[n].wheel_bits)
+      score += 2u;
+    if (reports[n].x_relative && reports[n].y_relative)
+      score += 1u;
+    if (selected < 0 || score > selected_score) {
+      selected = (int32_t)n;
+      selected_score = score;
+    }
+  }
+
+  if (selected >= 0) {
+    const mouse_report_t *report = &reports[(uint32_t)selected];
+    dev->hid_has_report_id = has_report_id;
+    dev->hid_mouse_report_id = (uint8_t)report->id;
+    dev->hid_buttons_bitoff = report->buttons_bitoff;
+    dev->hid_buttons_bits = report->buttons_bits;
+    dev->hid_x_bitoff = report->x_bitoff;
+    dev->hid_x_bits = report->x_bits;
+    dev->hid_x_is_relative = report->x_relative;
+    dev->hid_y_bitoff = report->y_bitoff;
+    dev->hid_y_bits = report->y_bits;
+    dev->hid_y_is_relative = report->y_relative;
+    dev->hid_wheel_bitoff = report->wheel_bitoff;
+    dev->hid_wheel_bits = report->wheel_bits;
+    dev->hid_wheel_is_relative = report->wheel_relative;
+    dev->hid_mouse_valid = 1u;
   }
 }
 
