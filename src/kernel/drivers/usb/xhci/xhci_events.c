@@ -6,6 +6,9 @@ extern void desktop_debug_set_usb_status(const char *status);
 static uint32_t g_xhci_mouse_report_log_count;
 static uint32_t g_xhci_transfer_event_log_count;
 
+/* Shared by the polling loop and synchronous command/control waiters. */
+static void xhci_handle_transfer_event(const xhci_trb_t *event);
+
 static int xhci_kbd_has_key(const uint8_t keys[6], uint8_t k) {
   if (!k)
     return 1;
@@ -189,6 +192,9 @@ int xhci_wait_for_command_completion(uint32_t *out_slot_id, uint32_t *out_cc) {
     xhci_service_background();
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
+      if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT)
+        xhci_handle_transfer_event(&evt);
+
       if (trb_type(evt.control) == TRB_TYPE_COMMAND_COMPLETION) {
         uint32_t slot = trb_slot_id(evt.control);
         uint32_t cc = trb_cc(evt.status);
@@ -245,8 +251,11 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
     xhci_service_background();
     xhci_trb_t evt;
     if (xhci_poll_event(&evt)) {
-      if (trb_type(evt.control) == TRB_TYPE_TRANSFER_EVENT &&
-          trb_slot_id(evt.control) == slot_id) {
+      const uint32_t event_type = trb_type(evt.control);
+      const uint32_t event_slot = trb_slot_id(evt.control);
+      const uint32_t event_dci = (evt.control >> 16) & 0x1Fu;
+      if (event_type == TRB_TYPE_TRANSFER_EVENT &&
+          event_slot == slot_id && event_dci == 1u) {
         uint32_t cc = trb_cc(evt.status);
         if (out_cc)
           *out_cc = cc;
@@ -264,6 +273,8 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
                               (cc == 1u || cc == 13u) ? "success" : "device-error");
         return 1;
       }
+      if (event_type == TRB_TYPE_TRANSFER_EVENT)
+        xhci_handle_transfer_event(&evt);
     } else {
       __asm__ volatile("pause");
     }
@@ -290,200 +301,162 @@ int xhci_wait_for_transfer_event(uint32_t slot_id, uint32_t *out_cc) {
   return 0;
 }
 
-static void xhci_poll_events_impl(void) {
-  if (!event_ring || !runtime_regs) {
+static void xhci_handle_transfer_event(const xhci_trb_t *event) {
+  if (!event || trb_type(event->control) != TRB_TYPE_TRANSFER_EVENT)
     return;
+
+  uint32_t cc = trb_cc(event->status);
+  uint32_t slot_id = trb_slot_id(event->control);
+  uint32_t ep_id = (event->control >> 16) & 0x1Fu;
+
+  /* Log completions even when a synchronous waiter services the shared ring. */
+  if (g_xhci_transfer_event_log_count < 32u) {
+    serial_print("[xHCI][EVENT] transfer slot=");
+    xhci_print_u32_dec(slot_id);
+    serial_print(" ep=");
+    xhci_print_u32_dec(ep_id);
+    serial_print(" cc=");
+    xhci_print_u32_dec(cc);
+    serial_print(" status=");
+    xhci_print_hex32(event->status);
+    serial_print(" control=");
+    xhci_print_hex32(event->control);
+    serial_print("\n");
   }
+  g_xhci_transfer_event_log_count++;
 
-  /*
-   * Never let a burst of USB events monopolize the desktop loop. Any events
-   * left in the ring remain pending and are consumed on the next poll pass.
-   * 64 leaves room for normal HID traffic while bounding per-tick work.
-   */
-  for (uint32_t processed = 0; processed < 64u; processed++) {
-    xhci_trb_t evt;
-    if (!xhci_poll_event(&evt)) {
-      break;
-    }
+  if (slot_id == 0u || slot_id >= 256u)
+    return;
 
-    if (trb_type(evt.control) != TRB_TYPE_TRANSFER_EVENT) {
-      continue;
-    }
+  xhci_device_state_t *dev = &g_devs[slot_id];
+  if (dev->slot_id != slot_id || dev->intr_dci == 0u ||
+      ep_id != (uint32_t)dev->intr_dci)
+    return;
 
-    uint32_t cc = trb_cc(evt.status);
-    uint32_t slot_id = trb_slot_id(evt.control);
-    uint32_t ep_id = (evt.control >> 16) & 0x1Fu;
+  /* Acquire the report written by the controller before reading its bytes. */
+  xhci_dma_read_barrier();
 
-    /*
-     * Log raw transfer events before device/endpoint filtering. This makes
-     * wrong-slot or wrong-DCI completions visible instead of silently losing
-     * the evidence needed to debug a dead HID endpoint.
-     */
-    if (g_xhci_transfer_event_log_count < 32u) {
-      serial_print("[xHCI][EVENT] transfer slot=");
-      xhci_print_u32_dec(slot_id);
-      serial_print(" ep=");
-      xhci_print_u32_dec(ep_id);
-      serial_print(" cc=");
-      xhci_print_u32_dec(cc);
-      serial_print(" status=");
-      xhci_print_hex32(evt.status);
-      serial_print(" control=");
-      xhci_print_hex32(evt.control);
-      serial_print("\n");
-    }
-    g_xhci_transfer_event_log_count++;
+  uint32_t remaining = event->status & 0xFFFFFFu;
+  uint32_t xfer_len = dev->intr_mps;
+  if (dev->intr_mps && remaining <= (uint32_t)dev->intr_mps)
+    xfer_len = (uint32_t)dev->intr_mps - remaining;
 
-    if (slot_id == 0 || slot_id >= 256) {
-      continue;
-    }
-
-    xhci_device_state_t *dev = &g_devs[slot_id];
-    if (dev->slot_id != slot_id) {
-      continue;
-    }
-
-    if (dev->intr_dci == 0) {
-      continue;
-    }
-
-    if (ep_id != (uint32_t)dev->intr_dci) {
-      continue;
-    }
-
-    /*
-     * A matching Transfer Event means the controller has finished writing
-     * the associated input buffer. Pair the event-ring acquire with a DMA
-     * read barrier before decoding the report bytes.
-     */
-    xhci_dma_read_barrier();
-
-    uint32_t trb_len_remaining = evt.status & 0xFFFFFFu;
-    uint32_t xfer_len = dev->intr_mps;
-    if (dev->intr_mps && trb_len_remaining <= (uint32_t)dev->intr_mps) {
-      xfer_len = (uint32_t)dev->intr_mps - trb_len_remaining;
-    }
-
-    if ((cc == 1 || cc == 13) && dev->intr_buf) {
-      if (dev->hid_mouse_valid) {
-          const uint8_t *r = dev->intr_buf;
-          uint32_t base_bit = 0;
-          if (dev->hid_has_report_id) {
-            if (xfer_len < 1) {
-              goto rearm;
-            }
-            if (r[0] != dev->hid_mouse_report_id) {
-              goto rearm;
-            }
-            base_bit = 8;
-          }
-
-          uint32_t buttons = 0;
-          if (dev->hid_buttons_bits) {
-            buttons = xhci_hid_get_bits_u32(r, (uint32_t)dev->hid_buttons_bitoff + base_bit, (uint32_t)dev->hid_buttons_bits);
-          }
-
-          int32_t dx = 0;
-          int32_t dy = 0;
-          int32_t wheel = 0;
-          if (dev->hid_x_bits) {
-            uint32_t off = (uint32_t)dev->hid_x_bitoff + base_bit;
-            uint32_t sz = (uint32_t)dev->hid_x_bits;
-            dx = dev->hid_x_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
-          }
-          if (dev->hid_y_bits) {
-            uint32_t off = (uint32_t)dev->hid_y_bitoff + base_bit;
-            uint32_t sz = (uint32_t)dev->hid_y_bits;
-            dy = dev->hid_y_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
-          }
-          if (dev->hid_wheel_bits) {
-            uint32_t off = (uint32_t)dev->hid_wheel_bitoff + base_bit;
-            uint32_t sz = (uint32_t)dev->hid_wheel_bits;
-            wheel = dev->hid_wheel_is_relative ? xhci_hid_get_bits_s32(r, off, sz) : (int32_t)xhci_hid_get_bits_u32(r, off, sz);
-          }
-
-          if (dev->hid_x_is_relative && dev->hid_y_is_relative) {
-            input_pointer_add_rel(dx, dy, buttons);
-          } else {
-            int32_t x = dx;
-            int32_t y = dy;
-            int32_t ddx = 0;
-            int32_t ddy = 0;
-            if (dev->hid_abs_have_last) {
-              ddx = x - dev->hid_abs_last_x;
-              ddy = y - dev->hid_abs_last_y;
-            }
-            dev->hid_abs_last_x = x;
-            dev->hid_abs_last_y = y;
-            dev->hid_abs_have_last = 1;
-
-            // QEMU usb-tablet typically uses 16-bit logical coords; map to screen.
-            input_pointer_set_abs_scaled(x, y, 0x7FFF, 0x7FFF, buttons);
-
-            (void)ddx;
-            (void)ddy;
-          }
-      } else if (dev->hid_proto == 2 && dev->hid_boot_protocol) {
-          uint8_t buttons = dev->intr_buf[0];
-          int8_t dx = (int8_t)dev->intr_buf[1];
-          int8_t dy = (int8_t)dev->intr_buf[2];
-          int8_t wheel = 0;
-          if (dev->intr_mps >= 4) {
-            wheel = (int8_t)dev->intr_buf[3];
-          }
-
-          input_pointer_add_rel((int32_t)dx, (int32_t)dy, (uint32_t)buttons);
-
-          (void)wheel;
-      } else if (dev->hid_proto == 1) {
-          if (xfer_len >= 8) {
-            const uint8_t *r = dev->intr_buf;
-            uint8_t mod = r[0];
-            uint8_t shift = (uint8_t)(((mod & 0x02u) || (mod & 0x20u)) ? 1u : 0u);
-            const uint8_t *keys = &r[2];
-
-            // Preserve character input for the shell and also expose raw
-            // HID transitions to applications such as DoomGeneric.
-            for (uint32_t i = 0; i < 6; i++) {
-              uint8_t k = keys[i];
-              if (k && !xhci_kbd_has_key(dev->kbd_prev_keys, k)) {
-                input_kbd_push_event(k, 1);
-                char c = xhci_kbd_keycode_to_ascii(k, shift);
-                if (c)
-                  input_kbd_push_char(c);
-              }
-            }
-            for (uint32_t i = 0; i < 6; i++) {
-              uint8_t k = dev->kbd_prev_keys[i];
-              if (k && !xhci_kbd_has_key(keys, k))
-                input_kbd_push_event(k, 0);
-            }
-            for (uint32_t bit = 0; bit < 8; bit++) {
-              uint8_t mask = (uint8_t)(1u << bit);
-              if ((mod & mask) != (dev->kbd_prev_mod & mask))
-                input_kbd_push_event((uint8_t)(0xE0u + bit),
-                                     (mod & mask) != 0);
-            }
-
-            dev->kbd_prev_mod = mod;
-            for (uint32_t i = 0; i < 6; i++) {
-              dev->kbd_prev_keys[i] = keys[i];
-            }
-          }
+  if ((cc == 1u || cc == 13u) && dev->intr_buf) {
+    if (dev->hid_mouse_valid) {
+      const uint8_t *report = dev->intr_buf;
+      uint32_t base_bit = 0u;
+      if (dev->hid_has_report_id) {
+        if (xfer_len < 1u)
+          goto rearm;
+        if (report[0] != dev->hid_mouse_report_id)
+          goto rearm;
+        base_bit = 8u;
       }
+
+      uint32_t buttons = 0u;
+      if (dev->hid_buttons_bits) {
+        buttons = xhci_hid_get_bits_u32(
+            report, (uint32_t)dev->hid_buttons_bitoff + base_bit,
+            (uint32_t)dev->hid_buttons_bits);
+      }
+
+      int32_t dx = 0;
+      int32_t dy = 0;
+      int32_t wheel = 0;
+      if (dev->hid_x_bits) {
+        uint32_t off = (uint32_t)dev->hid_x_bitoff + base_bit;
+        uint32_t bits = (uint32_t)dev->hid_x_bits;
+        dx = dev->hid_x_is_relative
+            ? xhci_hid_get_bits_s32(report, off, bits)
+            : (int32_t)xhci_hid_get_bits_u32(report, off, bits);
+      }
+      if (dev->hid_y_bits) {
+        uint32_t off = (uint32_t)dev->hid_y_bitoff + base_bit;
+        uint32_t bits = (uint32_t)dev->hid_y_bits;
+        dy = dev->hid_y_is_relative
+            ? xhci_hid_get_bits_s32(report, off, bits)
+            : (int32_t)xhci_hid_get_bits_u32(report, off, bits);
+      }
+      if (dev->hid_wheel_bits) {
+        uint32_t off = (uint32_t)dev->hid_wheel_bitoff + base_bit;
+        uint32_t bits = (uint32_t)dev->hid_wheel_bits;
+        wheel = dev->hid_wheel_is_relative
+            ? xhci_hid_get_bits_s32(report, off, bits)
+            : (int32_t)xhci_hid_get_bits_u32(report, off, bits);
+      }
+
+      if (dev->hid_x_is_relative && dev->hid_y_is_relative) {
+        input_pointer_add_rel(dx, dy, buttons);
+      } else {
+        input_pointer_set_abs_scaled(dx, dy, 0x7FFF, 0x7FFF, buttons);
+      }
+      (void)wheel;
+    } else if (dev->hid_proto == 2u && dev->hid_boot_protocol) {
+      /* Standard HID boot mouse report: buttons, signed X, signed Y, wheel. */
+      uint8_t buttons = dev->intr_buf[0];
+      int8_t dx = (int8_t)dev->intr_buf[1];
+      int8_t dy = (int8_t)dev->intr_buf[2];
+      int8_t wheel = 0;
+      if (xfer_len >= 4u)
+        wheel = (int8_t)dev->intr_buf[3];
+
+      input_pointer_add_rel((int32_t)dx, (int32_t)dy, (uint32_t)buttons);
+      (void)wheel;
+    } else if (dev->hid_proto == 1u && xfer_len >= 8u) {
+      const uint8_t *report = dev->intr_buf;
+      uint8_t mod = report[0];
+      uint8_t shift =
+          (uint8_t)(((mod & 0x02u) || (mod & 0x20u)) ? 1u : 0u);
+      const uint8_t *keys = &report[2];
+
+      for (uint32_t i = 0; i < 6u; ++i) {
+        uint8_t key = keys[i];
+        if (key && !xhci_kbd_has_key(dev->kbd_prev_keys, key)) {
+          input_kbd_push_event(key, 1);
+          char ch = xhci_kbd_keycode_to_ascii(key, shift);
+          if (ch)
+            input_kbd_push_char(ch);
+        }
+      }
+      for (uint32_t i = 0; i < 6u; ++i) {
+        uint8_t key = dev->kbd_prev_keys[i];
+        if (key && !xhci_kbd_has_key(keys, key))
+          input_kbd_push_event(key, 0);
+      }
+      for (uint32_t bit = 0; bit < 8u; ++bit) {
+        uint8_t mask = (uint8_t)(1u << bit);
+        if ((mod & mask) != (dev->kbd_prev_mod & mask))
+          input_kbd_push_event((uint8_t)(0xE0u + bit),
+                               (mod & mask) != 0);
+      }
+
+      dev->kbd_prev_mod = mod;
+      for (uint32_t i = 0; i < 6u; ++i)
+        dev->kbd_prev_keys[i] = keys[i];
     }
+  }
 
 rearm:
-    if (dev->hid_mouse_valid ||
-        (dev->hid_proto == 2u && dev->hid_boot_protocol)) {
-      xhci_debug_mouse_report(dev, cc, xfer_len);
-    }
-    if (dev->intr_ring && dev->intr_mps) {
-      xhci_hid_start_polling(dev);
-    }
-  }
+  if (dev->hid_mouse_valid ||
+      (dev->hid_proto == 2u && dev->hid_boot_protocol))
+    xhci_debug_mouse_report(dev, cc, xfer_len);
+
+  if (dev->intr_ring && dev->intr_mps)
+    xhci_hid_start_polling(dev);
 }
 
+static void xhci_poll_events_impl(void) {
+  if (!event_ring || !runtime_regs)
+    return;
+
+  /* Bound polling work while dispatching every consumed transfer completion. */
+  for (uint32_t processed = 0; processed < 64u; ++processed) {
+    xhci_trb_t event;
+    if (!xhci_poll_event(&event))
+      break;
+    xhci_handle_transfer_event(&event);
+  }
+}
 
 /*
  * The event ring has one global dequeue index and cycle state. Polling is
