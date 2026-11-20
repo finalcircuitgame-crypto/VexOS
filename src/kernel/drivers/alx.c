@@ -166,6 +166,8 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_TXQ0_EN                   (1u << 5)
 #define ALX_TXQ0_SUPT_IPOPT           (1u << 4)
 #define ALX_RXQ0_EN                   (1u << 31)
+#define ALX_RXQ0_RSS_HASH_EN          (1u << 29)
+#define ALX_RXQ0_RSS_MODE_DIS         (0u << 26)
 #define ALX_TXQ0_TPD_BURSTPREF        5u
 #define ALX_RXQ0_NUM_RFD_PREF         (8u << 20)
 #define ALX_RXQ0_IDT_TBL_SIZE         (0x100u << 8)
@@ -947,9 +949,17 @@ static void alx_configure_basic(void) {
     alx_write32(ALX_HQTPD, ALX_HQTPD_BURST_EN |
                            (5u << 8) | (5u << 4) | 5u);
 
-    value = ALX_RXQ0_NUM_RFD_PREF | ALX_RXQ0_IDT_TBL_SIZE |
-            ALX_RXQ0_RSS_HSTYP_ALL | ALX_RXQ0_IPV6_PARSE_EN |
-            ALX_RXQ0_ASPM_THRESH_100M;
+    /*
+     * Keep receive steering in the same single-queue mode as Linux alx.
+     * This driver has one RFD/RRD queue and no RSS indirection table, so RSS
+     * hash generation must remain disabled. Enabling RSS without configuring
+     * the hardware table/queue mapping can send traffic away from queue zero.
+     */
+    value = ALX_RXQ0_NUM_RFD_PREF | ALX_RXQ0_RSS_MODE_DIS |
+            ALX_RXQ0_IDT_TBL_SIZE | ALX_RXQ0_RSS_HSTYP_ALL |
+            ALX_RXQ0_IPV6_PARSE_EN | ALX_RXQ0_ASPM_THRESH_100M;
+    alx_write32(ALX_RXQ0, value);
+    value = alx_read32(ALX_RXQ0) & ~ALX_RXQ0_RSS_HASH_EN;
     alx_write32(ALX_RXQ0, value);
 
     uint32_t sram_bytes =
