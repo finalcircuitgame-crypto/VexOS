@@ -127,7 +127,14 @@ extern void desktop_debug_set_network_status(const char *status);
 #define ALX_PHY_CTRL_IDDQ             (1u << 7)
 #define ALX_PHY_CTRL_HIB_EN           (1u << 10)
 #define ALX_PHY_CTRL_HIB_PULSE        (1u << 11)
+#define ALX_PHY_CTRL_HIB_MASK         (ALX_PHY_CTRL_HIB_EN | ALX_PHY_CTRL_HIB_PULSE)
 #define ALX_PHY_CTRL_RST_ANALOG       (1u << 12)
+#define ALX_SERDES_MACCLK_SLWDWN      (1u << 17)
+#define ALX_SERDES_PHYCLK_SLWDWN      (1u << 18)
+#define ALX_MII_DBG_HIBNEG            0x0Bu
+#define ALX_MII_DBG_HIBNEG_DEFAULT    0xBC40u
+#define ALX_MII_DBG_GREENCFG          0x3Bu
+#define ALX_MII_DBG_GREENCFG_DEFAULT  0x7078u
 #define ALX_PHY_CTRL_PLL_ON           (1u << 13)
 #define ALX_PHY_CTRL_POWER_DOWN       (1u << 14)
 #define ALX_PHY_CTRL_100AB_EN         (1u << 17)
@@ -601,17 +608,28 @@ static int alx_reset_phy(void) {
     value &= ~(ALX_PHY_CTRL_DSPRST_OUT | ALX_PHY_CTRL_IDDQ |
                ALX_PHY_CTRL_GATE_25M | ALX_PHY_CTRL_POWER_DOWN |
                ALX_PHY_CTRL_CLS);
-    value |= ALX_PHY_CTRL_RST_ANALOG | ALX_PHY_CTRL_HIB_PULSE |
-             ALX_PHY_CTRL_HIB_EN;
+    /*
+     * AR816x/AR817x-specific policy from Haiku's alc driver: keep the PHY
+     * awake across link transitions instead of enabling its hibernation
+     * state machine. Linux's generic alx path enables HIB_EN; the BSD-derived
+     * AR816x path disables both hardware and debug-page hibernation controls.
+     */
+    value &= ~ALX_PHY_CTRL_HIB_MASK;
+    value |= ALX_PHY_CTRL_RST_ANALOG;
 
     alx_write32(ALX_PHY_CTRL, value);
-    alx_delay(20000u);
+    alx_delay(10000u);
     alx_write32(ALX_PHY_CTRL, value | ALX_PHY_CTRL_DSPRST_OUT);
-    alx_delay(1000000u);
+    alx_delay(800000u);
 
-    /* Restore the PHY analog defaults used by the vendor ALX driver. */
+    /* AR816x analog, power-saving, and PHY-clock defaults. */
     if (!alx_phy_debug_write(0x29u, 0x129Du) ||
         !alx_phy_debug_write(0x04u, 0xBB8Bu) ||
+        !alx_phy_debug_write(ALX_MII_DBG_HIBNEG,
+            (uint16_t)(ALX_MII_DBG_HIBNEG_DEFAULT &
+                       ~(0x8000u | 0x1000u))) ||
+        !alx_phy_debug_write(ALX_MII_DBG_GREENCFG,
+                             ALX_MII_DBG_GREENCFG_DEFAULT) ||
         !alx_phy_debug_write(0x12u, 0x4C04u) ||
         !alx_phy_debug_write(0x05u, 0x2C46u) ||
         !alx_phy_debug_write(0x36u, 0xE12Cu) ||
@@ -639,7 +657,9 @@ static int alx_reset_phy(void) {
  * requested advertised modes. Preserve that valid state across warm boots.
  */
 static int alx_phy_is_configured(void) {
-    if ((alx_read32(ALX_PHY_CTRL) & ALX_PHY_CTRL_DSPRST_OUT) == 0u)
+    uint32_t phy_control = alx_read32(ALX_PHY_CTRL);
+    if ((phy_control & ALX_PHY_CTRL_DSPRST_OUT) == 0u ||
+        (phy_control & ALX_PHY_CTRL_HIB_MASK) != 0u)
         return 0;
 
     uint32_t driver_config = alx_read32(ALX_DRV);
@@ -784,6 +804,26 @@ static int alx_reset_mac(void) {
 
     alx_delay(10000u);
 
+    /*
+     * Haiku's AR816x reset waits for both MACs and both queue engines to
+     * report idle after MASTER reset. MAC_STS uses the same four low status
+     * bits as ALC_IDLE_STATUS (RXMAC, TXMAC, RXQ, TXQ).
+     */
+    uint32_t idle_status = 0u;
+    uint32_t idle_poll = 0u;
+    for (; idle_poll < ALX_WAIT_LIMIT; ++idle_poll) {
+        idle_status = alx_read32(ALX_MAC_STS);
+        if ((idle_status & ALX_MAC_STS_IDLE) == 0u)
+            break;
+        __asm__ volatile("pause");
+    }
+    if (idle_poll == ALX_WAIT_LIMIT) {
+        serial_print("[ALX] RX/TX MAC or queue engines remained busy after reset; status=");
+        alx_print_hex32(idle_status);
+        serial_print("\n");
+        return 0;
+    }
+
     if (a_cr) {
         master = alx_read32(ALX_MASTER);
         alx_write32(ALX_MASTER, master | ALX_MASTER_PCLKSEL_SRDS);
@@ -836,6 +876,14 @@ static int alx_reset_mac(void) {
     alx_write32(ALX_MISC, misc);
 
     alx_delay(5000u);
+
+    /*
+     * Both Linux alx and Haiku alc apply the AR816x-family SerDes clock
+     * slowdown after reset. This is separate from PCIe ASPM policy.
+     */
+    uint32_t serdes = alx_read32(ALX_SERDES);
+    alx_write32(ALX_SERDES, serdes | ALX_SERDES_MACCLK_SLWDWN |
+                                      ALX_SERDES_PHYCLK_SLWDWN);
     return 1;
 }
 
