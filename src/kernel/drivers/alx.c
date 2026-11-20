@@ -818,9 +818,12 @@ static int alx_reset_mac(void) {
         __asm__ volatile("pause");
     }
     if (idle_poll == ALX_WAIT_LIMIT) {
-        serial_print("[ALX] RX/TX MAC or queue engines remained busy after reset; status=");
-        alx_print_hex32(idle_status);
-        serial_print("\n");
+        char diagnostic[96] = "[ALX] Post-reset engines did not become idle\n";
+        size_t used = sizeof("[ALX] Post-reset engines did not become idle\n") - 1u;
+        alx_append_hex32(diagnostic, sizeof(diagnostic), &used,
+                         "  IDLE_STATUS=", idle_status);
+        serial_print(diagnostic);
+        desktop_debug_set_network_status(diagnostic);
         return 0;
     }
 
